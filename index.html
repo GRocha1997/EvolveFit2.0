@@ -7,7 +7,252 @@
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
 <meta name="apple-mobile-web-app-title" content="EvolveFit" />
-<meta name="theme-color" content="#F1F0ED" /><!doctyp<!doctype html>
+<meta name="theme-color" content="#F1F0ED" /><!doctyp<!<!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="EvolveFit" />
+  
+  <meta name="theme-color" content="#F1F0ED" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0B0B0F" media="(prefers-color-scheme: dark)" />
+  
+  <title>EvolveFit</title>
+
+  <!-- CDNs Oficiais do React 18 e Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #F1F0ED;
+      --surface: #FFFFFF;
+      --surface2: #FBFAF8;
+      --text: #1A1A20;
+      --muted: #8A8A93;
+      --border: rgba(0,0,0,.055);
+      --shadow: 0 2px 14px rgba(20,20,30,.05);
+      --shadow-lg: 0 8px 30px rgba(20,20,30,.09);
+      --amber: #FFB25C;
+      --coral: #FF7A66;
+      --green: #3FCF8E;
+      --teal: #22C3C3;
+      --violet: #C77DFF;
+      --sleep: #9B8CFF;
+      --water: #37C6FF;
+    }
+
+    [data-theme="dark"] {
+      --bg: #0B0B0F;
+      --surface: #17171E;
+      --surface2: #1F1F28;
+      --text: #F2F2F6;
+      --muted: #8E8E9A;
+      --border: rgba(255,255,255,.07);
+      --shadow: 0 2px 14px rgba(0,0,0,.3);
+      --shadow-lg: 0 8px 34px rgba(0,0,0,.5);
+    }
+
+    * { 
+      box-sizing: border-box; 
+      -webkit-tap-highlight-color: transparent; 
+      transition: background-color 0.3s ease, color 0.3s ease;
+    }
+
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      background: var(--bg); 
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif; 
+    }
+
+    .app-wrap { 
+      min-height: 100vh; 
+      background: radial-gradient(120% 120% at 50% 0%, var(--surface2), var(--bg)); 
+      display: flex; 
+      justify-content: center; 
+    }
+
+    .phone { 
+      width: 100%; 
+      max-width: 460px; 
+      min-height: 100vh; 
+      background: var(--bg); 
+      display: flex; 
+      flex-direction: column; 
+      box-shadow: var(--shadow-lg); 
+      padding: 20px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 24px;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .theme-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 8px 16px;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+      box-shadow: var(--shadow);
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .card-title {
+      font-size: 14px;
+      color: var(--muted);
+      margin-bottom: 8px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .card-value {
+      font-size: 28px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .progress-bar {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--border);
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 10px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      color: #FFF;
+      text-align: center;
+    }
+
+    .btn-water { background: var(--water); }
+    .btn-sleep { background: var(--sleep); }
+    .btn-coral { background: var(--coral); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Script da Aplicação React -->
+  <script type="text/babel">
+    function App() {
+      const [theme, setTheme] = React.useState('light');
+      const [water, setWater] = React.useState(1.5);
+      const [sleep, setSleep] = React.useState(7.0);
+      const [calories, setCalories] = React.useState(1450);
+
+      const toggleTheme = () => {
+        const nextTheme = theme === 'light' ? 'dark' : 'light';
+        setTheme(nextTheme);
+        document.documentElement.setAttribute('data-theme', nextTheme);
+      };
+
+      return (
+        <div className="app-wrap">
+          <div className="phone">
+            <header className="header">
+              <h1>EvolveFit</h1>
+              <button className="theme-btn" onClick={toggleTheme}>
+                {theme === 'light' ? '🌙 Escuro' : '☀️ Claro'}
+              </button>
+            </header>
+
+            {/* Cartão de Hidratação */}
+            <div className="card">
+              <div className="card-title">Hidratação</div>
+              <div className="card-value" style={{ color: 'var(--water)' }}>{water.toFixed(2)} L / 2.50 L</div>
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${Math.min((water / 2.5) * 100, 100)}%`, background: 'var(--water)' }}
+                ></div>
+              </div>
+              <div className="actions">
+                <button className="btn btn-water" onClick={() => setWater(prev => prev + 0.25)}>+250 ml</button>
+              </div>
+            </div>
+
+            {/* Cartão de Sono */}
+            <div className="card">
+              <div className="card-title">Sono</div>
+              <div className="card-value" style={{ color: 'var(--sleep)' }}>{sleep.toFixed(1)} h / 8.0 h</div>
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${Math.min((sleep / 8.0) * 100, 100)}%`, background: 'var(--sleep)' }}
+                ></div>
+              </div>
+              <div className="actions">
+                <button className="btn btn-sleep" onClick={() => setSleep(prev => prev + 0.5)}>+30 min</button>
+              </div>
+            </div>
+
+            {/* Cartão de Calorias */}
+            <div className="card">
+              <div className="card-title">Calorias Consumidas</div>
+              <div className="card-value" style={{ color: 'var(--coral)' }}>{calories} / 2000 kcal</div>
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${Math.min((calories / 2000) * 100, 100)}%`, background: 'var(--coral)' }}
+                ></div>
+              </div>
+              <div className="actions">
+                <button className="btn btn-coral" onClick={() => setCalories(prev => prev + 150)}>+150 kcal</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+</html>doctype html>
 <html lang="pt">
 <head>
 <meta charset="utf-8" />
