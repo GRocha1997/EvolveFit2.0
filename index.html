@@ -12,7 +12,343 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" /><!doctype html>
+<html lang="pt">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="EvolveFit" />
+  
+  <meta name="theme-color" content="#F1F0ED" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#0B0B0F" media="(prefers-color-scheme: dark)" />
+  
+  <title>EvolveFit</title>
+
+  <!-- CDNs Oficiais do React 18 e Babel -->
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #F1F0ED;
+      --surface: #FFFFFF;
+      --surface2: #FBFAF8;
+      --text: #1A1A20;
+      --muted: #8A8A93;
+      --border: rgba(0,0,0,.055);
+      --shadow: 0 2px 14px rgba(20,20,30,.05);
+      --shadow-lg: 0 8px 30px rgba(20,20,30,.09);
+      --amber: #FFB25C;
+      --coral: #FF7A66;
+      --green: #3FCF8E;
+      --teal: #22C3C3;
+      --violet: #C77DFF;
+      --sleep: #9B8CFF;
+      --water: #37C6FF;
+    }
+
+    [data-theme="dark"] {
+      --bg: #0B0B0F;
+      --surface: #17171E;
+      --surface2: #1F1F28;
+      --text: #F2F2F6;
+      --muted: #8E8E9A;
+      --border: rgba(255,255,255,.07);
+      --shadow: 0 2px 14px rgba(0,0,0,.3);
+      --shadow-lg: 0 8px 34px rgba(0,0,0,.5);
+    }
+
+    * { 
+      box-sizing: border-box; 
+      -webkit-tap-highlight-color: transparent; 
+      transition: background-color 0.3s ease, color 0.3s ease, border-color 0.3s ease;
+    }
+
+    html, body { 
+      margin: 0; 
+      padding: 0; 
+      background: var(--bg); 
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Display", system-ui, "Segoe UI", Roboto, sans-serif; 
+    }
+
+    .app-wrap { 
+      min-height: 100vh; 
+      background: radial-gradient(120% 120% at 50% 0%, var(--surface2), var(--bg)); 
+      display: flex; 
+      justify-content: center; 
+    }
+
+    .phone { 
+      width: 100%; 
+      max-width: 460px; 
+      min-height: 100vh; 
+      background: var(--bg); 
+      display: flex; 
+      flex-direction: column; 
+      box-shadow: var(--shadow-lg); 
+      padding: 20px;
+    }
+
+    .header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+
+    .header h1 {
+      margin: 0;
+      font-size: 24px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .header-actions {
+      display: flex;
+      gap: 8px;
+    }
+
+    .icon-btn {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 8px 12px;
+      color: var(--text);
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 13px;
+      box-shadow: var(--shadow);
+    }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      margin-bottom: 16px;
+      box-shadow: var(--shadow);
+      position: relative;
+    }
+
+    .card.completed {
+      border: 1.5px solid var(--green);
+    }
+
+    .card-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 8px;
+    }
+
+    .card-title {
+      font-size: 13px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      font-weight: 600;
+    }
+
+    .edit-btn {
+      background: transparent;
+      border: none;
+      color: var(--muted);
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .card-value {
+      font-size: 26px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .progress-bar {
+      height: 8px;
+      border-radius: 4px;
+      background: var(--border);
+      overflow: hidden;
+      margin-top: 12px;
+    }
+
+    .progress-fill {
+      height: 100%;
+      transition: width 0.3s ease;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      margin-top: 12px;
+    }
+
+    .btn {
+      flex: 1;
+      padding: 10px;
+      border-radius: 10px;
+      border: none;
+      font-weight: 600;
+      cursor: pointer;
+      color: #FFF;
+      text-align: center;
+    }
+
+    .btn-water { background: var(--water); }
+    .btn-sleep { background: var(--sleep); }
+    .btn-coral { background: var(--coral); }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <!-- Script da Aplicação React com LocalStorage e Metas Editáveis -->
+  <script type="text/babel">
+    function App() {
+      // Estado Inicial lido de localStorage ou valor por defeito
+      const [theme, setTheme] = React.useState(() => localStorage.getItem('ef_theme') || 'light');
+      
+      const [water, setWater] = React.useState(() => parseFloat(localStorage.getItem('ef_water')) || 1.5);
+      const [waterGoal, setWaterGoal] = React.useState(() => parseFloat(localStorage.getItem('ef_waterGoal')) || 2.5);
+
+      const [sleep, setSleep] = React.useState(() => parseFloat(localStorage.getItem('ef_sleep')) || 7.0);
+      const [sleepGoal, setSleepGoal] = React.useState(() => parseFloat(localStorage.getItem('ef_sleepGoal')) || 8.0);
+
+      const [calories, setCalories] = React.useState(() => parseInt(localStorage.getItem('ef_calories')) || 1450);
+      const [caloriesGoal, setCaloriesGoal] = React.useState(() => parseInt(localStorage.getItem('ef_caloriesGoal')) || 2000);
+
+      // Guardar automaticamente na localStorage
+      React.useEffect(() => {
+        localStorage.setItem('ef_theme', theme);
+        document.documentElement.setAttribute('data-theme', theme);
+      }, [theme]);
+
+      React.useEffect(() => {
+        localStorage.setItem('ef_water', water);
+        localStorage.setItem('ef_waterGoal', waterGoal);
+      }, [water, waterGoal]);
+
+      React.useEffect(() => {
+        localStorage.setItem('ef_sleep', sleep);
+        localStorage.setItem('ef_sleepGoal', sleepGoal);
+      }, [sleep, sleepGoal]);
+
+      React.useEffect(() => {
+        localStorage.setItem('ef_calories', calories);
+        localStorage.setItem('ef_caloriesGoal', caloriesGoal);
+      }, [calories, caloriesGoal]);
+
+      const toggleTheme = () => {
+        setTheme(prev => (prev === 'light' ? 'dark' : 'light'));
+      };
+
+      const resetDay = () => {
+        if (confirm('Tem a certeza de que deseja reiniciar os registos do dia?')) {
+          setWater(0);
+          setSleep(0);
+          setCalories(0);
+        }
+      };
+
+      const editGoal = (type) => {
+        if (type === 'water') {
+          const val = prompt('Nova meta de Água (L):', waterGoal);
+          if (val && !isNaN(val)) setWaterGoal(parseFloat(val));
+        } else if (type === 'sleep') {
+          const val = prompt('Nova meta de Sono (horas):', sleepGoal);
+          if (val && !isNaN(val)) setSleepGoal(parseFloat(val));
+        } else if (type === 'calories') {
+          const val = prompt('Nova meta de Calorias (kcal):', caloriesGoal);
+          if (val && !isNaN(val)) setCaloriesGoal(parseInt(val));
+        }
+      };
+
+      return (
+        <div className="app-wrap">
+          <div className="phone">
+            <header className="header">
+              <h1>EvolveFit</h1>
+              <div className="header-actions">
+                <button className="icon-btn" onClick={resetDay} title="Reiniciar dia">🔄 Reset</button>
+                <button className="icon-btn" onClick={toggleTheme}>
+                  {theme === 'light' ? '🌙 Escuro' : '☀️ Claro'}
+                </button>
+              </div>
+            </header>
+
+            {/* Cartão de Hidratação */}
+            <div className={`card ${water >= waterGoal ? 'completed' : ''}`}>
+              <div className="card-header">
+                <span className="card-title">Hidratação</span>
+                <button className="edit-btn" onClick={() => editGoal('water')}>✏️ Meta</button>
+              </div>
+              <div className="card-value" style={{ color: 'var(--water)' }}>
+                {water.toFixed(2)} / {waterGoal.toFixed(2)} L {water >= waterGoal && '🎉'}
+              </div>
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${Math.min((water / waterGoal) * 100, 100)}%`, background: 'var(--water)' }}
+                ></div>
+              </div>
+              <div className="actions">
+                <button className="btn btn-water" onClick={() => setWater(prev => prev + 0.25)}>+250 ml</button>
+              </div>
+            </div>
+
+            {/* Cartão de Sono */}
+            <div className={`card ${sleep >= sleepGoal ? 'completed' : ''}`}>
+              <div className="card-header">
+                <span className="card-title">Sono</span>
+                <button className="edit-btn" onClick={() => editGoal('sleep')}>✏️ Meta</button>
+              </div>
+              <div className="card-value" style={{ color: 'var(--sleep)' }}>
+                {sleep.toFixed(1)} / {sleepGoal.toFixed(1)} h {sleep >= sleepGoal && '🎉'}
+              </div>
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${Math.min((sleep / sleepGoal) * 100, 100)}%`, background: 'var(--sleep)' }}
+                ></div>
+              </div>
+              <div className="actions">
+                <button className="btn btn-sleep" onClick={() => setSleep(prev => prev + 0.5)}>+30 min</button>
+              </div>
+            </div>
+
+            {/* Cartão de Calorias */}
+            <div className={`card ${calories >= caloriesGoal ? 'completed' : ''}`}>
+              <div className="card-header">
+                <span className="card-title">Calorias Consumidas</span>
+                <button className="edit-btn" onClick={() => editGoal('calories')}>✏️ Meta</button>
+              </div>
+              <div className="card-value" style={{ color: 'var(--coral)' }}>
+                {calories} / {caloriesGoal} kcal {calories >= caloriesGoal && '🎉'}
+              </div>
+              <div className="progress-bar">
+                <div 
+                  className="progress-fill" 
+                  style={{ width: `${Math.min((calories / caloriesGoal) * 100, 100)}%`, background: 'var(--coral)' }}
+                ></div>
+              </div>
+              <div className="actions">
+                <button className="btn btn-coral" onClick={() => setCalories(prev => prev + 150)}>+150 kcal</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    const container = document.getElementById('root');
+    const root = ReactDOM.createRoot(container);
+    root.render(<App />);
+  </script>
+</body>
+</html>
   <meta name="mobile-web-app-capable" content="yes" />
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
   <meta name="apple-mobile-web-app-title" content="EvolveFit" />
