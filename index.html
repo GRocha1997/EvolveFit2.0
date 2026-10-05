@@ -1335,12 +1335,23 @@ function lastNDays(days, n) {
  }
  return out;
 }
+function weekFromMonday(days) {
+ const day = TODAY.getDay();
+ const diffToMonday = day === 0 ? -6 : 1 - day;
+ const monday = addDays(TODAY, diffToMonday);
+ const out = [];
+ for (let i = 0; i < 7; i++) {
+   const key = iso(addDays(monday, i));
+   out.push({ key, day: days[key] });
+ }
+ return out;
+}
 function trainedOn(state, key) {
  return state.sessions.some(s => s.date === key) || (state.days[key] && state.days[key].tasks.forca ? state.days[key].tasks.forca.value > 0 : false);
 }
 function computeGoal(g, state) {
  const days = state.days,
- week = lastNDays(days, 7);
+ week = weekFromMonday(days);
  const sumQty = id => week.reduce((a, w) => a + (w.day && w.day.tasks[id] ? w.day.tasks[id].value || 0 : 0), 0);
  const cp = v => Math.min(100, Math.round(v));
  if (g.id === "treinos") {
@@ -2239,13 +2250,13 @@ function Workouts({
  const [view, setView] = useState("treino");
  const [planDay, setPlanDay] = useState(initialDay != null ? initialDay : todayIdx);
  const [showRir, setShowRir] = useState(false);
- const weekDays = lastNDays(state.days, 7);
+ const weekDays = weekFromMonday(state.days);
  const treinos = weekDays.filter(w => trainedOn(state, w.key)).length;
- const volWeek = state.sessions.filter(s => daysBetween(new Date(s.date), TODAY) < 7).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
+ const volWeek = state.sessions.filter(s => weekDays.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
  const kcal = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
  const cardio = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
  const loggedToday = state.sessions.some(s => s.date === todayKey && s.dayIdx === sel);
- const loggedDayIdx = new Set(state.sessions.filter(s => daysBetween(new Date(s.date), TODAY) < 7).map(s => s.dayIdx));
+ const loggedDayIdx = new Set(state.sessions.filter(s => weekDays.some(w => w.key === s.date)).map(s => s.dayIdx));
  const saveSession = entries => update(s => {
  entries.forEach((e, i) => {
  if (s.plano[sel].ex[i]) {
@@ -4216,7 +4227,7 @@ function Report({
  }));
 }
 function buildReport(state) {
- const week = lastNDays(state.days, 7);
+ const week = weekFromMonday(state.days);
  const consistency = +(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7).toFixed(1);
  const sumQty = (id, days) => days.reduce((a, w) => a + (w.day && w.day.tasks[id] ? w.day.tasks[id].value || 0 : 0), 0);
  const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
@@ -4235,10 +4246,10 @@ function buildReport(state) {
  });
  const house = ["Arrumaste a casa em " + choreDone + "/" + choreTotal + " dia(s) útil(eis) desta semana.", choreDone >= choreTotal - 1 ? "Rotina de casa muito consistente." : "Há dias de casa por fechar — tenta apanhá-los para a próxima."];
  // workout
- const vol = state.sessions.filter(s => daysBetween(new Date(s.date), TODAY) < 7).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
+ const vol = state.sessions.filter(s => week.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
  const cardio = sumQty("cardio", week);
  const wkcal = sumQty("calorias", week);
- const rirVals = state.sessions.filter(se => daysBetween(new Date(se.date), TODAY) < 7).flatMap(se => se.ex.filter(e => e.rir != null).map(e => e.rir));
+ const rirVals = state.sessions.filter(se => week.some(w => w.key === se.date)).flatMap(se => se.ex.filter(e => e.rir != null).map(e => e.rir));
  const rirAvg = rirVals.length ? +(rirVals.reduce((a, b) => a + b, 0) / rirVals.length).toFixed(1) : null;
  const rirNote = rirAvg == null ? "" : rirAvg < 1.5 ? " RIR médio de " + rirAvg + ": treinos muito perto da falha — vigia a recuperação. " : rirAvg > 3 ? " RIR médio de " + rirAvg + ": há margem para subir cargas. " : " RIR médio de " + rirAvg + ": intensidade na zona certa. ";
  // progression across all plan days (recent vs previous session per exercise)
