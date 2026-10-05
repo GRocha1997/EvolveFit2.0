@@ -274,7 +274,148 @@ img, svg, video, canvas {
   max-width: 100%;
 }
 
-</style></head><body><div id="root"></div><script>
+</style>
+<style id="evolvefit-aesthetic-palette">
+:root{
+  --bg:#F2F4F6;
+  --surface:#FFFFFF;
+  --surface2:#F7F8FA;
+  --text:#17212B;
+  --muted:#687582;
+  --border:rgba(23,33,43,.12);
+  --shadow:0 2px 5px rgba(23,33,43,.05),0 8px 20px rgba(23,33,43,.055);
+  --shadow-lg:0 10px 30px rgba(23,33,43,.12);
+
+  /* Paleta principal: navy/slate */
+  --coral:#344B60;
+  --teal:#4C6878;
+  --violet:#596B82;
+  --sleep:#66788E;
+  --water:#4E7891;
+  --amber:#9A6A24;
+
+  /* Estados semânticos */
+  --green:#18864B;
+  --good:#18864B;
+  --bad:#C0392B;
+}
+
+[data-theme="dark"]{
+  --bg:#0E141C;
+  --surface:#151D27;
+  --surface2:#1C2632;
+  --text:#F2F5F8;
+  --muted:#A1ACB9;
+  --border:rgba(255,255,255,.11);
+  --shadow:0 2px 5px rgba(0,0,0,.35),0 8px 22px rgba(0,0,0,.25);
+  --shadow-lg:0 10px 34px rgba(0,0,0,.5);
+  --coral:#71869A;
+  --teal:#6F8E9D;
+  --violet:#8190A5;
+  --sleep:#8796AA;
+  --water:#6F9AB0;
+  --amber:#D2A34D;
+  --green:#38B978;
+  --good:#38B978;
+  --bad:#E06A5D;
+}
+
+/* Fundo e cards */
+.app-wrap{background:var(--bg)!important;}
+.phone{background:var(--bg)!important;}
+.card,.stat,.streak-pill,.coach27-mini{
+  background:var(--surface)!important;
+  border-color:var(--border)!important;
+  box-shadow:var(--shadow)!important;
+}
+
+/* Elementos de seleção: navy em vez de azul vivo */
+.today-pill,
+.seg-b.on,
+.dp.on,
+.period-btn.active,
+.rir-chip.on,
+.checkbox.on{
+  background:var(--coral)!important;
+  border-color:var(--coral)!important;
+}
+
+.big-btn.coral,
+.btn-solid.coral,
+.big-btn.report{
+  background:linear-gradient(135deg,#263A4D,#40586C)!important;
+}
+
+.big-btn.sleep{
+  background:linear-gradient(135deg,#53657A,#6B7D92)!important;
+}
+
+.log-progress-fill,
+.progress-fill{
+  background:var(--coral)!important;
+}
+
+/* Água: azul dessaturado */
+.water-title svg,
+.water-val,
+.chip{color:var(--water)!important;}
+.water-custom button{background:var(--water)!important;}
+.celebrate-txt{background:var(--water)!important;}
+
+/* Secções: cada uma mantém identidade, mas com cores mais sóbrias */
+.tint-amber{--tint-c:#9A6A24;--tint-bg:rgba(154,106,36,.11);}
+.tint-teal{--tint-c:#4C6878;--tint-bg:rgba(76,104,120,.11);}
+.tint-coral{--tint-c:#344B60;--tint-bg:rgba(52,75,96,.11);}
+.tint-green{--tint-c:#18864B;--tint-bg:rgba(24,134,75,.11);}
+.tint-violet{--tint-c:#596B82;--tint-bg:rgba(89,107,130,.12);}
+.tint-sleep{--tint-c:#66788E;--tint-bg:rgba(102,120,142,.12);}
+
+.chore-header,
+.cardio-week-total{
+  color:var(--teal)!important;
+  background:rgba(76,104,120,.10)!important;
+}
+
+/* Coach: premium, sem azul elétrico */
+.coach,
+.coach27-hero{
+  background:linear-gradient(135deg,#243649 0%,#3C5367 100%)!important;
+  box-shadow:0 10px 30px rgba(36,54,73,.20)!important;
+}
+
+/* Alertas: só estes mantêm verde/vermelho */
+.alert-status-good,.pu,.metric-diff.good,.logged-badge{color:var(--green)!important;}
+.alert-status-bad,.pd,.metric-diff.bad{color:var(--bad)!important;}
+.alert-status-warning,.rir-hint.warn,.rg-row .warn{color:var(--amber)!important;}
+
+/* Progresso positivo */
+.pc-badge.up{color:var(--green)!important;background:rgba(24,134,75,.11)!important;}
+
+/* Menu inferior */
+.tabbar{
+  background:rgba(255,255,255,.96)!important;
+  border-top-color:var(--border)!important;
+  box-shadow:0 -6px 20px rgba(23,33,43,.08)!important;
+}
+[data-theme="dark"] .tabbar{background:rgba(21,29,39,.96)!important;}
+.tab.on{color:var(--coral)!important;}
+
+/* Links/ícones sem arco-íris */
+.plano-day-tag,
+.log-fillall,
+.rir-chip.tgt,
+.pex-w,
+.home-streak{
+  color:var(--coral)!important;
+}
+.plano-day-tag{background:rgba(52,75,96,.11)!important;}
+.log-fillall{background:rgba(52,75,96,.09)!important;}
+
+/* Mantém indicadores bons/malos claramente semânticos */
+.alert-status-good{color:#18864B!important;}
+.alert-status-bad{color:#C0392B!important;}
+</style>
+</head><body><div id="root"></div><script>
 /**
  * @license React
  * react.production.min.js
