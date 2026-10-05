@@ -1735,26 +1735,32 @@ function Dashboard({
  };
  }, [uid]);
  const update = fn => setState(p => {
- const n = clone(p);
- fn(n);
- n._updatedAt = Date.now();
-
- // Persistência REAL: grava o estado React imediatamente, antes do próximo render.
- // Assim um refresh logo após a edição não perde a alteração.
- save(n, uid);
- stateRef.current = n;
-
- // Se existir conta Firebase, envia também imediatamente para a nuvem.
- // Não esperamos pelo debounce normal de 600 ms.
- if (uid && fbDb) {
-   const payload = JSON.parse(JSON.stringify(n));
-   syncedJson.current = JSON.stringify(payload);
-   fbDb.collection("users").doc(uid).set(payload)
-     .catch(e => console.error("Erro ao guardar imediatamente na nuvem:", e));
+ try {
+   const n = clone(p);
+   if (!n.days || typeof n.days !== "object") n.days = {};
+   if (!Array.isArray(n.body)) n.body = [];
+   if (!Array.isArray(n.sessions)) n.sessions = [];
+   if (!n.profile || typeof n.profile !== "object") n.profile = {};
+   if (!n.menus || typeof n.menus !== "object") n.menus = {};
+   fn(n);
+   const safe = normalize(n);
+   safe._updatedAt = Date.now();
+   try { save(safe, uid); } catch (e) { console.error("Erro ao guardar localmente:", e); }
+   stateRef.current = safe;
+   if (uid && fbDb) {
+     try {
+       const payload = JSON.parse(JSON.stringify(safe));
+       syncedJson.current = JSON.stringify(payload);
+       fbDb.collection("users").doc(uid).set(payload)
+         .catch(e => console.error("Erro ao guardar na nuvem:", e));
+     } catch (e) { console.error("Erro ao preparar sincronização:", e); }
+   }
+   return safe;
+ } catch (e) {
+   console.error("Erro ao atualizar dados:", e);
+   return p;
  }
-
- return n;
- });
+});
  const tabs = [{
  id: "check",
  label: "Hoje",
@@ -3246,6 +3252,7 @@ function Body({
  };
  const empty = {
  weight: "",
+ bmi: "",
  bodyFat: "",
  muscle: "",
  skeletal: "",
@@ -3259,6 +3266,7 @@ function Body({
  const r = (state.body || []).find(x => x.date === date);
  setD(r ? {
  weight: r.weight ? fmtNum(r.weight) : "",
+ bmi: r.bmi ? fmtNum(r.bmi) : "",
  bodyFat: r.bodyFat ? fmtNum(r.bodyFat) : "",
  muscle: r.muscle ? fmtNum(r.muscle) : "",
  skeletal: r.skeletal ? fmtNum(r.skeletal) : "",
@@ -3303,7 +3311,7 @@ function Body({
  const rec = {
  date: date,
  weight: w,
- bmi: w ? +(w / ((h / 100) * (h / 100))).toFixed(1) : p.bmi || 0,
+ bmi: parseNum(d.bmi) || p.bmi || 0,
  bodyFat: parseNum(d.bodyFat) || p.bodyFat || 0,
  muscle: parseNum(d.muscle) || p.muscle || 0,
  skeletal: parseNum(d.skeletal) || p.skeletal || 0,
@@ -3323,6 +3331,20 @@ function Body({
  const i = s.body.findIndex(x => x.date === date);
  if (i >= 0) s.body.splice(i, 1);
  });
+ const editLatest = () => {
+   if (!last) return;
+   setDate(last.date);
+   setD({
+     weight: last.weight ? fmtNum(last.weight) : "",
+     bmi: last.bmi ? fmtNum(last.bmi) : "",
+     bodyFat: last.bodyFat ? fmtNum(last.bodyFat) : "",
+     muscle: last.muscle ? fmtNum(last.muscle) : "",
+     skeletal: last.skeletal ? fmtNum(last.skeletal) : "",
+     visceral: last.visceral ? fmtNum(last.visceral) : "",
+     cintura: last.cintura ? fmtNum(last.cintura) : ""
+   });
+   setForm(true);
+ };
  const MetricCard = ({
  m
  }) => {
@@ -3575,6 +3597,19 @@ function Body({
  className: "in-row"
  }, /*#__PURE__*/React.createElement("label", {
  className: "lbl"
+ }, "IMC (manual)", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ placeholder: "ex.: 28,9",
+ value: d.bmi,
+ onChange: e => setD({
+ ...d,
+ bmi: normDecInput(e.target.value)
+ })
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "in-row"
+ }, /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
  }, "Gordura (%)", /*#__PURE__*/React.createElement("input", {
  className: "in",
  inputMode: "decimal",
@@ -3679,7 +3714,11 @@ function Body({
  className: "bsum-l"
  }, "IMC ", bmiDiff <= 0 ? "↓" : "↑", Math.abs(bmiDiff)))), /*#__PURE__*/React.createElement("div", {
  className: "bsum-status"
- }, status)), has && /*#__PURE__*/React.createElement(WeekCompareCard, {
+ }, status), /*#__PURE__*/React.createElement("button", {
+ className: "btn-ghost",
+ style: { marginTop: "10px", width: "100%" },
+ onClick: editLatest
+ }, "Editar última pesagem")), has && /*#__PURE__*/React.createElement(WeekCompareCard, {
  list: list,
  days: activePeriod.days,
  title: "Média · " + activePeriod.label + " vs bloco anterior",
@@ -4560,6 +4599,33 @@ function App() {
  user: user
  });
 }
-ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(App));
+class EvolveFitErrorBoundary extends React.Component {
+ constructor(props) {
+   super(props);
+   this.state = { hasError: false, message: "" };
+ }
+ static getDerivedStateFromError(error) {
+   return { hasError: true, message: error && error.message ? error.message : "Erro inesperado" };
+ }
+ componentDidCatch(error, info) {
+   console.error("EvolveFit render error:", error, info);
+ }
+ render() {
+   if (this.state.hasError) return /*#__PURE__*/React.createElement("div", {
+     className: "app-wrap"
+   }, /*#__PURE__*/React.createElement("div", {
+     className: "phone"
+   }, /*#__PURE__*/React.createElement("div", {
+     className: "scroll",
+     style: { padding: "24px" }
+   }, /*#__PURE__*/React.createElement("div", {
+     className: "card"
+   }, /*#__PURE__*/React.createElement("h2", null, "Erro ao mostrar os dados"), /*#__PURE__*/React.createElement("p", null, "A aplicação protegeu os dados introduzidos. Tenta novamente."), /*#__PURE__*/React.createElement("small", null, this.state.message))));
+   return this.props.children;
+ }
+}
+ReactDOM.createRoot(document.getElementById("root")).render(
+ React.createElement(EvolveFitErrorBoundary, null, React.createElement(App))
+);
 </script>
 </body></html>
