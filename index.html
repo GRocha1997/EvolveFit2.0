@@ -365,7 +365,7 @@ function normalize(s) {
  if (!s || typeof s !== "object") return null;
  s.days = s.days && typeof s.days === "object" ? s.days : {};
  s.body = Array.isArray(s.body) ? s.body : [];
- s.body = s.body.filter(x => x && typeof x === "object" && /^\\d{4}-\\d{2}-\\d{2}$/.test(String(x.date || ""))).map(x => ({
+ s.body = s.body.filter(x => x && typeof x === "object" && /^\d{4}-\d{2}-\d{2}$/.test(String(x.date || ""))).map(x => ({
    date: String(x.date),
    weight: Number.isFinite(Number(x.weight)) ? Number(x.weight) : 0,
    bmi: Number.isFinite(Number(x.bmi)) ? Number(x.bmi) : 0,
@@ -1852,7 +1852,8 @@ function Checklist({
  };
  const list = dayList(viewKey);
  const doneCount = list.filter(t => isDone(day.tasks[t.id], t)).length;
- const pct = Math.round(doneCount / list.length * 100);
+ const remainingCount = Math.max(0, list.length - doneCount);
+ const pct = list.length ? Math.round(doneCount / list.length * 100) : 0;
  const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
  const hour = TODAY.getHours();
  const greet = hour < 12 ? "Bom dia" : hour < 19 ? "Boa tarde" : "Boa noite";
@@ -1923,9 +1924,9 @@ function Checklist({
  className: "ring-pct"
  }, pct, /*#__PURE__*/React.createElement("i", null, "%")))), /*#__PURE__*/React.createElement("div", {
  className: "progress-line"
- }, /*#__PURE__*/React.createElement("span", null, doneCount, " de ", list.length, " tarefas"), /*#__PURE__*/React.createElement("span", {
+ }, /*#__PURE__*/React.createElement("span", null, remainingCount === 0 ? "✓ Todas as tarefas concluídas" : "✓ " + remainingCount + (remainingCount === 1 ? " tarefa por concluir" : " tarefas por concluir")), /*#__PURE__*/React.createElement("span", {
  className: "dot"
- }, "•"), /*#__PURE__*/React.createElement("span", null, pct, "% do dia concluído")), /*#__PURE__*/React.createElement(TodayWorkoutCard, {
+ }, "•"), /*#__PURE__*/React.createElement("span", null, doneCount, "/", list.length, " concluídas · ", pct, "%")), /*#__PURE__*/React.createElement(TodayWorkoutCard, {
  state: state,
  dayKey: viewKey,
  onOpen: onOpenWorkout
@@ -3320,7 +3321,7 @@ function Body({
      return Number.isFinite(n) && n >= 0 ? n : 0;
    };
    const rec = {
-     date: /^\\d{4}-\\d{2}-\\d{2}$/.test(String(date)) ? String(date) : todayKey,
+     date: /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? String(date) : todayKey,
      weight: clean(d.weight),
      bmi: clean(d.bmi),
      bodyFat: clean(d.bodyFat),
