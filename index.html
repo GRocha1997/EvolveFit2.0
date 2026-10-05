@@ -274,15 +274,6 @@ img, svg, video, canvas {
   max-width: 100%;
 }
 
-.mission{background:linear-gradient(135deg,#FF7A66,#FF9E6B 55%,#FFB25C);border:none;color:#fff;box-shadow:0 10px 30px rgba(255,120,90,.32);position:relative;overflow:hidden;}
-.mission-top{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;}
-.mission-tag{display:flex;align-items:center;gap:5px;font-size:12px;font-weight:650;background:rgba(255,255,255,.22);padding:5px 10px;border-radius:20px;}
-.mission-days{font-size:12px;font-weight:600;opacity:.9;}
-.mission-nums{display:flex;align-items:center;justify-content:center;gap:18px;margin-bottom:16px;}
-.mission-bar{height:9px;background:rgba(255,255,255,.28);border-radius:20px;overflow:hidden;margin-bottom:12px;}
-.mission-bar-fill{height:100%;background:#fff;border-radius:20px;transition:width .8s cubic-bezier(.4,0,.2,1);}
-.mission-mot{font-size:13px;opacity:.92;font-style:italic;line-height:1.4;}
-.mission-forecast{font-size:12.5px;opacity:.95;line-height:1.4;margin-bottom:10px;display:flex;align-items:center;gap:6px;}
 </style></head><body><div id="root"></div><script>
 /**
  * @license React
@@ -2184,7 +2175,7 @@ function Checklist({
  state: state,
  dayKey: viewKey,
  onOpen: onOpenWorkout
- }), /*#__PURE__*/React.createElement(MissionCard, { state: state }),  /*#__PURE__*/React.createElement(WaterCard, {
+ }), /*#__PURE__*/React.createElement(WaterCard, {
  state: state,
  update: update,
  dayKey: viewKey
@@ -2233,64 +2224,6 @@ const paceProjection = (body, bfTarget) => {
  days: daysNeeded
  };
 };
-function MissionCard({
-  state
-}) {
-  const {
-    bfStart,
-    bfTarget,
-    targetDate
-  } = state.profile;
-  const body = [...state.body].sort((a, b) => a.date.localeCompare(b.date));
-  const current = body.length ? body[body.length - 1].bodyFat : bfStart;
-  const pct = Math.max(0, Math.min(100, Math.round((bfStart - current) / (bfStart - bfTarget) * 100)));
-  const remaining = Math.max(0, daysBetween(TODAY, new Date(targetDate)));
-  const proj = paceProjection(body, bfTarget);
-  const mots = ["Consistência bate intensidade. Um passo hoje.", "O corpo muda no silêncio dos dias repetidos.", "Cada escolha pequena soma para novembro.", "Disciplina hoje é liberdade amanhã."];
-  return /*#__PURE__*/React.createElement("div", {
-    className: "card mission"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "mission-top"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "mission-tag"
-  }, /*#__PURE__*/React.createElement(I, {
-    name: "flame",
-    size: 13
-  }), " Missão 19 Novembro"), /*#__PURE__*/React.createElement("div", {
-    className: "mission-days"
-  }, remaining, " dias")), /*#__PURE__*/React.createElement("div", {
-    className: "mission-nums"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "bf"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "bf-v"
-  }, current, /*#__PURE__*/React.createElement("i", null, "%")), /*#__PURE__*/React.createElement("span", {
-    className: "bf-l"
-  }, "atual")), /*#__PURE__*/React.createElement("div", {
-    className: "bf-arrow"
-  }, /*#__PURE__*/React.createElement(I, {
-    name: "trendDown",
-    size: 26
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "bf"
-  }, /*#__PURE__*/React.createElement("span", {
-    className: "bf-v goal"
-  }, bfTarget, /*#__PURE__*/React.createElement("i", null, "%")), /*#__PURE__*/React.createElement("span", {
-    className: "bf-l"
-  }, "objetivo"))), /*#__PURE__*/React.createElement("div", {
-    className: "mission-bar"
-  }, /*#__PURE__*/React.createElement("div", {
-    className: "mission-bar-fill",
-    style: {
-      width: pct + "%"
-    }
-  })), /*#__PURE__*/React.createElement("div", {
-    className: "mission-forecast"
-  }, proj == null ? "📈 Regista pelo menos 2 pesagens para veres a data prevista ao teu ritmo." : proj.reached ? "🎉 Ao teu ritmo atual já atingiste o objetivo!" : proj.stalled ? "📊 Sem tendência de descida nas últimas pesagens — ainda não dá para prever a data." : "📈 Ao teu ritmo atual, atinges os " + bfTarget + "% por volta de " + longDate(proj.date) + " (~" + proj.days + " dias)."), /*#__PURE__*/React.createElement("div", {
-    className: "mission-mot"
-  }, "\"", mots[TODAY.getDate() % mots.length], "\""));
-}
-
 function WaterCard({
  state,
  update,
@@ -3856,7 +3789,8 @@ function Body({
  fontWeight: 700,
  padding: "8px 10px"
  },
- value: dateVal, onChange: e => setDateVal(e.target.value), onBlur: e => update(s => { s.profile.targetDate = e.target.value; }),
+ value: dateVal,
+ onChange: e => setDateVal(e.target.value),
  onKeyDown: e => {
  if (e.key === "Enter") saveDate();
  }
