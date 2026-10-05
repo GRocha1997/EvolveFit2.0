@@ -365,6 +365,18 @@ function normalize(s) {
  if (!s || typeof s !== "object") return null;
  s.days = s.days && typeof s.days === "object" ? s.days : {};
  s.body = Array.isArray(s.body) ? s.body : [];
+ s.body = s.body.filter(x => x && typeof x === "object" && /^\\d{4}-\\d{2}-\\d{2}$/.test(String(x.date || ""))).map(x => ({
+   date: String(x.date),
+   weight: Number.isFinite(Number(x.weight)) ? Number(x.weight) : 0,
+   bmi: Number.isFinite(Number(x.bmi)) ? Number(x.bmi) : 0,
+   bodyFat: Number.isFinite(Number(x.bodyFat)) ? Number(x.bodyFat) : 0,
+   muscle: Number.isFinite(Number(x.muscle)) ? Number(x.muscle) : 0,
+   skeletal: Number.isFinite(Number(x.skeletal)) ? Number(x.skeletal) : 0,
+   visceral: Number.isFinite(Number(x.visceral)) ? Number(x.visceral) : 0,
+   cintura: Number.isFinite(Number(x.cintura)) ? Number(x.cintura) : 0,
+   perna: Number.isFinite(Number(x.perna)) ? Number(x.perna) : 0,
+   rabo: Number.isFinite(Number(x.rabo)) ? Number(x.rabo) : 0
+ }));
  s.sessions = Array.isArray(s.sessions) ? s.sessions : [];
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
  if (s.profile.name == null) s.profile.name = "Gonçalo";
@@ -3303,29 +3315,37 @@ function Body({
  const progressing = has ? last.bodyFat < list[0].bodyFat : false;
  const status = toGo <= 0 ? "Já atingiste o objetivo de " + state.profile.bfTarget + "%! A manter." : progressing ? "No bom caminho — faltam " + toGo.toFixed(1) + "% de gordura para os " + state.profile.bfTarget + "%. Mantém o défice suave e a proteína alta." : "Ainda a " + toGo.toFixed(1) + "% do objetivo. Foca na consistência de treino e hidratação.";
  const save = () => {
- update(s => {
- const b = [...s.body].sort((a, x) => a.date.localeCompare(x.date));
- const p = b.find(x => x.date === date) || b[b.length - 1] || {};
- const h = s.profile.height || 180;
- const w = parseNum(d.weight) || p.weight || 0;
- const rec = {
- date: date,
- weight: w,
- bmi: parseNum(d.bmi) || p.bmi || 0,
- bodyFat: parseNum(d.bodyFat) || p.bodyFat || 0,
- muscle: parseNum(d.muscle) || p.muscle || 0,
- skeletal: parseNum(d.skeletal) || p.skeletal || 0,
- visceral: parseNum(d.visceral) || p.visceral || 0,
- cintura: parseNum(d.cintura) || p.cintura || 0,
- perna: p.perna || 0,
- rabo: p.rabo || 0
- };
- const i = s.body.findIndex(x => x.date === date);
- if (i >= 0) s.body[i] = rec;else s.body.push(rec);
- });
- setForm(false);
- setDate(todayKey);
- setD(empty);
+   const clean = v => {
+     const n = parseNum(v);
+     return Number.isFinite(n) && n >= 0 ? n : 0;
+   };
+   const rec = {
+     date: /^\\d{4}-\\d{2}-\\d{2}$/.test(String(date)) ? String(date) : todayKey,
+     weight: clean(d.weight),
+     bmi: clean(d.bmi),
+     bodyFat: clean(d.bodyFat),
+     muscle: clean(d.muscle),
+     skeletal: clean(d.skeletal),
+     visceral: clean(d.visceral),
+     cintura: clean(d.cintura),
+     perna: 0,
+     rabo: 0
+   };
+   try {
+     update(s => {
+       const i = s.body.findIndex(x => x.date === rec.date);
+       const previous = i >= 0 ? s.body[i] : {};
+       rec.perna = Number.isFinite(Number(previous.perna)) ? Number(previous.perna) : 0;
+       rec.rabo = Number.isFinite(Number(previous.rabo)) ? Number(previous.rabo) : 0;
+       if (i >= 0) s.body[i] = { ...previous, ...rec };
+       else s.body.push(rec);
+     });
+     setForm(false);
+     setDate(todayKey);
+     setD(empty);
+   } catch (e) {
+     console.error("Erro ao guardar medição:", e);
+   }
  };
  const delBody = date => update(s => {
  const i = s.body.findIndex(x => x.date === date);
@@ -4611,17 +4631,24 @@ class EvolveFitErrorBoundary extends React.Component {
    console.error("EvolveFit render error:", error, info);
  }
  render() {
-   if (this.state.hasError) return /*#__PURE__*/React.createElement("div", {
-     className: "app-wrap"
-   }, /*#__PURE__*/React.createElement("div", {
-     className: "phone"
-   }, /*#__PURE__*/React.createElement("div", {
-     className: "scroll",
-     style: { padding: "24px" }
-   }, /*#__PURE__*/React.createElement("div", {
-     className: "card"
-   }, /*#__PURE__*/React.createElement("h2", null, "Erro ao mostrar os dados"), /*#__PURE__*/React.createElement("p", null, "A aplicação protegeu os dados introduzidos. Tenta novamente."), /*#__PURE__*/React.createElement("small", null, this.state.message))));
-   return this.props.children;
+   if (!this.state.hasError) return this.props.children;
+   const content = React.createElement("div", { className: "card" },
+     React.createElement("h2", null, "Erro ao mostrar os dados"),
+     React.createElement("p", null, "A aplicação protegeu os dados introduzidos. Podes recarregar sem perder os dados."),
+     React.createElement("button", {
+       className: "btn-primary",
+       style: { marginTop: "14px", width: "100%" },
+       onClick: () => location.reload()
+     }, "Recarregar aplicação"),
+     React.createElement("small", {
+       style: { display: "block", marginTop: "12px" }
+     }, this.state.message)
+   );
+   return React.createElement("div", { className: "app-wrap" },
+     React.createElement("div", { className: "phone" },
+       React.createElement("div", { className: "scroll", style: { padding: "24px" } }, content)
+     )
+   );
  }
 }
 ReactDOM.createRoot(document.getElementById("root")).render(
