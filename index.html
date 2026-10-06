@@ -620,6 +620,16 @@ const firebaseConfig = {
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLA_AQUI") === -1 && typeof firebase !== "undefined";
 /* Cloud AI — Gemini via Firebase Cloud Function. A API key do Gemini nunca fica no HTML. */
 const EVOLVEFIT_AI_ENDPOINT = "https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi";
+async function evolveFitFirebaseIdToken(){
+  try{
+    if(typeof firebase !== "undefined" && firebase.auth){
+      const user = firebase.auth().currentUser;
+      if(user) return await user.getIdToken(true);
+    }
+  }catch(e){ console.warn("Firebase Auth token:",e); }
+  return null;
+}
+
 // Gemini Cloud configurado: https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi
 /* Nota de segurança: a apiKey do Firebase acima é pública por natureza (é
  assim que o SDK client-side funciona) — não é um segredo. A segurança
@@ -4148,10 +4158,15 @@ function Coach2027({ state, update, onNavigate }) {
      const controller = new AbortController();
      const timeout = setTimeout(() => controller.abort(), 30000);
      try{
+       const idToken = await evolveFitFirebaseIdToken();
+       if(!idToken) throw new Error("Utilizador Firebase não autenticado.");
        const r = await fetch(endpoint,{
          method:"POST",
          mode:"cors",
-         headers:{"Content-Type":"application/json"},
+         headers:{
+           "Content-Type":"application/json",
+           "Authorization":"Bearer "+idToken
+         },
          body:JSON.stringify({question,context:aiContext}),
          signal:controller.signal
        });
