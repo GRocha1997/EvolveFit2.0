@@ -621,14 +621,70 @@ const firebaseConfig = {
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLA_AQUI") === -1 && typeof firebase !== "undefined";
 /* Cloud AI — Gemini via Firebase Cloud Function. A API key do Gemini nunca fica no HTML. */
 const EVOLVEFIT_AI_ENDPOINT = "https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi";
+const EVOLVEFIT_FIREBASE_PROJECT_ID = "evolvefit2-df25f";
+let evolveFitAuthRepairing = false;
+
+function evolveFitDecodeJwtPayload(token){
+  try{
+    const part = String(token || "").split(".")[1];
+    if(!part) return null;
+    const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
+    return JSON.parse(atob(padded));
+  }catch(e){
+    console.warn("Firebase JWT inválido:", e);
+    return null;
+  }
+}
+
 async function evolveFitFirebaseIdToken(){
   try{
-    if(typeof firebase !== "undefined" && firebase.auth){
-      const user = firebase.auth().currentUser;
-      if(user) return await user.getIdToken(true);
+    if(typeof firebase === "undefined" || !firebase.auth) return null;
+
+    const auth = firebase.auth();
+    let user = auth.currentUser;
+
+    if(!user){
+      const cred = await auth.signInAnonymously();
+      user = cred.user;
     }
-  }catch(e){ console.warn("Firebase Auth token:",e); }
-  return null;
+
+    let token = await user.getIdToken(true);
+    let payload = evolveFitDecodeJwtPayload(token);
+
+    if(!payload || payload.aud !== EVOLVEFIT_FIREBASE_PROJECT_ID){
+      console.warn(
+        "Firebase token de projeto incorreto:",
+        payload && payload.aud,
+        "=> esperado:",
+        EVOLVEFIT_FIREBASE_PROJECT_ID
+      );
+
+      evolveFitAuthRepairing = true;
+      try{
+        await auth.signOut();
+        const cred = await auth.signInAnonymously();
+        user = cred.user;
+      }finally{
+        evolveFitAuthRepairing = false;
+      }
+
+      token = await user.getIdToken(true);
+      payload = evolveFitDecodeJwtPayload(token);
+
+      if(!payload || payload.aud !== EVOLVEFIT_FIREBASE_PROJECT_ID){
+        throw new Error(
+          "Token Firebase pertence ao projeto incorreto: " +
+          String(payload && payload.aud)
+        );
+      }
+    }
+
+    return token;
+  }catch(e){
+    console.error("Firebase Auth token:", e);
+    return null;
+  }
 }
 
 // Gemini Cloud configurado: https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi
