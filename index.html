@@ -624,6 +624,19 @@ const EVOLVEFIT_AI_ENDPOINT = "https://us-central1-evolvefit2-df25f.cloudfunctio
 const EVOLVEFIT_FIREBASE_PROJECT_ID = "evolvefit2-df25f";
 let evolveFitAuthRepairing = false;
 
+/* Firestore não aceita listas dentro de listas. Para evitar esse erro, o estado
+   é guardado na nuvem como texto JSON dentro de um único campo (_json).
+   fromCloud() também lê o formato antigo (campos soltos), por compatibilidade. */
+function toCloud(obj){
+  return { _fmt: 2, _updatedAt: (obj && obj._updatedAt) || 0, _json: JSON.stringify(obj) };
+}
+function fromCloud(data){
+  if (data && data._fmt === 2 && typeof data._json === "string") {
+    try { return JSON.parse(data._json); } catch (e) { console.error("fromCloud:", e); }
+  }
+  return data;
+}
+
 function evolveFitDecodeJwtPayload(token){
   try{
     const part = String(token || "").split(".")[1];
@@ -1892,10 +1905,10 @@ function Dashboard({
  // Primeira vez nesta conta: envia o estado atual para a nuvem.
  const j = JSON.stringify(stateRef.current);
  syncedJson.current = j;
- ref.set(JSON.parse(j)).catch(e => console.error(e));
+ ref.set(toCloud(stateRef.current)).catch(e => console.error(e));
  return;
  }
- const remote = snap.data();
+ const remote = fromCloud(snap.data());
  const j = JSON.stringify(remote);
  if (j !== syncedJson.current) {
  const localUpdatedAt = stateRef.current._updatedAt || 0;
@@ -1922,7 +1935,7 @@ function Dashboard({
  const j = JSON.stringify(state);
  if (j !== syncedJson.current) {
  syncedJson.current = j;
- fbDb.collection("users").doc(uid).set(JSON.parse(j))
+ fbDb.collection("users").doc(uid).set(toCloud(state))
    .catch(e => console.error("Erro ao guardar na nuvem:", e));
  }
  }
@@ -1940,7 +1953,7 @@ function Dashboard({
      if (!current) return;
      save(current, uid);
      if (uid && fbDb) {
-       fbDb.collection("users").doc(uid).set(JSON.parse(JSON.stringify(current)))
+       fbDb.collection("users").doc(uid).set(toCloud(current))
          .catch(() => {});
      }
    } catch (e) {}
@@ -1974,7 +1987,7 @@ function Dashboard({
      try {
        const payload = JSON.parse(JSON.stringify(safe));
        syncedJson.current = JSON.stringify(payload);
-       fbDb.collection("users").doc(uid).set(payload)
+       fbDb.collection("users").doc(uid).set(toCloud(payload))
          .catch(e => console.error("Erro ao guardar na nuvem:", e));
      } catch (e) { console.error("Erro ao preparar sincronização:", e); }
    }
