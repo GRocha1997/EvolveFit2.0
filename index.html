@@ -610,12 +610,13 @@ function normalize(s) {
  com "COLA_AQUI", a app funciona só localmente (sem sincronização).
  ===================================================================== */
 const firebaseConfig = {
- apiKey: "AIzaSyCOoErLQPCWHN_hb1H28P72bDo0xOaVLrc",
- authDomain: "evolvefit-108af.firebaseapp.com",
- projectId: "evolvefit-108af",
- storageBucket: "evolvefit-108af.firebasestorage.app",
- messagingSenderId: "1086363081148",
- appId: "1:1086363081148:web:dde9e242af453e04b2b3b9"
+  apiKey: "AIzaSyAXRkX_xYvOk6B3xeMede-E9hGK_iCQKQ",
+  authDomain: "evolvefit2-df25f.firebaseapp.com",
+  projectId: "evolvefit2-df25f",
+  storageBucket: "evolvefit2-df25f.firebasestorage.app",
+  messagingSenderId: "34608837067",
+  appId: "1:34608837067:web:b0b72a6f938feda3b4464e",
+  measurementId: "G-B5V1CV6H58"
 };
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLA_AQUI") === -1 && typeof firebase !== "undefined";
 /* Cloud AI — Gemini via Firebase Cloud Function. A API key do Gemini nunca fica no HTML. */
@@ -4962,11 +4963,31 @@ function storageAvailable() {
 function App() {
  const [user, setUser] = useState(undefined); // undefined = ainda a verificar
  useEffect(() => {
- if (!CLOUD_ENABLED || !fbAuth) {
- setUser(null);
- return;
- }
- return fbAuth.onAuthStateChanged(u => setUser(u || null));
+   if (!CLOUD_ENABLED || !fbAuth) {
+     setUser(null);
+     return;
+   }
+   let unsub = () => {};
+   try {
+     unsub = fbAuth.onAuthStateChanged(async u => {
+       if (u) {
+         setUser(u);
+         return;
+       }
+       try {
+         // EvolveFit é pessoal: cria sessão Firebase anónima automaticamente.
+         const cred = await fbAuth.signInAnonymously();
+         setUser(cred.user);
+       } catch (e) {
+         console.error("Firebase Anonymous Auth falhou:", e);
+         setUser(null);
+       }
+     });
+   } catch (e) {
+     console.error("Firebase Auth inicialização falhou:", e);
+     setUser(null);
+   }
+   return () => unsub();
  }, []);
  // Sem nuvem configurada: funciona localmente, como antes.
  if (!CLOUD_ENABLED) return /*#__PURE__*/React.createElement(Dashboard, {
@@ -4985,7 +5006,14 @@ function App() {
  color: "var(--muted)"
  }
  }, "A carregar…")));
- if (!user) return /*#__PURE__*/React.createElement(Login);
+ if (!user) return /*#__PURE__*/React.createElement("div", {
+   className: "app-wrap"
+ }, /*#__PURE__*/React.createElement("div", {
+   className: "phone"
+ }, /*#__PURE__*/React.createElement("div", {
+   className: "scroll",
+   style: { display:"flex", alignItems:"center", justifyContent:"center", color:"var(--muted)", textAlign:"center" }
+ }, "Não foi possível iniciar a sessão segura. Verifica a ligação à internet e recarrega a EvolveFit.")));
  return /*#__PURE__*/React.createElement(Dashboard, {
  user: user
  });
