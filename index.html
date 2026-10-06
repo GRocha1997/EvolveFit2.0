@@ -8,7 +8,22 @@
   height:18px;
   min-width:18px;
   border-radius:50%;
-  font-size:12px;<style data-evolvefit-coach-alert-pseudo>
+  font-size:12px;
+  font-weight:800;
+  line-height:1;
+  margin-right:7px;
+  vertical-align:-2px;
+}
+.coach-alert-positive{
+  color:#3F7D63;
+  background:#E8F2EC;
+}
+.coach-alert-negative{
+  color:#B4425A;
+  background:#F7E9ED;
+}
+</style>
+<style data-evolvefit-coach-alert-pseudo>
 .coach-alert-positive::before{content:"✓";}
 .coach-alert-negative::before{content:"!";}
 </style><style data-evolvefit-connected>
@@ -104,137 +119,6 @@
 .evf-ai-use strong{display:block;color:var(--text);font-size:12px;margin-bottom:2px}
 @media(max-width:380px){.evf-ai-prompts{grid-template-columns:1fr}.evf-ai-actions{grid-template-columns:1fr 1fr}}
 </style>
-<script type="module" id="evolvefit-local-ai-runtime">
-import { pipeline } from "https://cdn.jsdelivr.net/npm/@huggingface/transformers/+esm";
-
-const MODEL = "onnx-community/Qwen3-0.6B-ONNX";
-let generator = null;
-let loading = null;
-let status = "not_loaded";
-let progress = 0;
-let errorMessage = "";
-
-function notify() {
-  window.dispatchEvent(new CustomEvent("evolvefit-ai-status", {
-    detail: { status, progress, error: errorMessage }
-  }));
-}
-
-async function load() {
-  if (generator) return generator;
-  if (loading) return loading;
-
-  if (!("gpu" in navigator)) {
-    status = "unsupported";
-    errorMessage = "Este navegador/dispositivo não disponibiliza WebGPU.";
-    notify();
-    throw new Error(errorMessage);
-  }
-
-  status = "loading";
-  progress = 0;
-  errorMessage = "";
-  notify();
-
-  loading = pipeline("text-generation", MODEL, {
-    device: "webgpu",
-    dtype: "q4f16",
-    progress_callback: (p) => {
-      if (typeof p?.progress === "number") progress = Math.max(0, Math.min(100, p.progress));
-      notify();
-    }
-  }).then(pipe => {
-    generator = pipe;
-    status = "ready";
-    progress = 100;
-    notify();
-    return generator;
-  }).catch(err => {
-    status = "error";
-    errorMessage = err?.message || String(err);
-    notify();
-    throw err;
-  }).finally(() => {
-    loading = null;
-  });
-
-  return loading;
-}
-
-function cleanOutput(text) {
-  return String(text || "")
-    .replace(/<think>[\s\S]*?<\/think>/gi, "")
-    .replace(/^\s*assistant\s*/i, "")
-    .trim();
-}
-
-async function ask(question, context) {
-  const pipe = await load();
-
-  const system = `És o AI Coach da EvolveFit.
-Responde em português de Portugal, de forma clara, curta e prática.
-Cruza corpo, treino, nutrição e recuperação quando existirem dados.
-Usa apenas os dados fornecidos no contexto; se faltarem dados, diz isso.
-Não inventes medições, diagnósticos ou factos pessoais.
-Não substituis um profissional de saúde.
-Estrutura a resposta em:
-ANÁLISE
-DECISÃO
-PRÓXIMA AÇÃO
-Não mostres raciocínio interno nem uses etiquetas <think>.`;
-
-  const user = `Contexto da EvolveFit:
-${JSON.stringify(context, null, 2)}
-
-Pergunta do utilizador:
-${question}`;
-
-  const messages = [
-    { role: "system", content: system },
-    { role: "user", content: user }
-  ];
-
-  const output = await pipe(messages, {
-    max_new_tokens: 320,
-    do_sample: false
-  });
-
-  const generated = output?.[0]?.generated_text;
-  let text = "";
-  if (Array.isArray(generated)) {
-    const last = generated[generated.length - 1];
-    text = typeof last === "string" ? last : (last?.content || "");
-  } else {
-    text = generated || "";
-  }
-  return cleanOutput(text);
-}
-
-window.EvolveFitLocalAI = {
-  model: MODEL,
-  load,
-  ask,
-  getStatus: () => ({ status, progress, error: errorMessage }),
-  isReady: () => status === "ready"
-};
-notify();
-</script>
-
-<style id="evolvefit-local-ai-css">
-.evf-local-ai-status{
-  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
-  margin:10px 0 12px;padding:10px 12px;border:1px solid #D9E0E7;
-  border-radius:12px;background:#F7F9FB;font-size:12px;color:#687789;
-}
-.evf-local-ai-dot{width:8px;height:8px;border-radius:50%;background:#6B829B;flex:none}
-.evf-local-ai-dot.ready{background:#3F7D63}
-.evf-local-ai-dot.error{background:#B4425A}
-.evf-local-ai-dot.loading{background:#6B829B}
-.evf-local-ai-progress{width:100%;height:5px;border-radius:99px;background:#E5EAF0;overflow:hidden}
-.evf-local-ai-progress > span{display:block;height:100%;width:0;background:#3F7D63;border-radius:99px;transition:width .2s ease}
-.evf-ai-hint{font-size:11px;color:#7A8795;line-height:1.4;margin-top:8px}
-</style>
-
 <script id="evolvefit-visual-restructure">
 (function(){
   var css = '\n/* =========================================================\n   EVOLVEFIT — VISUAL RESTRUCTURE v1\n   Premium / clean / low-noise mobile UI\n   ========================================================= */\n\n:root{\n  --ef-bg:#F3F5F6;\n  --ef-surface:#FFFFFF;\n  --ef-surface-soft:#F7F8F9;\n  --ef-text:#17212B;\n  --ef-muted:#71808D;\n  --ef-border:rgba(23,33,43,.09);\n  --ef-navy:#263A4D;\n  --ef-navy-2:#3E5569;\n  --ef-green:#19864D;\n  --ef-red:#C33F32;\n  --ef-shadow:0 1px 2px rgba(20,30,40,.03),0 8px 24px rgba(20,30,40,.055);\n  --ef-shadow-soft:0 1px 2px rgba(20,30,40,.03);\n}\n\nbody{\n  background:var(--ef-bg)!important;\n  color:var(--ef-text)!important;\n}\n\n.app-wrap,\n.phone{\n  background:var(--ef-bg)!important;\n}\n\n.scroll{\n  padding-left:18px!important;\n  padding-right:18px!important;\n}\n\n/* Global cards: flatter, quieter */\n.card,\n.stat,\n.streak-pill,\n.coach27-mini,\n.progress-card,\n.chart-card,\n.body-summary,\n.auto-note{\n  border:1px solid var(--ef-border)!important;\n  box-shadow:var(--ef-shadow)!important;\n  border-radius:18px!important;\n}\n\n.card{\n  padding:17px!important;\n  margin-bottom:14px!important;\n}\n\n/* Typography */\n.tabhead h1{\n  font-size:29px!important;\n  letter-spacing:-.045em!important;\n}\n.tabhead p{\n  color:var(--ef-muted)!important;\n}\n\n/* Main actions */\n.big-btn.coral,\n.btn-solid.coral,\n.big-btn.report{\n  background:linear-gradient(135deg,var(--ef-navy),var(--ef-navy-2))!important;\n  box-shadow:0 8px 18px rgba(38,58,77,.14)!important;\n}\n.big-btn{\n  border-radius:15px!important;\n}\n\n/* =========================================================\n   TODAY / WORKOUT HERO\n   ========================================================= */\n.workout-today-card,\n.today-workout-card,\n.today-card{\n  position:relative;\n  overflow:hidden;\n  padding:19px!important;\n  background:linear-gradient(145deg,#FFFFFF 0%,#F8FAFB 100%)!important;\n}\n\n.workout-today-card::before,\n.today-workout-card::before,\n.today-card::before{\n  content:"";\n  position:absolute;\n  left:0;top:0;bottom:0;\n  width:4px;\n  background:var(--ef-navy);\n  border-radius:0 4px 4px 0;\n}\n\n.workout-today-card .section-title,\n.today-workout-card .section-title,\n.today-card .section-title{\n  letter-spacing:-.02em;\n}\n\n.workout-today-card .btn-solid,\n.today-workout-card .btn-solid,\n.today-card .btn-solid{\n  margin-top:12px;\n  min-height:48px;\n  border-radius:14px;\n}\n\n/* Make the status visually semantic, not decorative */\n.logged-badge{\n  background:rgba(25,134,77,.09)!important;\n  color:var(--ef-green)!important;\n  border:1px solid rgba(25,134,77,.14);\n}\n\n/* =========================================================\n   COACH — visual hierarchy\n   ========================================================= */\n.coach27-hero{\n  border-radius:20px!important;\n  background:linear-gradient(145deg,#263A4D,#40596D)!important;\n  box-shadow:0 12px 30px rgba(38,58,77,.18)!important;\n  padding:19px!important;\n}\n\n.coach27-hero .coach27-badge{\n  background:rgba(255,255,255,.12)!important;\n}\n\n.coach27-actions{\n  gap:9px!important;\n}\n\n.coach27-actions button{\n  border-radius:13px!important;\n}\n\n.coach27-mini{\n  padding:14px!important;\n}\n\n.coach27-mini-v{\n  font-size:22px!important;\n  letter-spacing:-.04em!important;\n}\n\n/* AI result */\n.ai-answer,\n.ai-result,\n.coach-answer{\n  border-radius:16px!important;\n  border:1px solid var(--ef-border)!important;\n  background:var(--ef-surface)!important;\n  box-shadow:var(--ef-shadow-soft)!important;\n}\n\n/* =========================================================\n   HOME SECTIONS — less visual noise\n   ========================================================= */\n.section{\n  padding-left:2px!important;\n  padding-right:2px!important;\n}\n\n.section-head{\n  padding:13px 2px!important;\n}\n\n.section-icon{\n  width:30px!important;\n  height:30px!important;\n  border-radius:9px!important;\n}\n\n.section-title{\n  font-size:14px!important;\n  font-weight:700!important;\n}\n\n.section-count{\n  font-size:12px!important;\n}\n\n/* Task rows become cleaner */\n.task{\n  padding:10px 2px!important;\n}\n.checkbox{\n  width:21px!important;\n  height:21px!important;\n  border-radius:7px!important;\n}\n\n/* =========================================================\n   METRICS — editorial look\n   ========================================================= */\n.stat-grid{\n  gap:10px!important;\n}\n.stat{\n  padding:16px!important;\n}\n.stat-icon{\n  width:31px!important;\n  height:31px!important;\n  border-radius:9px!important;\n}\n.stat-v{\n  font-size:25px!important;\n}\n\n/* =========================================================\n   PROGRESS / BODY\n   ========================================================= */\n.bsum-grid{\n  gap:8px!important;\n}\n.bsum{\n  padding:4px 2px;\n}\n.bsum-v{\n  font-size:23px!important;\n}\n\n/* =========================================================\n   TABS\n   ========================================================= */\n.tabbar{\n  border-top:1px solid rgba(23,33,43,.08)!important;\n  box-shadow:0 -6px 22px rgba(23,33,43,.06)!important;\n}\n.tab{\n  padding-top:7px!important;\n  padding-bottom:7px!important;\n}\n.tab span{\n  font-size:10px!important;\n  font-weight:650!important;\n}\n.tab.on{\n  color:var(--ef-navy)!important;\n}\n\n/* Inputs */\n.in,\n.coach27-in,\n.notes,\n.water-custom input,\n.log-w,\n.log-note{\n  border-color:var(--ef-border)!important;\n  background:var(--ef-surface-soft)!important;\n  border-radius:12px!important;\n}\n\n/* Remove excess saturated gradients from selected controls */\n.seg-b.on,\n.dp.on,\n.period-btn.active,\n.rir-chip.on,\n.checkbox.on{\n  background:var(--ef-navy)!important;\n  border-color:var(--ef-navy)!important;\n}\n\n/* Green only for actual positive state */\n.pc-badge.up,\n.logged-badge{\n  color:var(--ef-green)!important;\n}\n\n/* Mobile polish */\n@media (max-width:520px){\n  .scroll{\n    padding-left:16px!important;\n    padding-right:16px!important;\n  }\n  .tabhead h1{\n    font-size:27px!important;\n  }\n  .card{\n    border-radius:17px!important;\n  }\n}\n\n/* Respect dark mode */\n[data-theme="dark"]{\n  --ef-bg:#0E141C;\n  --ef-surface:#151D27;\n  --ef-surface-soft:#1B2530;\n  --ef-text:#F2F5F8;\n  --ef-muted:#A1ACB9;\n  --ef-border:rgba(255,255,255,.09);\n  --ef-navy:#71869A;\n  --ef-navy-2:#526A7E;\n}\n[data-theme="dark"] .workout-today-card,\n[data-theme="dark"] .today-workout-card,\n[data-theme="dark"] .today-card{\n  background:linear-gradient(145deg,#151D27,#18232E)!important;\n}\n';
@@ -4289,17 +4173,6 @@ function Coach2027({ state, update, onNavigate }) {
         * mantém-se o Coach local de regras. O modelo Qwen local continua
         * disponível como fallback adicional quando o WebGPU estiver pronto.
         */
-       if(window.EvolveFitLocalAI){
-         try{
-           const localAnswer = await window.EvolveFitLocalAI.ask(question, aiContext);
-           if(localAnswer){
-             setAiAnswer(String(localAnswer) + "\n\nNota: o Gemini Cloud está temporariamente indisponível; foi usado o motor local.");
-             return;
-           }
-         }catch(localError){
-           console.warn("AI local indisponível:",localError);
-         }
-       }
        setAiAnswer(localAI(question)+"\n\nNota: o Gemini Cloud está temporariamente indisponível; foi usada a análise local de regras.");
      }
    }catch(e){
