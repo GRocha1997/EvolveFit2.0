@@ -4935,7 +4935,8 @@ function Login() {
  return;
  }
  setBusy(true);
- const p = mode === "up" ? fbAuth.createUserWithEmailAndPassword(email.trim(), pw) : fbAuth.signInWithEmailAndPassword(email.trim(), pw);
+ const cu = fbAuth.currentUser;
+ const p = mode === "up" ? (cu && cu.isAnonymous ? cu.linkWithCredential(firebase.auth.EmailAuthProvider.credential(email.trim(), pw)).then(() => { location.reload(); }) : fbAuth.createUserWithEmailAndPassword(email.trim(), pw)) : fbAuth.signInWithEmailAndPassword(email.trim(), pw);
  p.catch(e => {
  const m = {
  "auth/invalid-email": "Email inválido.",
@@ -5045,10 +5046,10 @@ function App() {
    let unsub = () => {};
    try {
      unsub = fbAuth.onAuthStateChanged(async u => {
-       if (u) {
-         setUser(u);
-         return;
-       }
+       if (u && !u.isAnonymous) {
+ setUser(u);
+ return;
+ }
        setUser(null); // sem sessão: mostra o ecrã de login (email + palavra-passe)
      });
    } catch (e) {
