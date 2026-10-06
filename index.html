@@ -490,6 +490,17 @@ const load = uid => {
  r = old;
  }
  }
+ if (!r) {
+ let best = null, bl = 0;
+ for (let i = 0; i < localStorage.length; i++) {
+ const kk = localStorage.key(i);
+ if (kk && kk.indexOf(BASE_KEY) === 0 && kk !== k && kk !== OLD_SHARED_KEY) {
+ const v = localStorage.getItem(kk);
+ if (v && v.length > bl) { try { const o = JSON.parse(v); if (o && o.sessions) { best = v; bl = v.length; } } catch (e) {} }
+ }
+ }
+ if (best) { localStorage.setItem(k, best); r = best; }
+ }
  return r ? JSON.parse(r) : null;
  } catch (e) {
  return null;
@@ -657,10 +668,7 @@ async function evolveFitFirebaseIdToken(){
     const auth = firebase.auth();
     let user = auth.currentUser;
 
-    if(!user){
-      const cred = await auth.signInAnonymously();
-      user = cred.user;
-    }
+    if(!user){ return null; }
 
     let token = await user.getIdToken(true);
     let payload = evolveFitDecodeJwtPayload(token);
@@ -675,9 +683,7 @@ async function evolveFitFirebaseIdToken(){
 
       evolveFitAuthRepairing = true;
       try{
-        await auth.signOut();
-        const cred = await auth.signInAnonymously();
-        user = cred.user;
+        return null;
       }finally{
         evolveFitAuthRepairing = false;
       }
@@ -5043,14 +5049,7 @@ function App() {
          setUser(u);
          return;
        }
-       try {
-         // EvolveFit é pessoal: cria sessão Firebase anónima automaticamente.
-         const cred = await fbAuth.signInAnonymously();
-         setUser(cred.user);
-       } catch (e) {
-         console.error("Firebase Anonymous Auth falhou:", e);
-         setUser(null);
-       }
+       setUser(null); // sem sessão: mostra o ecrã de login (email + palavra-passe)
      });
    } catch (e) {
      console.error("Firebase Auth inicialização falhou:", e);
@@ -5075,14 +5074,7 @@ function App() {
  color: "var(--muted)"
  }
  }, "A carregar…")));
- if (!user) return /*#__PURE__*/React.createElement("div", {
-   className: "app-wrap"
- }, /*#__PURE__*/React.createElement("div", {
-   className: "phone"
- }, /*#__PURE__*/React.createElement("div", {
-   className: "scroll",
-   style: { display:"flex", alignItems:"center", justifyContent:"center", color:"var(--muted)", textAlign:"center" }
- }, "Não foi possível iniciar a sessão segura. Verifica a ligação à internet e recarrega a EvolveFit.")));
+ if (!user) return React.createElement(Login);
  return /*#__PURE__*/React.createElement(Dashboard, {
  user: user
  });
@@ -5122,5 +5114,104 @@ class EvolveFitErrorBoundary extends React.Component {
 ReactDOM.createRoot(document.getElementById("root")).render(
  React.createElement(EvolveFitErrorBoundary, null, React.createElement(App))
 );
+</script>
+<script id="ef-health-ai">
+(function(){
+var HK="ef_health_v1",KK="ef_gemini_key",MK="ef_gemini_model";
+function g(k,d){try{var v=localStorage.getItem(k);return v==null?d:v}catch(e){return d}}
+function s(k,v){try{localStorage.setItem(k,v)}catch(e){}}
+function H(){try{return JSON.parse(g(HK,"{}"))}catch(e){return{}}}
+function appState(){var best=null,sc=-1;
+ for(var i=0;i<localStorage.length;i++){var k=localStorage.key(i);
+  if(k.indexOf("lifeos_v4")!==0||k==="lifeos_v4_goncalo")continue;
+  try{var o=JSON.parse(localStorage.getItem(k));if(!o||!o.sessions)continue;
+   var n=o.sessions.length+Object.keys(o.days||{}).length;if(n>sc){sc=n;best=o}}catch(e){}}
+ return best}
+function dur(v){v=String(v).toLowerCase().replace(",",".");
+ var h=v.match(/([\d.]+)\s*(h|hr|hora)/),m=v.match(/([\d.]+)\s*min/);
+ if(h||m)return (h?parseFloat(h[1]):0)*60+(m?parseFloat(m[1]):0);
+ var c=v.match(/^(\d+):(\d+)/);if(c)return +c[1]*60+ +c[2];
+ var n=parseFloat(v);return isNaN(n)?NaN:(n<=24?n*60:n)}
+function parse(txt){var acc={},n=0;
+ txt.split(/\r?\n/).forEach(function(l){
+  var p=l.split(/[;\t,](?=\d{4}-\d{2}-\d{2})/);if(p.length<2)return;
+  var t=p[0].trim().toLowerCase(),r=p[1].split(/[;\t,]/),d=(r[0]||"").trim().slice(0,10),v=r.slice(1).join(".").trim();
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d))return;
+  var key=/sono|sleep/.test(t)?"sono":/rhr|repouso|resting/.test(t)?"rhr":/hrv|variab/.test(t)?"hrv":/passo|step/.test(t)?"passos":/kcal|energ|cal/.test(t)?"kcal":null;
+  if(!key)return;var x=key==="sono"?dur(v):parseFloat(v.replace(",","."));if(isNaN(x))return;
+  var a=acc[d]=acc[d]||{};(a[key]=a[key]||[]).push(x);n++});
+ var out=H();
+ Object.keys(acc).forEach(function(d){var o=out[d]=out[d]||{},a=acc[d];
+  Object.keys(a).forEach(function(k){var xs=a[k],sum=xs.reduce(function(p,c){return p+c},0);
+   o[k]=(k==="rhr"||k==="hrv")?+(sum/xs.length).toFixed(1):k==="sono"?+(sum/60).toFixed(2):Math.round(sum)})});
+ s(HK,JSON.stringify(out));return n}
+function shift(d,n){return new Date(Date.parse(d+"T00:00:00Z")-n*864e5).toISOString().slice(0,10)}
+function series(){var h=H(),S={sono:{},rhr:{},hrv:{},passos:{},kcal:{},vol:{},rir:{},agua:{}};
+ Object.keys(h).forEach(function(d){for(var k in h[d])S[k][d]=h[d][k]});
+ var a=appState();if(a){
+  (a.sessions||[]).forEach(function(se){var v=0,r=[];(se.ex||[]).forEach(function(e){
+    v+=(+e.sets||0)*(+e.reps||0)*(+e.weight||0);if(e.rir!=null&&e.rir!=="")r.push(+e.rir)});
+   S.vol[se.date]=(S.vol[se.date]||0)+v;if(r.length)S.rir[se.date]=r.reduce(function(p,c){return p+c},0)/r.length});
+  Object.keys(a.days||{}).forEach(function(d){if(a.days[d].water)S.agua[d]=a.days[d].water})}
+ return S}
+function corr(X,Y,lag){var xs=[],ys=[];
+ Object.keys(Y).forEach(function(d){var x=X[shift(d,lag)];if(x!=null){xs.push(x);ys.push(Y[d])}});
+ var n=xs.length;if(n<6)return{n:n,r:null};
+ var mx=xs.reduce(function(p,c){return p+c},0)/n,my=ys.reduce(function(p,c){return p+c},0)/n,sxy=0,sx=0,sy=0;
+ for(var i=0;i<n;i++){sxy+=(xs[i]-mx)*(ys[i]-my);sx+=Math.pow(xs[i]-mx,2);sy+=Math.pow(ys[i]-my,2)}
+ return{n:n,r:sx&&sy?+(sxy/Math.sqrt(sx*sy)).toFixed(2):null}}
+function pairs(S){return [
+ ["Sono (noite anterior) → volume de treino",S.sono,S.vol,1],
+ ["Sono (noite anterior) → RIR médio",S.sono,S.rir,1],
+ ["HRV (manhã) → volume de treino",S.hrv,S.vol,0],
+ ["FC em repouso → RIR médio",S.rhr,S.rir,0],
+ ["Passos (dia anterior) → sono",S.passos,S.sono,1],
+ ["Kcal ativas (dia anterior) → HRV",S.kcal,S.hrv,1],
+ ["Água (dia anterior) → HRV",S.agua,S.hrv,1]].map(function(p){var c=corr(p[1],p[2],p[3]);return{l:p[0],r:c.r,n:c.n}})}
+function ask(summary){var key=g(KK,""),model=g(MK,"gemini-2.5-flash");
+ if(!key)return Promise.reject(new Error("Falta a chave do Gemini."));
+ var prompt="És um coach de treino e recuperação. Responde em português de Portugal, sem diagnósticos médicos.\n"+
+ "Dados de uma só pessoa (últimos dias) e correlações de Pearson (r, n=dias). RIR alto = treino mais folgado. Correlação não prova causa.\n"+
+ "Dá 4 a 5 observações curtas e 3 ajustes concretos ao treino/sono/recuperação para a próxima semana. Se n for pequeno, di-lo.\n\n"+summary;
+ return fetch("https://generativelanguage.googleapis.com/v1beta/models/"+encodeURIComponent(model)+":generateContent",
+  {method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":key},body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})})
+ .then(function(r){return r.json()}).then(function(j){
+  if(j.error)throw new Error(j.error.message);
+  var p=j.candidates&&j.candidates[0]&&j.candidates[0].content.parts;
+  return p?p.map(function(x){return x.text||""}).join(""):"Sem resposta."})}
+function css(){var st=document.createElement("style");st.textContent=
+ "#efh-fab{position:fixed;right:14px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:10000;border:none;border-radius:24px;padding:11px 15px;background:var(--coral);color:#fff;font:650 13px -apple-system,system-ui,sans-serif;box-shadow:var(--shadow-lg)}"+
+ "#efh{position:fixed;inset:0;z-index:10001;background:var(--bg);color:var(--text);overflow:auto;padding:calc(18px + env(safe-area-inset-top)) 16px 40px;font-family:-apple-system,system-ui,sans-serif;display:none}"+
+ "#efh.on{display:block}#efh .c{background:var(--surface);border:1px solid var(--border);border-radius:16px;padding:14px;margin:0 auto 12px;max-width:460px}"+
+ "#efh h2{margin:0 auto 12px;max-width:460px;font-size:22px;display:flex;justify-content:space-between}#efh h3{margin:0 0 8px;font-size:14px}"+
+ "#efh textarea,#efh input{width:100%;box-sizing:border-box;padding:10px;border-radius:12px;border:1px solid var(--border);background:var(--surface2);color:var(--text);font-size:16px;margin-bottom:8px}"+
+ "#efh button{border:none;border-radius:12px;padding:11px 14px;background:var(--coral);color:#fff;font-weight:650;font-size:14px;margin:0 6px 6px 0}#efh button.g{background:var(--surface2);color:var(--text);border:1px solid var(--border)}"+
+ "#efh .m{font-size:12px;color:var(--muted);margin:2px 0 6px}#efh pre{white-space:pre-wrap;font:14px/1.5 inherit;margin:0}";
+ document.head.appendChild(st)}
+function ui(){css();
+ var f=document.createElement("button");f.id="efh-fab";f.textContent="Saúde + IA";
+ var p=document.createElement("div");p.id="efh";
+ p.innerHTML='<h2>Saúde + IA <button class="g" id="efh-x">Fechar</button></h2>'+
+ '<div class="c"><h3>1. Importar do Atalho</h3><textarea id="efh-t" rows="4" placeholder="tipo,data,valor (uma linha por amostra)"></textarea>'+
+ '<button id="efh-p">Colar da área de transferência</button><button class="g" id="efh-i">Importar texto</button><div class="m" id="efh-s"></div></div>'+
+ '<div class="c"><h3>2. Gemini (só fica neste telemóvel)</h3><input id="efh-k" type="password" placeholder="Chave da API (AI Studio)"><input id="efh-m" placeholder="Modelo"></div>'+
+ '<div class="c"><button id="efh-a">Calcular e analisar</button><div id="efh-o"></div></div>';
+ document.body.appendChild(f);document.body.appendChild(p);
+ var $=function(i){return document.getElementById(i)};
+ function stat(){var h=H(),d=Object.keys(h).sort();$("efh-s").textContent=d.length?d.length+" dias guardados ("+d[0]+" a "+d[d.length-1]+")":"Ainda sem dados."}
+ f.onclick=function(){p.classList.add("on");$("efh-k").value=g(KK,"");$("efh-m").value=g(MK,"gemini-2.5-flash");stat()};
+ $("efh-x").onclick=function(){p.classList.remove("on")};
+ $("efh-i").onclick=function(){var n=parse($("efh-t").value);$("efh-s").textContent=n+" linhas lidas.";if(n)stat()};
+ $("efh-p").onclick=function(){navigator.clipboard.readText().then(function(t){$("efh-t").value=t;var n=parse(t);$("efh-s").textContent=n+" linhas lidas.";if(n)stat()})
+  .catch(function(){$("efh-s").textContent="Sem permissão: cola o texto na caixa e carrega em Importar."})};
+ $("efh-a").onclick=function(){s(KK,$("efh-k").value.trim());s(MK,$("efh-m").value.trim()||"gemini-2.5-flash");
+  var S=series(),P=pairs(S),o=$("efh-o");
+  var html="<h3>Correlações</h3>"+P.map(function(x){return "<div class='m'>"+x.l+": <b>"+(x.r==null?"dados insuficientes":"r = "+x.r)+"</b> (n="+x.n+")</div>"}).join("")+"<h3 style='margin-top:12px'>Gemini</h3><pre id='efh-r'>A pensar…</pre>";
+  o.innerHTML=html;
+  var days=Object.keys(H()).sort().slice(-14).map(function(d){return d+" "+JSON.stringify({sono_h:S.sono[d],fc_rep:S.rhr[d],hrv:S.hrv[d],passos:S.passos[d],kcal:S.kcal[d],volume:S.vol[d],rir:S.rir[d],agua_ml:S.agua[d]})}).join("\n");
+  ask("Correlações:\n"+P.map(function(x){return x.l+": r="+x.r+" (n="+x.n+")"}).join("\n")+"\n\nÚltimos dias:\n"+days)
+   .then(function(t){document.getElementById("efh-r").textContent=t}).catch(function(e){document.getElementById("efh-r").textContent="Erro: "+e.message})}}
+if(document.readyState==="loading")document.addEventListener("DOMContentLoaded",ui);else ui();
+})();
 </script>
 </body></html>
