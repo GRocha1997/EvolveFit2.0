@@ -208,7 +208,7 @@ window.evfEnableNotifications=async function(){
   if(reg) reg.active?.postMessage({type:"TEST_NOTIFICATION"});
   return true;
 };
-window.addEventListener("load",()=>{window.evfRegisterSW();try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}});
+window.addEventListener("load",()=>window.evfRegisterSW());
 window.addEventListener("online",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
 window.addEventListener("offline",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
 document.addEventListener("visibilitychange",async()=>{
@@ -612,28 +612,11 @@ const load = uid => {
  }
 };
 
-const SNAP_KEY = BASE_KEY + "_snapshots";
-let _snapDay = null;
-try { _snapDay = localStorage.getItem(SNAP_KEY + "_day"); } catch (e) {}
-/* Guarda no máximo 1 cópia por dia (últimas 3) para recuperar de qualquer engano. */
-const snapshotDaily = payload => {
- try {
-   const day = new Date().toISOString().slice(0, 10);
-   if (_snapDay === day) return;
-   const arr = JSON.parse(localStorage.getItem(SNAP_KEY) || "[]");
-   arr.push({day, at: Date.now(), json: payload});
-   while (arr.length > 3) arr.shift();
-   localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
-   localStorage.setItem(SNAP_KEY + "_day", day);
-   _snapDay = day;
- } catch (e) {}
-};
 const save = (s, uid) => {
  try {
    const payload = JSON.stringify(s);
    localStorage.setItem(keyFor(uid), payload);
    localStorage.setItem(DEVICE_BACKUP_KEY, payload);
-   if (s && ((s.body && s.body.length) || (s.sessions && s.sessions.length))) snapshotDaily(payload);
  } catch (e) {
    console.error("Erro de persistência local:", e);
  }
@@ -675,13 +658,8 @@ function normalize(s) {
  if (!Array.isArray(s.profile.planAdjustments)) s.profile.planAdjustments = [];
  if (s.theme == null) s.theme = "light";
  if (!s.menus || typeof s.menus !== "object" || !s.menus.manha || !s.menus.tarde) s.menus = clone(MENUS);
- if (!Array.isArray(s.plano) || !s.plano.length) {
+ if (!Array.isArray(s.plano) || s.planoVersion !== PLAN_VERSION) {
  s.plano = clone(PLAN);
- s.planoVersion = PLAN_VERSION;
- } else if (s.planoVersion !== PLAN_VERSION) {
- // Nunca repor o plano: preserva cargas, reps e edições do utilizador.
- // Só acrescenta dias do plano base que ainda não existam.
- PLAN.forEach(pd => { if (!s.plano.some(d => d && d.day === pd.day)) s.plano.push(clone(pd)); });
  s.planoVersion = PLAN_VERSION;
  }
  // Migração Verão 2027: Quinta troca Cable Fly por Single-Arm DB Chest Press (mantém as cargas guardadas)
@@ -763,7 +741,6 @@ const firebaseConfig = {
   measurementId: "G-B5V1CV6H58"
 };
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLA_AQUI") === -1 && typeof firebase !== "undefined";
-let fbAuth = null, fbDb = null;
 /* Cloud AI — Gemini via Firebase Cloud Function. A API key do Gemini nunca fica no HTML. */
 const EVOLVEFIT_AI_ENDPOINT = "https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi";
 const EVOLVEFIT_FIREBASE_PROJECT_ID = "evolvefit2-df25f";
@@ -863,18 +840,9 @@ function cloudQueueClear(){
 async function evolveFitCloudSave(uid, state){
   if(!uid || !fbDb || !state) return false;
   const payload = toCloud(state);
-  if(payload._json.length > 850000 && !window.__evfSizeWarned){
-    window.__evfSizeWarned = true;
-    console.warn("Dados perto do limite de 1 MB da nuvem:", payload._json.length);
-    try{ alert("Os teus dados estão perto do limite da nuvem (1 MB). Exporta um backup no Relatório e diz-me para dividir o histórico por ano."); }catch(e){}
-  }
   cloudQueueWrite({uid, payload, queuedAt:Date.now()});
   window.evfSetCloudStatus && window.evfSetCloudStatus(navigator.onLine ? "saving" : "offline");
   if(!navigator.onLine) return false;
-  // Só escreve na nuvem depois de a nuvem ter sido lida (evita que um estado
-  // vazio/antigo sobrescreva dados mais recentes). A edição fica guardada
-  // localmente e na fila; é enviada logo a seguir à primeira leitura.
-  if(!window.__evfRemoteSeen) return false;
   try{
     await fbDb.collection("users").doc(uid).set(payload);
     cloudQueueClear();
@@ -890,8 +858,6 @@ async function evolveFitCloudSave(uid, state){
 async function evolveFitFlushCloudQueue(){
   const q=cloudQueueRead();
   if(!q || !navigator.onLine || !fbDb || !q.uid || !q.payload) return;
-  if(!window.__evfRemoteSeen) return;
-  if((Number(q.payload._updatedAt) || 0) < (window.__evfRemoteUpdatedAt || 0)){ cloudQueueClear(); return; }
   try{
     await fbDb.collection("users").doc(q.uid).set(q.payload);
     cloudQueueClear();
@@ -914,6 +880,7 @@ if (CLOUD_ENABLED) {
  fbDb.enablePersistence({synchronizeTabs:true})
    .then(()=>console.log("Firestore offline persistence ativa."))
    .catch(e=>console.warn("Firestore offline persistence:",e.code||e));
+ evolveFitFlushCloudQueue();
  } catch (e) {
  console.error("Firebase init falhou:", e);
  }
@@ -1616,13 +1583,6 @@ const lastWeekdayDate = W => {
 
 /* ---------------------------- seed sample data -------------------------- */
 function seed() {
- const s = seedDemo();
- s.days = {};
- s.body = [];
- s.sessions = [];
- return s;
-}
-function seedDemo() {
  const days = {},
  body = [],
  sessions = [];
@@ -2075,12 +2035,6 @@ function Dashboard({
  const [wDay, setWDay] = useState(null);
  const [, setDayTick] = useState(0); // força re-render quando o dia civil muda
  const first = useRef(true);
- const [cloudReady, setCloudReady] = useState(!(uid && fbDb)); // nuvem = fonte principal
- useEffect(() => {
-   if (cloudReady) return;
-   const t = setTimeout(() => setCloudReady(true), 5000); // offline: usa a cache local
-   return () => clearTimeout(t);
- }, [cloudReady]);
  const syncedJson = useRef(null); // último JSON já sincronizado com a nuvem
  const writeTimer = useRef(null);
  const stateRef = useRef(state);
@@ -2166,10 +2120,6 @@ function Dashboard({
  } // ignora o eco da própria escrita
  if (!snap.exists) {
  // Primeira vez nesta conta: envia o estado atual para a nuvem.
- if (snap.metadata.fromCache) return; // cache vazia não significa conta vazia
- setCloudReady(true);
- window.__evfRemoteSeen = true;
- window.__evfRemoteUpdatedAt = 0;
  const j = JSON.stringify(stateRef.current);
  syncedJson.current = j;
  ref.set(toCloud(stateRef.current)).catch(e => console.error(e));
@@ -2177,15 +2127,10 @@ function Dashboard({
  }
  const remote = fromCloud(snap.data());
  const j = JSON.stringify(remote);
- setCloudReady(true);
- window.__evfRemoteSeen = true;
- window.__evfRemoteUpdatedAt = Number(remote && remote._updatedAt) || 0;
  if (j !== syncedJson.current) {
  const localUpdatedAt = stateRef.current._updatedAt || 0;
  const remoteUpdatedAt = remote._updatedAt || 0;
  if (remoteUpdatedAt < localUpdatedAt) {
-   // O local é mais recente (ex.: editado offline): envia-o para a nuvem.
-   evolveFitCloudSave(uid, stateRef.current);
    return;
  }
  if (remoteUpdatedAt === localUpdatedAt &&
@@ -2196,16 +2141,11 @@ function Dashboard({
  window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
  const normalizedRemote = normalize(remote);
  if (normalizedRemote) {
-   try { // cópia de segurança do estado local antes de o substituir
-     const cur = JSON.stringify(stateRef.current);
-     if (cur !== JSON.stringify(normalizedRemote)) localStorage.setItem(BASE_KEY + "_before_remote", cur);
-   } catch (e) {}
    stateRef.current = normalizedRemote;
    setState(normalizedRemote);
  }
  }
  }, err => {
-   setCloudReady(true);
    window.evfSetCloudStatus && window.evfSetCloudStatus("error");
    console.error("Erro de sincronização:", err);
  });
@@ -2281,9 +2221,6 @@ function Dashboard({
    return p;
  }
 });
- if (!cloudReady) return React.createElement("div", {className: "app-wrap"},
-   React.createElement("div", {className: "phone"},
-     React.createElement("div", {className: "scroll", style: {display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)"}}, "A sincronizar com a nuvem…")));
  const onNavigate = id => {
    setWDay(null);
    setTab(id);
@@ -4317,26 +4254,6 @@ function Body({
 
 
 /* ============================= COACH 2027 ============================== */
-function aiFullHistory(st) {
-  try {
-    const compact = tasks => {
-      const out = {};
-      Object.keys(tasks || {}).forEach(k => {
-        const t = tasks[k];
-        if (t && (t.value != null || t.done)) out[k] = t.value != null ? t.value : 1;
-      });
-      return out;
-    };
-    const dayKeys = Object.keys(st.days || {}).sort().slice(-120);
-    return {
-      perfil: st.profile || {},
-      pesagens: (st.body || []).map(b => ({data:b.date, peso:b.weight, gordura:b.bodyFat, musculo:b.muscle, esqueletico:b.skeletal, visceral:b.visceral, cintura:b.cintura, perna:b.perna, rabo:b.rabo})),
-      diario: dayKeys.map(k => ({data:k, agua:(st.days[k] && st.days[k].water) || 0, registos:compact(st.days[k] && st.days[k].tasks)})),
-      sessoes: (st.sessions || []).slice(-60).map(se => ({data:se.date, dia:se.dayIdx, exercicios:(se.ex || []).map(e => ({nome:e.name, series:e.sets, reps:e.reps, carga:e.weight, rir:e.rir, repsLadoMenor:e.repsS, repsLadoMaior:e.repsB}))})),
-      plano: (st.plano || []).map(d => ({dia:d.day, nome:d.name, exercicios:(d.ex || []).map(x => ({nome:x.name, series:x.sets, reps:x.reps, repsMax:x.repsMax, carga:x.weight, rir:x.rir}))}))
-    };
-  } catch (e) { return null; }
-}
 function Coach2027({ state, update, onNavigate }) {
  const prof = state.profile || {};
  const today = state.days[todayKey] || { tasks:{}, water:0 };
@@ -4361,7 +4278,7 @@ function Coach2027({ state, update, onNavigate }) {
  const [baselineForm, setBaselineForm] = useState({weight:"",bodyFat:"",cintura:""});
  useEffect(() => {
    if (!firstBody) return;
-   const current = state.profile?.coachBaseline;
+   const current = stateRef.current?.profile?.coachBaseline;
    if (!current || current.sourceDate !== firstBody.date) {
      update(s => {
        s.profile = s.profile || {};
@@ -4377,7 +4294,7 @@ function Coach2027({ state, update, onNavigate }) {
  }, [firstBody?.date, firstBody?.weight, firstBody?.bodyFat, firstBody?.cintura]);
 
  const openBaselineEditor = () => {
-   const b = state.profile?.coachBaseline || firstBody || {};
+   const b = stateRef.current?.profile?.coachBaseline || firstBody || {};
    setBaselineForm({
      weight: b.weight ?? "",
      bodyFat: b.bodyFat ?? "",
@@ -4538,9 +4455,7 @@ function Coach2027({ state, update, onNavigate }) {
    alerts: alerts.map(a=>({text:a.text,level:a.level})),
    adherence28,
    recentSessions: aiRecentSessions,
-   recentDays: aiRecentDays,
- fullHistory: aiFullHistory(state),
- instructions: "Usa TODO o fullHistory (pesagens, diário por dia, sessões, plano e perfil) e correlaciona sempre sono, calorias, proteína, passos, cardio, treino/cargas, peso, gordura e cintura antes de responder. Cita datas e valores concretos."
+   recentDays: aiRecentDays
  };
 
  const localAI = question => {
@@ -4627,11 +4542,9 @@ function Coach2027({ state, update, onNavigate }) {
  const [photos,setPhotos] = useState(()=>{
  try{return JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")}catch(e){return[]}
  });
- const PH_KEY = "evolvefit_progress_photos_v1";
- // Fotos ficam só neste dispositivo (por escolha); o resto dos dados vai para a nuvem.
  const savePhotos = arr => {
  setPhotos(arr);
- try{localStorage.setItem(PH_KEY,JSON.stringify(arr))}catch(e){alert("Sem espaço local para mais fotografias. Remove algumas antigas.");}
+ try{localStorage.setItem("evolvefit_progress_photos_v1",JSON.stringify(arr))}catch(e){alert("Sem espaço local para mais fotografias. Remove algumas antigas.");}
  };
  const addPhoto = e => {
  const f=e.target.files && e.target.files[0]; if(!f) return;
@@ -4643,7 +4556,7 @@ function Coach2027({ state, update, onNavigate }) {
  const c=document.createElement("canvas"); c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale);
  c.getContext("2d").drawImage(img,0,0,c.width,c.height);
  const data=c.toDataURL("image/jpeg",.62);
- const arr=[...photos,{id:Date.now(),date:todayKey,data}].slice(-12);
+ const arr=[...photos,{id:Date.now(),date:todayKey,data}].slice(-8);
  savePhotos(arr);
  };
  img.src=ev.target.result;
@@ -5030,24 +4943,15 @@ function Report({
  update,
  user
 }) {
- const [report, setReport] = useState(null);
- const [gen, setGen] = useState(false);
+ const report = buildReport(state);
  const dark = state.theme === "dark";
- const week = lastNDays(state.days, 7);
- const consistency = Math.round(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7);
- const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
- const coach = buildCoach(state, waterAvg);
+ const coach = buildCoach(state, report.waterAvg);
  const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
  const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= 2500);
  const workoutStreak = streak(state.days, (d, k) => trainedOn(state, k));
- const generate = () => {
- setGen(true);
- setReport(buildReport(state));
- setGen(false);
- };
  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
  title: "Relatórios",
- sub: "A tua semana, analisada",
+ sub: "Dados da app · " + report.weekLabel,
  right: /*#__PURE__*/React.createElement("button", {
  className: "theme-toggle",
  onClick: () => update(s => {
@@ -5098,14 +5002,7 @@ function Report({
  state: state,
  user: user,
  update: update
- }), !report && /*#__PURE__*/React.createElement("button", {
- className: "big-btn report",
- onClick: generate,
- disabled: gen
- }, gen ? "A analisar os teus dados..." : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(I, {
- name: "barChart",
- size: 18
- }), " Gerar relatório da semana")), report && /*#__PURE__*/React.createElement("div", {
+ }), /*#__PURE__*/React.createElement("div", {
  className: "report-body"
  }, /*#__PURE__*/React.createElement(ReportBlock, {
  title: "Resumo geral"
@@ -5131,7 +5028,7 @@ function Report({
  tint: "teal"
  }, /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Treinos"), /*#__PURE__*/React.createElement("span", null, report.workout.count, "/5")), /*#__PURE__*/React.createElement("div", {
+ }, /*#__PURE__*/React.createElement("span", null, "Treinos"), /*#__PURE__*/React.createElement("span", null, report.workout.count, "/", report.workout.target)), /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
  }, /*#__PURE__*/React.createElement("span", null, "Volume total"), /*#__PURE__*/React.createElement("span", null, (report.workout.volume / 1000).toFixed(1), "k kg")), /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
@@ -5151,11 +5048,11 @@ function Report({
  className: report.body.grams > 0 ? "good" : ""
  }, report.body.grams > 0 ? "−" : report.body.grams < 0 ? "+" : "", Math.abs(report.body.grams), " g")), /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Gordura corporal"), /*#__PURE__*/React.createElement("span", null, report.body.bf, "% (", report.body.bfDiff <= 0 ? "↓" : "↑", Math.abs(report.body.bfDiff), ")")), /*#__PURE__*/React.createElement("div", {
+ }, /*#__PURE__*/React.createElement("span", null, "Gordura corporal"), /*#__PURE__*/React.createElement("span", null, report.body.bf == null ? "—" : report.body.bf + "% (" + (report.body.bfDiff <= 0 ? "↓" : "↑") + Math.abs(report.body.bfDiff) + ")")), /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "IMC"), /*#__PURE__*/React.createElement("span", null, report.body.bmi)), /*#__PURE__*/React.createElement("div", {
+ }, /*#__PURE__*/React.createElement("span", null, "IMC"), /*#__PURE__*/React.createElement("span", null, report.body.bmi == null ? "—" : report.body.bmi)), /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Massa muscular"), /*#__PURE__*/React.createElement("span", null, report.body.muscle, " kg (", report.body.muscleDiff >= 0 ? "↑" : "↓", Math.abs(report.body.muscleDiff), ")")), /*#__PURE__*/React.createElement("p", {
+ }, /*#__PURE__*/React.createElement("span", null, "Massa muscular"), /*#__PURE__*/React.createElement("span", null, report.body.muscle == null ? "—" : report.body.muscle + " kg (" + (report.body.muscleDiff >= 0 ? "↑" : "↓") + Math.abs(report.body.muscleDiff) + ")")), /*#__PURE__*/React.createElement("p", {
  style: {
  marginTop: 8
  }
@@ -5225,6 +5122,9 @@ function Report({
 }
 function buildReport(state) {
  const week = weekFromMonday(state.days);
+ const weekStart = week[0].key;
+ const weekEnd = week[week.length - 1].key;
+ const weekLabel = weekStart + " → " + weekEnd;
  const consistency = +(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7).toFixed(1);
  const sumQty = (id, days) => days.reduce((a, w) => a + (w.day && w.day.tasks[id] ? w.day.tasks[id].value || 0 : 0), 0);
  const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
@@ -5268,14 +5168,14 @@ function buildReport(state) {
  const wNote = treinos >= 5 ? "Excelente frequência. " : treinos > 0 ? "Frequência abaixo do alvo de 5. " : "";
  const progNote = tot > 0 ? up >= tot * 0.5 ? "Estás a subir a carga na maioria dos exercícios — progressão sólida." : "A carga está estável — considera subir peso ou reps onde já dominas a técnica." : "Regista os treinos para acompanhar a progressão de carga.";
  // body
- const body = [...state.body].sort((a, b) => a.date.localeCompare(b.date));
- const last = body[body.length - 1];
- const weekAgo = body.filter(b => b.date <= iso(addDays(TODAY, -6))).pop() || body[0];
- const grams = Math.round((weekAgo.weight - last.weight) * 1000);
+ const body = [...(state.body || [])].sort((a, b) => a.date.localeCompare(b.date));
+ const last = body[body.length - 1] || null;
+ const weekAgo = last ? (body.filter(b => b.date <= iso(addDays(TODAY, -6))).pop() || body[0]) : null;
+ const grams = last && weekAgo ? Math.round((weekAgo.weight - last.weight) * 1000) : 0;
  const prevBody = body.length > 1 ? body[body.length - 2] : last;
- const bfDiff = +(last.bodyFat - prevBody.bodyFat).toFixed(1);
- const muscleDiff = +(last.muscle - prevBody.muscle).toFixed(1);
- const bodyNote = grams > 0 && last.bodyFat <= prevBody.bodyFat ? "Perda de gordura no bom ritmo, mantendo (ou ganhando) músculo — exatamente o que queres para os " + state.profile.bfTarget + "%." : "Ritmo mais lento esta semana. O peso oscila com água/ciclo; olha a tendência de várias semanas, não um dia.";
+ const bfDiff = last && prevBody ? +(last.bodyFat - prevBody.bodyFat).toFixed(1) : 0;
+ const muscleDiff = last && prevBody ? +(last.muscle - prevBody.muscle).toFixed(1) : 0;
+ const bodyNote = !last ? "Ainda não existem medições corporais suficientes para analisar a evolução." : grams > 0 && last.bodyFat <= prevBody.bodyFat ? "A tendência recente combina com perda de peso e redução/estabilidade da gordura corporal." : "Usa a tendência de várias medições; um único registo pode oscilar com água e outros fatores.";
  // patterns / science
  const patterns = ["Em geral, estudos associam treino regular e boa hidratação a melhor humor, energia e produtividade — os teus dados são o teste real para ti."];
  // strong / opps / recs
@@ -5294,7 +5194,9 @@ function buildReport(state) {
  const summary = "Esta semana cumpriste " + consistency + "% do que planeaste. Fizeste " + treinos + " treino(s) e bebeste em média " + waterAvg + "L de água. " + (consistency >= 75 ? "Estás a construir uma rotina forte rumo aos " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + "." : "Uma semana para consolidar hábitos — pequenos ajustes fazem grande diferença até lá.");
  // hoje: corpo e treino
  const trainedToday = trainedOn(state, todayKey);
- const todaySummary = "Hoje " + (trainedToday ? "já treinaste" : "ainda não treinaste") + ". O teu peso atual é " + last.weight + "kg, com " + last.bodyFat + "% de gordura e IMC " + last.bmi + ".";
+ const todaySummary = !last
+  ? "Ainda não existem medições corporais. Regista uma medição no menu Corpo para acompanhar peso, gordura, IMC e massa muscular."
+  : "Hoje " + (trainedToday ? "já treinaste" : "ainda não treinaste") + ". O teu peso atual é " + last.weight + "kg, com " + last.bodyFat + "% de gordura e IMC " + last.bmi + ".";
  const goalResults = GOALS.map(g => ({
  g,
  ...computeGoal(g, state)
