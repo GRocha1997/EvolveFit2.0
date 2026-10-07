@@ -185,7 +185,7 @@ window.evfSetCloudStatus=function(status){
 };
 window.evfRegisterSW=async function(){
   if(!("serviceWorker" in navigator)) return null;
-  try{var chk=await fetch("./sw.js",{method:"HEAD",cache:"no-store"});if(!chk.ok)return null;return await navigator.serviceWorker.register("./sw.js",{scope:"./"});}catch(e){return null;}
+  try{return await navigator.serviceWorker.register("./sw.js",{scope:"./"});}catch(e){console.warn("Service worker:",e);return null;}
 };
 window.evfRequestWakeLock=async function(){
   try{
@@ -216,14 +216,6 @@ document.addEventListener("visibilitychange",async()=>{
 });
 </script>
 
-<style id="ef-save-css">
-.ef-save{width:100%;margin-top:12px;padding:13px;border-radius:13px;border:none;background:var(--coral);color:#fff;font-size:14px;font-weight:650;cursor:pointer;font-family:inherit;transition:opacity .15s,background .15s}
-.ef-save:disabled{opacity:.45;cursor:default}
-.ef-save.ok{background:var(--green);opacity:1}
-.ef-save.sticky{position:sticky;bottom:calc(76px + env(safe-area-inset-bottom));z-index:20;box-shadow:var(--shadow-lg)}
-.ef-text-btn{width:auto!important;padding:0 14px!important;font-size:13px;font-weight:650}
-.water-custom button.ef-save-water{width:auto;padding:0 16px;font-size:14px;font-weight:650}
-</style>
 </head><body><div id="root"></div><script>
 /**
  * @license React
@@ -560,41 +552,68 @@ const normDecInput = s => {
  return s.slice(0, i + 1) + s.slice(i + 1).replace(/,/g, "");
 };
 const OLD_SHARED_KEY = "lifeos_v4_goncalo"; // chave usada antes desta correção
+const DEVICE_BACKUP_KEY = BASE_KEY + "_device_backup";
+
 const load = uid => {
  try {
- const k = keyFor(uid);
- let r = localStorage.getItem(k);
- // Migração única: se ainda não há nada na chave nova mas existem dados
- // na chave antiga (partilhada), copia-os para a chave nova para não
- // perder o histórico.
- if (!r) {
- const old = localStorage.getItem(OLD_SHARED_KEY);
- if (old) {
- localStorage.setItem(k, old);
- r = old;
- }
- }
- if (!r) {
- let best = null, bl = 0;
- for (let i = 0; i < localStorage.length; i++) {
- const kk = localStorage.key(i);
- if (kk && kk.indexOf(BASE_KEY) === 0 && kk !== k && kk !== OLD_SHARED_KEY) {
- const v = localStorage.getItem(kk);
- if (v && v.length > bl) { try { const o = JSON.parse(v); if (o && o.sessions) { best = v; bl = v.length; } } catch (e) {} }
- }
- }
- if (best) { localStorage.setItem(k, best); r = best; }
- }
- return r ? JSON.parse(r) : null;
+   const candidates = [];
+   const add = (raw, source) => {
+     if (!raw) return;
+     try {
+       const obj = JSON.parse(raw);
+       if (obj && typeof obj === "object")
+         candidates.push({obj, source, updatedAt: Number(obj._updatedAt) || 0});
+     } catch (e) {}
+   };
+
+   add(localStorage.getItem(keyFor(uid)), "account");
+   if (!candidates.length) add(localStorage.getItem(OLD_SHARED_KEY), "old");
+   add(localStorage.getItem(DEVICE_BACKUP_KEY), "device");
+
+   if (!candidates.length) {
+     let best = null, bestLen = 0;
+     for (let i = 0; i < localStorage.length; i++) {
+       const kk = localStorage.key(i);
+       if (kk && kk.indexOf(BASE_KEY) === 0 &&
+           kk !== keyFor(uid) && kk !== OLD_SHARED_KEY &&
+           kk !== DEVICE_BACKUP_KEY) {
+         const raw = localStorage.getItem(kk);
+         if (raw && raw.length > bestLen) {
+           try {
+             const o = JSON.parse(raw);
+             if (o && o.sessions) { best = raw; bestLen = raw.length; }
+           } catch (e) {}
+         }
+       }
+     }
+     add(best, "legacy");
+   }
+
+   if (!candidates.length) return null;
+   candidates.sort((x,y) => y.updatedAt - x.updatedAt);
+   const winner = candidates[0].obj;
+   const payload = JSON.stringify(winner);
+   try {
+     localStorage.setItem(keyFor(uid), payload);
+     localStorage.setItem(DEVICE_BACKUP_KEY, payload);
+   } catch (e) {}
+   return winner;
  } catch (e) {
- return null;
+   console.error("Erro ao carregar dados:", e);
+   return null;
  }
 };
+
 const save = (s, uid) => {
  try {
- localStorage.setItem(keyFor(uid), JSON.stringify(s));
- } catch (e) {}
+   const payload = JSON.stringify(s);
+   localStorage.setItem(keyFor(uid), payload);
+   localStorage.setItem(DEVICE_BACKUP_KEY, payload);
+ } catch (e) {
+   console.error("Erro de persistência local:", e);
+ }
 };
+
 /* Garante que um estado guardado (possivelmente antigo/incompleto) tem todos os campos.
  Isto evita crashes e registos "a zero" quando a estrutura mudou entre versões. */
 function normalize(s) {
@@ -1879,28 +1898,6 @@ const Bar = ({
  background: color
  }
 }));
-function SaveBtn({
- dirty,
- onSave,
- label,
- sticky
-}) {
- const [ok, setOk] = useState(false);
- useEffect(() => {
-   if (!ok) return;
-   const t = setTimeout(() => setOk(false), 1600);
-   return () => clearTimeout(t);
- }, [ok]);
- return React.createElement("button", {
-   type: "button",
-   className: "ef-save" + (ok ? " ok" : "") + (sticky ? " sticky" : ""),
-   disabled: !dirty && !ok,
-   onClick: () => {
-     onSave();
-     setOk(true);
-   }
- }, ok ? "✓ Guardado" : label || "Guardar");
-}
 function QtyInput({
  value,
  unit,
@@ -1984,6 +1981,24 @@ function Dashboard({
  const stateRef = useRef(state);
  const scrollRef = useRef(null);
  stateRef.current = state;
+
+ // Quando o Firebase termina de autenticar, carregar explicitamente
+ // os dados persistidos dessa conta.
+ useEffect(() => {
+   if (!uid) return;
+   const savedForUser = load(uid);
+   if (!savedForUser) return;
+   const normalized = normalize(savedForUser);
+   if (!normalized) return;
+
+   const currentAt = Number(stateRef.current && stateRef.current._updatedAt) || 0;
+   const savedAt = Number(normalized._updatedAt) || 0;
+
+   if (savedAt >= currentAt) {
+     stateRef.current = normalized;
+     setState(normalized);
+   }
+ }, [uid]);
  // Volta ao topo sempre que mudas de separador, em vez de manter a posição
  // de scroll do separador anterior (o que fazia abrir "a meio" o ecrã).
  useEffect(() => {
@@ -2026,13 +2041,18 @@ function Dashboard({
  const localUpdatedAt = stateRef.current._updatedAt || 0;
  const remoteUpdatedAt = remote._updatedAt || 0;
  if (remoteUpdatedAt < localUpdatedAt) {
- // O local tem uma edição mais recente que ainda não chegou à
- // nuvem (ex: debounce em curso, ou estávamos offline). Não
- // sobrepor — o próximo write local vai corrigir a nuvem.
- return;
+   return;
+ }
+ if (remoteUpdatedAt === localUpdatedAt &&
+     j !== JSON.stringify(stateRef.current)) {
+   return;
  }
  syncedJson.current = j;
- setState(normalize(remote));
+ const normalizedRemote = normalize(remote);
+ if (normalizedRemote) {
+   stateRef.current = normalizedRemote;
+   setState(normalizedRemote);
+ }
  }
  }, err => console.error("Erro de sincronização:", err));
  return unsub;
@@ -2226,19 +2246,6 @@ function Checklist({
  value: num
  };
  });
- const saveQtys = map => update(s => {
-   s.days[viewKey] = s.days[viewKey] || {
-     tasks: {},
-     water: 0
-   };
-   const t = s.days[viewKey].tasks;
-   Object.entries(map).forEach(([id, num]) => {
-     if (!num || num <= 0) delete t[id];else t[id] = {
-       done: true,
-       value: num
-     };
-   });
- });
  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("header", {
  className: "head"
  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
@@ -2302,7 +2309,6 @@ function Checklist({
  day: day,
  toggle: toggle,
  setQty: setQty,
- saveQtys: saveQtys,
  dayKey: viewKey
  })), /*#__PURE__*/React.createElement("div", {
  className: "pad"
@@ -2421,27 +2427,24 @@ function WaterCard({
  placeholder: "ml personalizado",
  inputMode: "numeric"
  }), /*#__PURE__*/React.createElement("button", {
- className: "ef-save-water",
  onClick: () => {
  if (custom) {
  add(+custom);
  setCustom("");
  }
  }
- }, "Guardar")));
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "plus",
+ size: 16
+ }))));
 }
 function Section({
  sec,
  day,
  toggle,
  setQty,
- saveQtys,
  dayKey
 }) {
- const [drafts, setDrafts] = useState({});
- useEffect(() => {
-   setDrafts({});
- }, [dayKey]);
  const [open, setOpen] = useState(() => {
  const ts = sec.chores ? choresForKey(dayKey || todayKey) : sec.tasks || [];
  return !(ts.length && ts.every(t => isDone(day.tasks[t.id], t)));
@@ -2532,10 +2535,7 @@ function Section({
  value: day.tasks[t.id] ? day.tasks[t.id].value : 0,
  unit: t.unit,
  decimal: t.unit === "h",
- onCommit: n => setDrafts(d => ({
-     ...d,
-     [t.id]: n
-   }))
+ onCommit: n => setQty(t.id, n)
  })) : /*#__PURE__*/React.createElement("button", {
  key: t.id,
  className: "task" + (day.tasks[t.id] && day.tasks[t.id].done ? " done" : ""),
@@ -2552,13 +2552,7 @@ function Section({
  }, /*#__PURE__*/React.createElement(I, {
  name: "target",
  size: 10
- })))))), all.some(t => t.qty) && /*#__PURE__*/React.createElement(SaveBtn, {
-   dirty: Object.keys(drafts).length > 0,
-   onSave: () => {
-     saveQtys(drafts);
-     setDrafts({});
-   }
- })));
+ }))))))));
 }
 /* Caixa de cardio semanal: check + minutos por dia, ligada aos mesmos dados
  da tarefa "Cardio" do checklist diário. */
@@ -2566,20 +2560,6 @@ function CardioWeekCard({
  state,
  update
 }) {
- const [drafts, setDrafts] = useState({});
- const saveMins = map => update(s => {
-   Object.entries(map).forEach(([key, num]) => {
-     s.days[key] = s.days[key] || {
-       tasks: {},
-       water: 0
-     };
-     const t = s.days[key].tasks;
-     if (!num || num <= 0) delete t.cardio;else t.cardio = {
-       done: true,
-       value: num
-     };
-   });
- });
  const weekDays = lastNDays(state.days, 7);
  const total = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
  const toggle = key => update(s => {
@@ -2625,17 +2605,8 @@ function CardioWeekCard({
  key: w.key
  }, /*#__PURE__*/React.createElement("button", {
  className: "checkbox" + (checked ? " on" : ""),
- onClick: () => {
-     setDrafts(d => {
-       const c = {
-         ...d
-       };
-       delete c[w.key];
-       return c;
-     });
-     toggle(w.key);
-   },
-   "aria-label": "Marcar cardio de " + WD[weekdayOf(w.key)]
+ onClick: () => toggle(w.key),
+ "aria-label": "Marcar cardio de " + WD[weekdayOf(w.key)]
  }, checked && /*#__PURE__*/React.createElement(I, {
  name: "check",
  size: 13
@@ -2644,17 +2615,8 @@ function CardioWeekCard({
  }, WD[weekdayOf(w.key)], /*#__PURE__*/React.createElement("i", null, new Date(w.key + "T12:00:00").getDate(), isToday ? " · hoje" : "")), /*#__PURE__*/React.createElement(QtyInput, {
  value: val,
  unit: "min",
- onCommit: n => setDrafts(d => ({
-     ...d,
-     [w.key]: n
-   }))
+ onCommit: n => setMin(w.key, n)
  }));
- }), /*#__PURE__*/React.createElement(SaveBtn, {
-   dirty: Object.keys(drafts).length > 0,
-   onSave: () => {
-     saveMins(drafts);
-     setDrafts({});
-   }
  }));
 }
 /* =============================== TREINOS ================================ */
@@ -2713,30 +2675,13 @@ function Workouts({
  s.days[todayKey].tasks = s.days[todayKey].tasks || {};
  s.days[todayKey].tasks.forca = { done:true, value:1 };
  });
- const [planDraft, setPlanDraft] = useState(null);
- const planView = planDraft || plano;
- const editPlan = fn => setPlanDraft(prev => {
-   const base = clone(prev || plano);
-   fn({
-     plano: base
-   });
-   return base;
- });
- const savePlan = () => {
-   if (!planDraft) return;
-   const novo = clone(planDraft);
-   update(s => {
-     s.plano = novo;
-   });
-   setPlanDraft(null);
- };
- const setPlanEx = (di, xi, f, val) => editPlan(s => {
+ const setPlanEx = (di, xi, f, val) => update(s => {
  s.plano[di].ex[xi][f] = f === "name" || f === "notes" ? val : f === "weight" ? normDecInput(val) : parseInt(val, 10) || 0;
  });
- const setPlanName = (di, val) => editPlan(s => {
+ const setPlanName = (di, val) => update(s => {
  s.plano[di].name = val;
  });
- const addPlanEx = di => editPlan(s => s.plano[di].ex.push({
+ const addPlanEx = di => update(s => s.plano[di].ex.push({
  name: "",
  sets: 3,
  reps: 10,
@@ -2744,8 +2689,8 @@ function Workouts({
  weight: 0,
  rir: DEFAULT_RIR
  }));
- const delPlanEx = (di, xi) => editPlan(s => s.plano[di].ex.splice(xi, 1));
- const reorderPlanEx = (di, order) => editPlan(s => {
+ const delPlanEx = (di, xi) => update(s => s.plano[di].ex.splice(xi, 1));
+ const reorderPlanEx = (di, order) => update(s => {
  s.plano[di].ex = order.map(i => s.plano[di].ex[i]);
  });
  const daySessions = [...state.sessions].filter(s => s.dayIdx === sel).sort((a, b) => a.date.localeCompare(b.date));
@@ -2857,18 +2802,13 @@ function Workouts({
  onClick: () => setPlanDay(i)
  }, d.day.slice(0, 3)))), /*#__PURE__*/React.createElement(PlanDayCard, {
  key: planDay,
- d: planView[planDay],
+ d: plano[planDay],
  di: planDay,
  onEditName: setPlanName,
  onEditField: setPlanEx,
  onAdd: addPlanEx,
  onDelete: delPlanEx,
  onReorder: reorderPlanEx
- }), /*#__PURE__*/React.createElement(SaveBtn, {
-   dirty: !!planDraft,
-   label: "Guardar plano",
-   sticky: true,
-   onSave: savePlan
  })), /*#__PURE__*/React.createElement("div", {
  className: "pad"
  }));
@@ -3900,11 +3840,11 @@ function Body({
  fontStyle: "normal"
  }
  }, "%"))), /*#__PURE__*/React.createElement("button", {
- className: editStart ? "theme-toggle ef-text-btn" : "theme-toggle",
+ className: "theme-toggle",
  "aria-label": editStart ? "Guardar ponto de partida" : "Editar ponto de partida",
  onClick: () => editStart ? saveStart() : setEditStart(true)
- }, editStart ? "Guardar" : /*#__PURE__*/React.createElement(I, {
- name: "edit",
+ }, /*#__PURE__*/React.createElement(I, {
+ name: editStart ? "check" : "edit",
  size: 17
  }))), /*#__PURE__*/React.createElement("div", {
  className: "card",
@@ -3963,11 +3903,11 @@ function Body({
  fontStyle: "normal"
  }
  }, "%"))), /*#__PURE__*/React.createElement("button", {
- className: editGoal ? "theme-toggle ef-text-btn" : "theme-toggle",
+ className: "theme-toggle",
  "aria-label": editGoal ? "Guardar objetivo" : "Editar objetivo",
  onClick: () => editGoal ? saveGoal() : setEditGoal(true)
- }, editGoal ? "Guardar" : /*#__PURE__*/React.createElement(I, {
- name: "edit",
+ }, /*#__PURE__*/React.createElement(I, {
+ name: editGoal ? "check" : "edit",
  size: 17
  }))), /*#__PURE__*/React.createElement("div", {
  className: "card",
@@ -4008,11 +3948,11 @@ function Body({
  textTransform: "capitalize"
  }
  }, longDate(new Date(state.profile.targetDate)))), /*#__PURE__*/React.createElement("button", {
- className: editDate ? "theme-toggle ef-text-btn" : "theme-toggle",
+ className: "theme-toggle",
  "aria-label": editDate ? "Guardar data" : "Editar data",
  onClick: () => editDate ? saveDate() : setEditDate(true)
- }, editDate ? "Guardar" : /*#__PURE__*/React.createElement(I, {
- name: "edit",
+ }, /*#__PURE__*/React.createElement(I, {
+ name: editDate ? "check" : "edit",
  size: 17
  }))), form && /*#__PURE__*/React.createElement("div", {
  className: "card form"
@@ -4234,21 +4174,6 @@ function Coach2027({ state, update, onNavigate }) {
  const n = Math.max(0, Number(String(value).replace(",", ".")) || 0);
  s.days[todayKey].tasks[id] = {done:n>0,value:n};
  });
- const [nutDraft,setNutDraft] = useState({});
- const nv = id => (id in nutDraft) ? nutDraft[id] : (taskVal(id) || "");
- const setNv = (id,v) => setNutDraft(d=>({...d,[id]:String(v).replace(/[^0-9.,]/g,"")}));
- const saveNut = () => {
-   const draft = nutDraft;
-   update(s => {
-     if (!s.days[todayKey]) s.days[todayKey] = {tasks:{},water:0};
-     if (!s.days[todayKey].tasks) s.days[todayKey].tasks = {};
-     Object.entries(draft).forEach(([id,v])=>{
-       const n = Math.max(0, Number(String(v).replace(",", ".")) || 0);
-       s.days[todayKey].tasks[id] = {done:n>0,value:n};
-     });
-   });
-   setNutDraft({});
- };
  const body = [...(state.body || [])].sort((a,b)=>a.date.localeCompare(b.date));
  const latest = body.length ? body[body.length-1] : null;
  const firstBody = body.length ? body[0] : null;
@@ -4514,12 +4439,21 @@ function Coach2027({ state, update, onNavigate }) {
 
  return /*#__PURE__*/React.createElement("div",null,
  /*#__PURE__*/React.createElement(TabHead,{title:"Coach 2027",sub:"Decisões com base nos teus dados"}),
- 
+ /*#__PURE__*/React.createElement(WeeklyCoachInsights,{state:state}),
  /*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
  /*#__PURE__*/React.createElement("div",{className:"coach27-badge"}," Verão 2027"),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"26px",fontWeight:800,marginTop:"10px"}},status),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",opacity:.9,marginTop:"7px",lineHeight:1.45}},decision),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",opacity:.8,marginTop:"10px"}},daysToGoal," dias até ",prof.summerTargetDate||"2027-06-01")
+ ),
+ /*#__PURE__*/React.createElement("div",{className:"card coach27-connect"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Ações rápidas"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-connect-grid"},
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("check")},"Hoje"),
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("workout")},"Treinos"),
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("body")},"Corpo"),
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("report")},"Relatório")
+ )
  ),
  /*#__PURE__*/React.createElement("div",{className:"card evf-ai-card"},
    /*#__PURE__*/React.createElement("div",{className:"evf-ai-top"},
@@ -4591,12 +4525,11 @@ function Coach2027({ state, update, onNavigate }) {
  /*#__PURE__*/React.createElement("div",{className:"card"},
  /*#__PURE__*/React.createElement("div",{className:"pc-title",style:{marginBottom:"12px"}}," Hoje — nutrição"),
  /*#__PURE__*/React.createElement("div",{className:"coach27-actions"},
- numInput("Calorias",nv("calorias_in"),v=>setNv("calorias_in",v),"kcal"),
- numInput("Proteína",nv("proteina"),v=>setNv("proteina",v),"g"),
- numInput("Gordura",nv("gordura_in"),v=>setNv("gordura_in",v),"g"),
- numInput("Passos",nv("passos"),v=>setNv("passos",v),"")
+ numInput("Calorias",taskVal("calorias_in"),v=>setTaskVal("calorias_in",v),"kcal"),
+ numInput("Proteína",taskVal("proteina"),v=>setTaskVal("proteina",v),"g"),
+ numInput("Gordura",taskVal("gordura_in"),v=>setTaskVal("gordura_in",v),"g"),
+ numInput("Passos",taskVal("passos"),v=>setTaskVal("passos",v),"")
  ),
- /*#__PURE__*/React.createElement(SaveBtn,{dirty:Object.keys(nutDraft).length>0,onSave:saveNut}),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"10px",lineHeight:1.45}},
  "Alvos: ",prof.kcalTarget||2350," kcal · ",prof.proteinTarget||170," g proteína · ",prof.fatTarget||70," g gordura · ",prof.stepsTarget||9000," passos."
  )
@@ -4742,6 +4675,53 @@ function efPearson(xs, ys){
   let num=0,dx=0,dy=0;
   for(let i=0;i<n;i++){const a=xs[i]-ax,b=ys[i]-ay;num+=a*b;dx+=a*a;dy+=b*b;}
   return dx&&dy ? num/Math.sqrt(dx*dy) : null;
+}
+function WeeklyCoachInsights({state}){
+  const days=lastNDays(state.days,7);
+  const paired=(id,fn)=>days.map(w=>{
+    const d=w.day||{tasks:{},water:0};
+    const v=id==="water" ? Number(d.water||0)/1000 : Number(d.tasks&&d.tasks[id]&&d.tasks[id].value||0);
+    return {v,score:dayPct(d,w.key)};
+  }).filter(x=>x.v>0);
+  const metrics=[
+    ["Sono","sono","h"],
+    ["Passos","passos",""],
+    ["Proteína","proteina","g"],
+    ["Água","water","L"]
+  ];
+  const corrs=metrics.map(([name,id,unit])=>{
+    const p=paired(id); return {name,id,unit,n:p.length,r:efPearson(p.map(x=>x.v),p.map(x=>x.score))};
+  }).filter(x=>x.r!=null).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  const wk=weekFromMonday(state.days);
+  const sessions=(state.sessions||[]).filter(s=>wk.some(w=>w.key===s.date)).length;
+  const consistency=Math.round(days.reduce((a,w)=>a+dayPct(w.day,w.key),0)/7);
+  const body=[...(state.body||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  const last=body.at(-1), prev=body.at(-2);
+  const suggestion = consistency<65 ? "Prioridade: melhorar consistência antes de alterar o plano."
+    : sessions<4 ? "Prioridade: recuperar a frequência de treino esta semana."
+    : last&&prev&&last.weight<prev.weight ? "Tendência favorável: mantém a estratégia e volta a avaliar com mais dados."
+    : "Mantém o plano atual e usa tendência semanal, não um único dia, para decidir ajustes.";
+  const weekKey=iso(addDays(TODAY,-((TODAY.getDay()+6)%7)));
+  useEffect(()=>{try{
+    const k="evolvefit_weekly_reports_v1";
+    const arr=JSON.parse(localStorage.getItem(k)||"[]");
+    if(!arr.some(x=>x.week===weekKey)){arr.push({week:weekKey,generatedAt:Date.now(),consistency,sessions,suggestion});localStorage.setItem(k,JSON.stringify(arr.slice(-26)));}
+  }catch(e){}},[weekKey,consistency,sessions,suggestion]);
+  return /*#__PURE__*/React.createElement("div",{className:"card"},
+    /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Relatório semanal automático"),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},consistency+"%"), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"consistência · últimos 7 dias")),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},sessions+" treino"+(sessions===1?"":"s")), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"esta semana"))
+    ),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px",fontWeight:650,color:"var(--text)"}},suggestion),
+    corrs.length ? /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Correlações dos teus dados"),
+      corrs.map((c,i)=>/*#__PURE__*/React.createElement("div",{className:"ef-corr",key:c.id},
+        c.name,": ",c.r>0?"associação positiva ":"associação inversa ","(",Math.abs(c.r).toFixed(2),", ",c.n," dias)."
+      )),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Correlação não prova causalidade; usa estes padrões como pistas para testar ao longo de várias semanas.")
+    ) : /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px"}},"Regista pelo menos 3 dias comparáveis de sono, passos, proteína ou água para calcular correlações.")
+  );
 }
 function EvolveFitSystemCard({state,user,update}){
   const [online,setOnline]=useState(navigator.onLine);
