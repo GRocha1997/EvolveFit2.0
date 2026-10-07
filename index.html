@@ -2294,7 +2294,7 @@ function Dashboard({
  update: update,
  user: user,
  onNavigate: onNavigate
-}), tab === "report" && /*#__PURE__*/React.createElement(TargetsCard, { state: state, update: update })),/*#__PURE__*/React.createElement("nav", {
+})),/*#__PURE__*/React.createElement("nav", {
  className: "tabbar"
  }, tabs.map(t => /*#__PURE__*/React.createElement("button", {
  key: t.id,
@@ -4973,7 +4973,9 @@ function Report({
  const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
  const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= ((state.profile.waterTarget || 3) * 1000));
  const workoutStreak = streak(state.days, (d, k) => trainedOn(state, k));
- return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
+ const [rview,setRview] = useState("resumo");
+ return /*#__PURE__*/React.createElement("div", null,
+/*#__PURE__*/React.createElement(TabHead, {
  title: "Relatórios",
  sub: "Dados da app · " + report.weekLabel,
  right: /*#__PURE__*/React.createElement("button", {
@@ -4999,14 +5001,18 @@ function Report({
  })) : /*#__PURE__*/React.createElement("path", {
  d: "M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"
  })))
- }), /*#__PURE__*/React.createElement("div", {
+ }),
+/*#__PURE__*/React.createElement("div",{className:"seg"},[["resumo","Resumo"],["detalhe","Detalhe"],["alvos","Alvos e conta"]].map(function(x){return /*#__PURE__*/React.createElement("button",{key:x[0],className:"seg-b"+(rview===x[0]?" on":""),onClick:function(){setRview(x[0]);}},x[1]);})),
+rview==="resumo" && /*#__PURE__*/React.createElement(React.Fragment,null,
+/*#__PURE__*/React.createElement("div", {
  className: "card coach"
  }, /*#__PURE__*/React.createElement("div", {
  className: "coach-tag"
  }, /*#__PURE__*/React.createElement(I, {
  name: "zap",
  size: 14
- }), " Resumo do Dia"), /*#__PURE__*/React.createElement("p", null, coach)), /*#__PURE__*/React.createElement("div", {
+ }), " Resumo do Dia"), /*#__PURE__*/React.createElement("p", null, coach)),
+/*#__PURE__*/React.createElement("div", {
  className: "streaks"
  }, /*#__PURE__*/React.createElement(StreakPill, {
  v: checkStreak,
@@ -5020,15 +5026,9 @@ function Report({
  v: waterStreak,
  l: "Água",
  c: "#2A8FD6"
- })), /*#__PURE__*/React.createElement(GitCal, {
- days: state.days
- }), /*#__PURE__*/React.createElement(EvolveFitSystemCard, {
- state: state,
- user: user,
- update: update
- }), /*#__PURE__*/React.createElement("div", {
- className: "report-body"
- }, /*#__PURE__*/React.createElement(ReportBlock, {
+ })),
+/*#__PURE__*/React.createElement("div",{className:"report-body"},
+/*#__PURE__*/React.createElement(ReportBlock, {
  title: "Resumo geral"
  }, /*#__PURE__*/React.createElement("div", {
  className: "big-stat"
@@ -5045,9 +5045,53 @@ function Report({
  marginTop: 8,
  fontWeight: 600
  }
- }, report.todaySummary)), /*#__PURE__*/React.createElement(ReportBlock, {
+ }, report.todaySummary)),
+/*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Objetivos semanais"
+ }, report.goalResults.map(({
+ g,
+ value,
+ pct
+ }) => {
+ const done = pct >= 100;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "rg-row",
+ key: g.id
+ }, /*#__PURE__*/React.createElement("span", null, g.label), /*#__PURE__*/React.createElement("span", {
+ className: done ? "good" : pct >= 60 ? "" : "warn"
+ }, goalLabel(g, value), " ", done ? "" : pct >= 60 ? "" : "!"));
+ })),
+/*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Pontos fortes",
+ tint: "green"
+ }, /*#__PURE__*/React.createElement("ul", null, report.strong.map((s, i) => /*#__PURE__*/React.createElement("li", {
+ key: i
+ }, s)))),
+/*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Oportunidades de melhoria",
+ tint: "amber"
+ }, /*#__PURE__*/React.createElement("ul", null, report.opps.map((s, i) => /*#__PURE__*/React.createElement("li", {
+ key: i
+ }, s)))),
+/*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Recomendações",
+ tint: "violet"
+ }, /*#__PURE__*/React.createElement("ul", null, report.recs.map((s, i) => /*#__PURE__*/React.createElement("li", {
+ key: i
+ }, s)))),
+/*#__PURE__*/React.createElement("div", {
+ className: "disclaimer"
+ }, "Análises informativas geradas a partir dos teus registos — não substituem aconselhamento médico profissional.")
+)),
+rview==="detalhe" && /*#__PURE__*/React.createElement(React.Fragment,null,
+/*#__PURE__*/React.createElement(GitCal, {
+ days: state.days
+ }),
+/*#__PURE__*/React.createElement("div",{className:"report-body"},
+/*#__PURE__*/React.createElement(ReportBlock, {
  title: "Água"
- }, /*#__PURE__*/React.createElement("p", null, "Média de ", /*#__PURE__*/React.createElement("b", null, report.waterAvg, "L"), "/dia. Objetivo atingido em ", /*#__PURE__*/React.createElement("b", null, report.waterDays, "/7"), " dias.")), /*#__PURE__*/React.createElement(ReportBlock, {
+ }, /*#__PURE__*/React.createElement("p", null, "Média de ", /*#__PURE__*/React.createElement("b", null, report.waterAvg, "L"), "/dia. Objetivo atingido em ", /*#__PURE__*/React.createElement("b", null, report.waterDays, "/7"), " dias.")),
+/*#__PURE__*/React.createElement(ReportBlock, {
  title: "Treino",
  tint: "teal"
  }, /*#__PURE__*/React.createElement("div", {
@@ -5064,7 +5108,8 @@ function Report({
  style: {
  marginTop: 8
  }
- }, report.workout.note)), /*#__PURE__*/React.createElement(ReportBlock, {
+ }, report.workout.note)),
+/*#__PURE__*/React.createElement(ReportBlock, {
  title: "Corpo"
  }, /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
@@ -5080,43 +5125,25 @@ function Report({
  style: {
  marginTop: 8
  }
- }, report.body.note)), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Objetivos semanais"
- }, report.goalResults.map(({
- g,
- value,
- pct
- }) => {
- const done = pct >= 100;
- return /*#__PURE__*/React.createElement("div", {
- className: "rg-row",
- key: g.id
- }, /*#__PURE__*/React.createElement("span", null, g.label), /*#__PURE__*/React.createElement("span", {
- className: done ? "good" : pct >= 60 ? "" : "warn"
- }, goalLabel(g, value), " ", done ? "" : pct >= 60 ? "" : "!"));
- })), /*#__PURE__*/React.createElement(ReportBlock, {
+ }, report.body.note)),
+/*#__PURE__*/React.createElement(ReportBlock, {
  title: "Padrões & ciência",
  tint: "violet"
  }, report.patterns.map((s, i) => /*#__PURE__*/React.createElement("p", {
  key: i
- }, s))), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Pontos fortes",
- tint: "green"
- }, /*#__PURE__*/React.createElement("ul", null, report.strong.map((s, i) => /*#__PURE__*/React.createElement("li", {
- key: i
- }, s)))), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Oportunidades de melhoria",
- tint: "amber"
- }, /*#__PURE__*/React.createElement("ul", null, report.opps.map((s, i) => /*#__PURE__*/React.createElement("li", {
- key: i
- }, s)))), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Recomendações",
- tint: "violet"
- }, /*#__PURE__*/React.createElement("ul", null, report.recs.map((s, i) => /*#__PURE__*/React.createElement("li", {
- key: i
- }, s)))), /*#__PURE__*/React.createElement("div", {
+ }, s))),
+/*#__PURE__*/React.createElement("div", {
  className: "disclaimer"
- }, "Análises informativas geradas a partir dos teus registos — não substituem aconselhamento médico profissional.")), /*#__PURE__*/React.createElement("button", {
+ }, "Análises informativas geradas a partir dos teus registos — não substituem aconselhamento médico profissional.")
+)),
+rview==="alvos" && /*#__PURE__*/React.createElement(React.Fragment,null,
+/*#__PURE__*/React.createElement(TargetsCard,{state:state,update:update}),
+/*#__PURE__*/React.createElement(EvolveFitSystemCard, {
+ state: state,
+ user: user,
+ update: update
+ }),
+/*#__PURE__*/React.createElement("button", {
  className: "reset-btn",
  style: user ? {
  marginBottom: "6px"
@@ -5126,7 +5153,8 @@ function Report({
  onClick: () => {
  if (fbAuth) fbAuth.signOut();
  }
- }, user ? "Terminar sessão (" + (user.email || "conta") + ")" : ""), /*#__PURE__*/React.createElement("button", {
+ }, user ? "Terminar sessão (" + (user.email || "conta") + ")" : ""),
+/*#__PURE__*/React.createElement("button", {
  className: "reset-btn",
  style: {
  color: "var(--coral)"
@@ -5140,7 +5168,9 @@ function Report({
  });
  }
  }
- }, "Eliminar todos os registos"), /*#__PURE__*/React.createElement("div", {
+ }, "Eliminar todos os registos")
+),
+/*#__PURE__*/React.createElement("div", {
  className: "pad"
  }));
 }
