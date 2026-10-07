@@ -824,13 +824,63 @@ async function evolveFitFirebaseIdToken(){
  Regras), que devem garantir que cada conta só lê/escreve os SEUS
  próprios dados, por exemplo:
  match /users/{uid} { allow read, write: if request.auth.uid == uid; } */
-let fbAuth = null,
- fbDb = null;
+const EVOLVEFIT_CLOUD_QUEUE_KEY = "evolvefit_cloud_pending_v1";
+
+function cloudQueueRead(){
+  try { return JSON.parse(localStorage.getItem(EVOLVEFIT_CLOUD_QUEUE_KEY) || "null"); }
+  catch(e){ return null; }
+}
+function cloudQueueWrite(payload){
+  try { localStorage.setItem(EVOLVEFIT_CLOUD_QUEUE_KEY, JSON.stringify(payload)); } catch(e){}
+}
+function cloudQueueClear(){
+  try { localStorage.removeItem(EVOLVEFIT_CLOUD_QUEUE_KEY); } catch(e){}
+}
+
+async function evolveFitCloudSave(uid, state){
+  if(!uid || !fbDb || !state) return false;
+  const payload = toCloud(state);
+  cloudQueueWrite({uid, payload, queuedAt:Date.now()});
+  window.evfSetCloudStatus && window.evfSetCloudStatus(navigator.onLine ? "saving" : "offline");
+  if(!navigator.onLine) return false;
+  try{
+    await fbDb.collection("users").doc(uid).set(payload);
+    cloudQueueClear();
+    window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
+    return true;
+  }catch(e){
+    window.evfSetCloudStatus && window.evfSetCloudStatus("error");
+    console.error("Erro ao guardar na nuvem:",e);
+    return false;
+  }
+}
+
+async function evolveFitFlushCloudQueue(){
+  const q=cloudQueueRead();
+  if(!q || !navigator.onLine || !fbDb || !q.uid || !q.payload) return;
+  try{
+    await fbDb.collection("users").doc(q.uid).set(q.payload);
+    cloudQueueClear();
+    window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
+  }catch(e){
+    window.evfSetCloudStatus && window.evfSetCloudStatus("error");
+    console.error("Erro ao sincronizar fila:",e);
+  }
+}
+
+if(CLOUD_ENABLED){
+  window.addEventListener("online",()=>setTimeout(evolveFitFlushCloudQueue,250));
+}
+
 if (CLOUD_ENABLED) {
  try {
  firebase.initializeApp(firebaseConfig);
  fbAuth = firebase.auth();
  fbDb = firebase.firestore();
+ fbDb.enablePersistence({synchronizeTabs:true})
+   .then(()=>console.log("Firestore offline persistence ativa."))
+   .catch(e=>console.warn("Firestore offline persistence:",e.code||e));
+ evolveFitFlushCloudQueue();
  } catch (e) {
  console.error("Firebase init falhou:", e);
  }
@@ -1976,6 +2026,7 @@ function Dashboard({
  user
 }) {
  const uid = user ? user.uid : null;
+ useEffect(() => { if(uid) evolveFitFlushCloudQueue(); }, [uid]);
  const [state, setState] = useState(() => {
  const saved = load(uid);
  return saved ? normalize(saved) : seed();
@@ -2063,7 +2114,10 @@ function Dashboard({
  if (!uid || !fbDb) return;
  const ref = fbDb.collection("users").doc(uid);
  const unsub = ref.onSnapshot(snap => {
- if (snap.metadata.hasPendingWrites) return; // ignora o eco da própria escrita
+ if (snap.metadata.hasPendingWrites) {
+   window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
+   return;
+ } // ignora o eco da própria escrita
  if (!snap.exists) {
  // Primeira vez nesta conta: envia o estado atual para a nuvem.
  const j = JSON.stringify(stateRef.current);
@@ -2084,13 +2138,17 @@ function Dashboard({
    return;
  }
  syncedJson.current = j;
+ window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
  const normalizedRemote = normalize(remote);
  if (normalizedRemote) {
    stateRef.current = normalizedRemote;
    setState(normalizedRemote);
  }
  }
- }, err => console.error("Erro de sincronização:", err));
+ }, err => {
+   window.evfSetCloudStatus && window.evfSetCloudStatus("error");
+   console.error("Erro de sincronização:", err);
+ });
  return unsub;
  }, [uid]);
  useEffect(() => {
@@ -2103,8 +2161,7 @@ function Dashboard({
  const j = JSON.stringify(state);
  if (j !== syncedJson.current) {
  syncedJson.current = j;
- fbDb.collection("users").doc(uid).set(toCloud(state))
-   .catch(e => console.error("Erro ao guardar na nuvem:", e));
+ evolveFitCloudSave(uid, state);
  }
  }
  }, [state, uid]);
@@ -2121,8 +2178,7 @@ function Dashboard({
      if (!current) return;
      save(current, uid);
      if (uid && fbDb) {
-       fbDb.collection("users").doc(uid).set(toCloud(current))
-         .catch(() => {});
+       evolveFitCloudSave(uid, current);
      }
    } catch (e) {}
  };
@@ -2156,9 +2212,7 @@ function Dashboard({
        const payload = JSON.parse(JSON.stringify(safe));
        syncedJson.current = JSON.stringify(payload);
        window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
-       fbDb.collection("users").doc(uid).set(toCloud(payload))
-         .then(() => window.evfSetCloudStatus && window.evfSetCloudStatus("saved"))
-         .catch(e => { window.evfSetCloudStatus && window.evfSetCloudStatus("error"); console.error("Erro ao guardar na nuvem:", e); });
+       evolveFitCloudSave(uid, payload);
      } catch (e) { console.error("Erro ao preparar sincronização:", e); }
    }
    return safe;
