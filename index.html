@@ -2294,7 +2294,7 @@ function Dashboard({
  update: update,
  user: user,
  onNavigate: onNavigate
-}), tab === "report" && /*#__PURE__*/React.createElement(TargetsCard, { state: state, update: update }), tab !== "goals" && /*#__PURE__*/React.createElement(QuickLinks, { tab: tab, onNavigate: onNavigate })),/*#__PURE__*/React.createElement("nav", {
+}), tab === "report" && /*#__PURE__*/React.createElement(TargetsCard, { state: state, update: update })),/*#__PURE__*/React.createElement("nav", {
  className: "tabbar"
  }, tabs.map(t => /*#__PURE__*/React.createElement("button", {
  key: t.id,
@@ -2319,16 +2319,6 @@ function TargetsCard({ state, update }) {
      fields.map(([k, l]) => React.createElement("label", { key: k, style: { fontSize: 11, fontWeight: 650, color: "var(--muted)" } }, l,
        React.createElement("input", { className: "in", inputMode: "decimal", key: k + "_" + p[k], defaultValue: fmtNum(p[k]), style: { marginTop: 4, width: "100%", textAlign: "center" },
          onBlur: e => { const v = parseNum(e.target.value); if (v > 0) update(s => { s.profile[k] = v; }); } })))));
-}
-
-/* ============================ QUICK LINKS ================================ */
-function QuickLinks({ tab, onNavigate }) {
- const all = [["check","Hoje"],["workout","Treinos"],["body","Corpo"],["goals","Coach"],["report","Relatório"]];
- const items = all.filter(x => x[0] !== tab);
- return React.createElement("div", { style: { margin: "4px 0 12px" } },
-   React.createElement("div", { style: { fontSize: 12, color: "var(--muted)", margin: "0 2px 6px", fontWeight: 650 } }, "Ir para"),
-   React.createElement("div", { style: { display: "grid", gridTemplateColumns: "repeat(" + items.length + ",1fr)", gap: 6 } },
-     items.map(x => React.createElement("button", { key: x[0], className: "coach27-link", onClick: () => onNavigate(x[0]) }, x[1]))));
 }
 
 /* ============================ DAILY CHECKLIST =========================== */
@@ -4447,6 +4437,7 @@ function Coach2027({ state, update, onNavigate }) {
 
 
  const [aiQuestion,setAiQuestion] = useState("");
+ const [cview,setCview] = useState("resumo");
  const [aiAnswer,setAiAnswer] = useState("");
  const [aiBusy,setAiBusy] = useState(false);
  const [aiStatus,setAiStatus] = useState(() => window.EvolveFitLocalAI?.getStatus?.() || {status:"not_loaded",progress:0,error:""});
@@ -4620,24 +4611,41 @@ function Coach2027({ state, update, onNavigate }) {
  );
 
  return /*#__PURE__*/React.createElement("div",null,
- /*#__PURE__*/React.createElement(TabHead,{title:"Coach 2027",sub:"Decisões com base nos teus dados"}),
- /*#__PURE__*/React.createElement(WeeklyCoachInsights,{state:state}),
- /*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
+/*#__PURE__*/React.createElement(TabHead,{title:"Coach 2027",sub:"Decisões com base nos teus dados"}),
+/*#__PURE__*/React.createElement("div",{className:"seg"},[["resumo","Resumo"],["registo","Registo"],["progresso","Progresso"]].map(function(x){return /*#__PURE__*/React.createElement("button",{key:x[0],className:"seg-b"+(cview===x[0]?" on":""),onClick:function(){setCview(x[0]);}},x[1]);})),
+cview==="resumo" && /*#__PURE__*/React.createElement(React.Fragment,null,
+/*#__PURE__*/React.createElement(WeeklyCoachInsights,{state:state}),
+/*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
  /*#__PURE__*/React.createElement("div",{className:"coach27-badge"}," Objetivo"),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"26px",fontWeight:800,marginTop:"10px"}},status),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",opacity:.9,marginTop:"7px",lineHeight:1.45}},decision),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",opacity:.8,marginTop:"10px"}},daysToGoal," dias até ",longDate(new Date(goalDateStr+"T12:00:00"))," · ",/*#__PURE__*/React.createElement("button",{className:"coach27-link",style:{padding:"3px 8px",marginLeft:"4px"},onClick:()=>onNavigate&&onNavigate("body")},"Alterar data"))
  ),
- /*#__PURE__*/React.createElement("div",{className:"card coach27-connect"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Ações rápidas"),
- /*#__PURE__*/React.createElement("div",{className:"coach27-connect-grid"},
-   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("check")},"Hoje"),
-   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("workout")},"Treinos"),
-   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("body")},"Corpo"),
-   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("report")},"Relatório")
+/*#__PURE__*/React.createElement("div",{className:"coach27-grid"},
+ mini(latest&&latest.weight?latest.weight+" kg":"—","Peso atual"),
+ mini(latest&&latest.cintura?latest.cintura+" cm":"—","Cintura"),
+ mini(latest&&latest.bodyFat?latest.bodyFat+"%":"—","Gordura corporal"),
+ mini(recovery==null?"—":recovery+"%","Recuperação · "+recLabel)
+ ),
+/*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Decisão automática"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-status",style:{marginTop:"10px"}},status),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",color:"var(--muted)",lineHeight:1.5,marginTop:"6px"}},decision),
+ enoughData && /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"9px"}},
+ "Tendência recente: peso ",weightTrend>0?"+":"",weightTrend," kg",
+ waistTrend!=null?" · cintura "+(waistTrend>0?"+":"")+waistTrend+" cm":""
  )
  ),
- /*#__PURE__*/React.createElement("div",{className:"card evf-ai-card"},
+/*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Alertas inteligentes"),
+ alerts.length ? alerts.map((a,i)=>/*#__PURE__*/React.createElement("button",{className:"coach27-alert coach27-alert-"+a.level,key:i,onClick:()=>onNavigate && onNavigate(a.tab)},
+   /*#__PURE__*/React.createElement("span",{className:"coach-alert-symbol "+(a.level==="positive"?"coach-alert-positive":"coach-alert-negative")},a.level==="positive"?"✓":"!"),
+   /*#__PURE__*/React.createElement("span",{style:{flex:1,textAlign:"left"}},a.text),
+   /*#__PURE__*/React.createElement("span",{style:{fontSize:"15px",opacity:.65}},"›")
+ ))
+ : /*#__PURE__*/React.createElement("div",{className:"pc-empty",style:{marginTop:"10px"}},"Sem alertas relevantes com os dados atuais.")
+ ),
+/*#__PURE__*/React.createElement("div",{className:"card evf-ai-card"},
    /*#__PURE__*/React.createElement("div",{className:"evf-ai-top"},
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-head"},
        /*#__PURE__*/React.createElement("div",null,
@@ -4679,7 +4687,55 @@ function Coach2027({ state, update, onNavigate }) {
        /*#__PURE__*/React.createElement("div",{className:"evf-ai-use"}, /*#__PURE__*/React.createElement("strong",null,"Recuperação"),"sono, cardio e carga")
      )
    )
- ), /*#__PURE__*/React.createElement("div",{className:"card coach27-baseline"},
+ )
+),
+cview==="registo" && /*#__PURE__*/React.createElement(React.Fragment,null,
+/*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title",style:{marginBottom:"12px"}}," Hoje — nutrição"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-actions"},
+ numInput("Calorias",taskVal("calorias_in"),v=>setTaskVal("calorias_in",v),"kcal"),
+ numInput("Proteína",taskVal("proteina"),v=>setTaskVal("proteina",v),"g"),
+ numInput("Gordura",taskVal("gordura_in"),v=>setTaskVal("gordura_in",v),"g"),
+ numInput("Passos",taskVal("passos"),v=>setTaskVal("passos",v),"")
+ ),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"10px",lineHeight:1.45}},
+ "Alvos: ",prof.kcalTarget||2350," kcal · ",prof.proteinTarget||170," g proteína · ",prof.fatTarget||70," g gordura · ",prof.stepsTarget||9000," passos."
+ )
+ ),
+/*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Objetivos semanais"),
+ goalsFor(state).filter(g=>g.cat==="Corpo").map(g=>{
+ const z=computeGoal(g,state), done=z.pct>=100;
+ return /*#__PURE__*/React.createElement("div",{key:g.id,style:{marginTop:"12px"}},
+ /*#__PURE__*/React.createElement("div",{className:"goal-top"},
+ /*#__PURE__*/React.createElement("span",{className:"goal-label"},g.label),
+ /*#__PURE__*/React.createElement("span",{className:"goal-val"+(done?" done":"")},goalLabel(g,z.value))
+ ),
+ /*#__PURE__*/React.createElement(Bar,{pct:z.pct,color:done?"linear-gradient(90deg,#1E9E6A,#0E8F9E)":"linear-gradient(90deg,#2B5FD9,#3F73EA)"})
+ );
+ })
+ )
+),
+cview==="progresso" && /*#__PURE__*/React.createElement(React.Fragment,null,
+/*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Últimos 7 dias"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},
+ mini(avgKcal?Math.round(avgKcal):"—","kcal/dia"),
+ mini(avgProtein?Math.round(avgProtein)+" g":"—","proteína/dia"),
+ mini(avgSteps?Math.round(avgSteps).toLocaleString("pt-PT"):"—","passos/dia"),
+ mini(cardio7+" min","cardio/semana")
+ )
+ ),
+/*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Revisão de 4 semanas"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},
+ mini(reviewW==null?"—":(reviewW>0?"+":"")+reviewW+" kg","Peso"),
+ mini(reviewWaist==null?"—":(reviewWaist>0?"+":"")+reviewWaist+" cm","Cintura"),
+ mini(adherence28+"%","Consistência"),
+ mini((state.sessions||[]).filter(s=>(TODAY-new Date(s.date+"T12:00:00"))/86400000<28).length,"Treinos")
+ )
+ ),
+/*#__PURE__*/React.createElement("div",{className:"card coach27-baseline"},
    /*#__PURE__*/React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px"}},
      /*#__PURE__*/React.createElement("div",null,
        /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Ponto de partida"),
@@ -4714,74 +4770,7 @@ function Coach2027({ state, update, onNavigate }) {
          (latest.weight-Number(coachBaseline?.weight ?? firstBody.weight)).toFixed(1)+" kg":"—","Variação")
      )
  ),
- /*#__PURE__*/React.createElement("div",{className:"card coach27-sync"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Dados e sincronização"),
- /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",marginTop:"7px"}},
-   fbDb ? "✓ Sincronização disponível quando estás ligado à tua conta." : "✓ Dados guardados localmente neste dispositivo."
- )
- ),
- /*#__PURE__*/React.createElement("div",{className:"coach27-grid"},
- mini(latest&&latest.weight?latest.weight+" kg":"—","Peso atual"),
- mini(latest&&latest.cintura?latest.cintura+" cm":"—","Cintura"),
- mini(latest&&latest.bodyFat?latest.bodyFat+"%":"—","Gordura corporal"),
- mini(recovery==null?"—":recovery+"%","Recuperação · "+recLabel)
- ),
-
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title",style:{marginBottom:"12px"}}," Hoje — nutrição"),
- /*#__PURE__*/React.createElement("div",{className:"coach27-actions"},
- numInput("Calorias",taskVal("calorias_in"),v=>setTaskVal("calorias_in",v),"kcal"),
- numInput("Proteína",taskVal("proteina"),v=>setTaskVal("proteina",v),"g"),
- numInput("Gordura",taskVal("gordura_in"),v=>setTaskVal("gordura_in",v),"g"),
- numInput("Passos",taskVal("passos"),v=>setTaskVal("passos",v),"")
- ),
- /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"10px",lineHeight:1.45}},
- "Alvos: ",prof.kcalTarget||2350," kcal · ",prof.proteinTarget||170," g proteína · ",prof.fatTarget||70," g gordura · ",prof.stepsTarget||9000," passos."
- )
- ),
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Últimos 7 dias"),
- /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},
- mini(avgKcal?Math.round(avgKcal):"—","kcal/dia"),
- mini(avgProtein?Math.round(avgProtein)+" g":"—","proteína/dia"),
- mini(avgSteps?Math.round(avgSteps).toLocaleString("pt-PT"):"—","passos/dia"),
- mini(cardio7+" min","cardio/semana")
- )
- ),
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Decisão automática"),
- /*#__PURE__*/React.createElement("div",{className:"coach27-status",style:{marginTop:"10px"}},status),
- /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",color:"var(--muted)",lineHeight:1.5,marginTop:"6px"}},decision),
- enoughData && /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"9px"}},
- "Tendência recente: peso ",weightTrend>0?"+":"",weightTrend," kg",
- waistTrend!=null?" · cintura "+(waistTrend>0?"+":"")+waistTrend+" cm":""
- )
- ),
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Alertas inteligentes"),
- alerts.length ? alerts.map((a,i)=>/*#__PURE__*/React.createElement("button",{className:"coach27-alert coach27-alert-"+a.level,key:i,onClick:()=>onNavigate && onNavigate(a.tab)},
-   /*#__PURE__*/React.createElement("span",{className:"coach-alert-symbol "+(a.level==="positive"?"coach-alert-positive":"coach-alert-negative")},a.level==="positive"?"✓":"!"),
-   /*#__PURE__*/React.createElement("span",{style:{flex:1,textAlign:"left"}},a.text),
-   /*#__PURE__*/React.createElement("span",{style:{fontSize:"15px",opacity:.65}},"›")
- ))
- : /*#__PURE__*/React.createElement("div",{className:"pc-empty",style:{marginTop:"10px"}},"Sem alertas relevantes com os dados atuais.")
- ),
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Revisão de 4 semanas"),
- /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},
- mini(reviewW==null?"—":(reviewW>0?"+":"")+reviewW+" kg","Peso"),
- mini(reviewWaist==null?"—":(reviewWaist>0?"+":"")+reviewWaist+" cm","Cintura"),
- mini(adherence28+"%","Consistência"),
- mini((state.sessions||[]).filter(s=>(TODAY-new Date(s.date+"T12:00:00"))/86400000<28).length,"Treinos")
- )
- ),
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
+/*#__PURE__*/React.createElement("div",{className:"card"},
  /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Assimetria do peito"),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",lineHeight:1.5,marginTop:"7px"}},
  "Single-Arm DB Chest Press: lado menor primeiro · mesma carga e reps no lado maior · 1–2 RIR · +1 série apenas no lado menor se recuperares bem."
@@ -4793,8 +4782,7 @@ function Coach2027({ state, update, onNavigate }) {
  )
  )) : /*#__PURE__*/React.createElement("div",{className:"pc-empty",style:{marginTop:"10px"}},"Os próximos registos do exercício unilateral vão aparecer aqui.")
  ),
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
+/*#__PURE__*/React.createElement("div",{className:"card"},
  /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Fotos de progresso"),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",lineHeight:1.45,margin:"7px 0 10px"}},
  "Ideal: frente, costas e lados, mesma luz e distância, de 2 em 2 semanas. As fotos ficam apenas neste dispositivo."
@@ -4813,21 +4801,14 @@ function Coach2027({ state, update, onNavigate }) {
  ))
  ) : /*#__PURE__*/React.createElement("div",{className:"pc-empty"},"Ainda não tens fotografias guardadas.")
  ),
-
- /*#__PURE__*/React.createElement("div",{className:"card"},
- /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Objetivos semanais"),
- goalsFor(state).filter(g=>g.cat==="Corpo").map(g=>{
- const z=computeGoal(g,state), done=z.pct>=100;
- return /*#__PURE__*/React.createElement("div",{key:g.id,style:{marginTop:"12px"}},
- /*#__PURE__*/React.createElement("div",{className:"goal-top"},
- /*#__PURE__*/React.createElement("span",{className:"goal-label"},g.label),
- /*#__PURE__*/React.createElement("span",{className:"goal-val"+(done?" done":"")},goalLabel(g,z.value))
- ),
- /*#__PURE__*/React.createElement(Bar,{pct:z.pct,color:done?"linear-gradient(90deg,#1E9E6A,#0E8F9E)":"linear-gradient(90deg,#2B5FD9,#3F73EA)"})
- );
- })
- ),
- /*#__PURE__*/React.createElement("div",{className:"pad"})
+/*#__PURE__*/React.createElement("div",{className:"card coach27-sync"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Dados e sincronização"),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",marginTop:"7px"}},
+   fbDb ? "✓ Sincronização disponível quando estás ligado à tua conta." : "✓ Dados guardados localmente neste dispositivo."
+ )
+ )
+),
+/*#__PURE__*/React.createElement("div",{className:"pad"})
  );
 }
 
