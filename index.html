@@ -654,6 +654,11 @@ function normalize(s) {
  if (s.profile.stepsTarget == null) s.profile.stepsTarget = 9000;
  if (s.profile.waterTarget == null) s.profile.waterTarget = 3;
  if (s.profile.cardioTarget == null) s.profile.cardioTarget = 90;
+ if (s.profile.workoutsTarget == null) s.profile.workoutsTarget = 5;
+ if (s.profile.trainingKcalWeeklyTarget == null) s.profile.trainingKcalWeeklyTarget = 4000;
+ if (s.profile.sleepTarget == null) s.profile.sleepTarget = 8;
+ if (s.profile.standingTarget == null) s.profile.standingTarget = 8;
+ if (s.profile.activeCaloriesTarget == null) s.profile.activeCaloriesTarget = 800;
  if (s.profile.ritmoAlvoKgSemana == null) s.profile.ritmoAlvoKgSemana = "0,6 a 0,8";
  if (!Array.isArray(s.profile.planAdjustments)) s.profile.planAdjustments = [];
  if (s.theme == null) s.theme = "light";
@@ -1298,69 +1303,44 @@ const SECTIONS = [{
  unit: "kcal"
  }]
 }];
+const taskLabelFor = (t, state) => {
+ const p = state && state.profile ? state.profile : {};
+ const fmt = v => Number.isInteger(Number(v)) ? String(Number(v)) : String(Number(v)).replace(".", ",");
+ if (t.id === "passos") return "Passos (meta " + Number(p.stepsTarget || 9000).toLocaleString("pt-PT") + ")";
+ if (t.id === "calorias_in") return "Calorias ingeridas (meta " + fmt(p.kcalTarget || 2350) + " kcal)";
+ if (t.id === "proteina") return "Proteína (meta " + fmt(p.proteinTarget || 170) + "g)";
+ if (t.id === "gordura_in") return "Gordura (meta " + fmt(p.fatTarget || 70) + "g)";
+ if (t.id === "pe") return "Tempo de pé (meta " + fmt(p.standingTarget || 8) + "h)";
+ if (t.id === "sono") return "Sono (meta " + fmt(p.sleepTarget || 8) + "h)";
+ if (t.id === "mov_ativo") return "Calorias ativas (meta " + fmt(p.activeCaloriesTarget || 800) + " kcal)";
+ return t.label;
+};
 const FIXED_TASKS = SECTIONS.flatMap(s => s.chores ? [] : s.groups ? s.groups.flatMap(g => g.tasks) : s.tasks);
 const dayList = key => [...FIXED_TASKS, ...choresForKey(key)];
 const isDone = (rec, t) => t.qty ? rec && rec.value > 0 : !!(rec && rec.done);
 
 /* ------------------------------- goals ---------------------------------- */
-const GOALS = [{
- id: "treinos",
- cat: "Corpo",
- label: "Treinos",
- target: 5,
- type: "count"
-}, {
- id: "passos",
- cat: "Corpo",
- label: "Passos",
- target: 70000,
- type: "steps"
-}, {
- id: "calgastas",
- cat: "Corpo",
- label: "Calorias gastas",
- target: 4000,
- type: "calories"
-}, {
- id: "agua",
- cat: "Corpo",
- label: "Água (média)",
- target: 2.5,
- unit: "L",
- type: "wateravg"
-}, {
- id: "cardiomin",
- cat: "Corpo",
- label: "Cardio",
- target: 90,
- unit: "min",
- type: "minutesweek",
- src: "cardio"
-}, {
- id: "proteinaavg",
- cat: "Corpo",
- label: "Proteína (média)",
- target: 170,
- unit: "g",
- type: "gramsavg",
- src: "proteina"
-}, {
- id: "peavg",
- cat: "Corpo",
- label: "Tempo de pé (média)",
- target: 8,
- unit: "h",
- type: "hoursavg",
- src: "pe"
-}, {
- id: "sonoavg",
- cat: "Corpo",
- label: "Sono (média)",
- target: 8,
- unit: "h",
- type: "hoursavg",
- src: "sono"
-}];
+const goalsFor = state => {
+ const p = state && state.profile ? state.profile : {};
+ const stepsDaily = Math.max(0, Number(p.stepsTarget) || 9000);
+ return [{
+ id: "treinos", cat: "Corpo", label: "Treinos", target: Math.max(1, Number(p.workoutsTarget) || 5), type: "count"
+ }, {
+ id: "passos", cat: "Corpo", label: "Passos", target: stepsDaily * 7, type: "steps"
+ }, {
+ id: "calgastas", cat: "Corpo", label: "Calorias gastas", target: Math.max(1, Number(p.trainingKcalWeeklyTarget) || 4000), type: "calories"
+ }, {
+ id: "agua", cat: "Corpo", label: "Água (média)", target: Math.max(0.1, Number(p.waterTarget) || 3), unit: "L", type: "wateravg"
+ }, {
+ id: "cardiomin", cat: "Corpo", label: "Cardio", target: Math.max(1, Number(p.cardioTarget) || 90), unit: "min", type: "minutesweek", src: "cardio"
+ }, {
+ id: "proteinaavg", cat: "Corpo", label: "Proteína (média)", target: Math.max(1, Number(p.proteinTarget) || 170), unit: "g", type: "gramsavg", src: "proteina"
+ }, {
+ id: "peavg", cat: "Corpo", label: "Tempo de pé (média)", target: Math.max(0.1, Number(p.standingTarget) || 8), unit: "h", type: "hoursavg", src: "pe"
+ }, {
+ id: "sonoavg", cat: "Corpo", label: "Sono (média)", target: Math.max(0.1, Number(p.sleepTarget) || 8), unit: "h", type: "hoursavg", src: "sono"
+ }];
+};
 function goalLabel(g, v) {
  if (g.type === "wateravg") return v + "L / " + g.target + "L";
  if (g.type === "steps") return (v / 1000).toFixed(1) + "k / " + g.target / 1000 + "k";
@@ -1707,6 +1687,11 @@ function seed() {
  stepsTarget: 9000,
  waterTarget: 3,
  cardioTarget: 90,
+ workoutsTarget: 5,
+ trainingKcalWeeklyTarget: 4000,
+ sleepTarget: 8,
+ standingTarget: 8,
+ activeCaloriesTarget: 800,
  height: 180
  },
  days,
@@ -2396,6 +2381,7 @@ function Checklist({
  }), SECTIONS.map(sec => /*#__PURE__*/React.createElement(Section, {
  key: sec.id,
  sec: sec,
+ state: state,
  day: day,
  toggle: toggle,
  setQty: setQty,
@@ -2441,7 +2427,8 @@ function WaterCard({
  dayKey
 }) {
  const key = dayKey || todayKey;
- const GOAL = 2500;
+ const goalL = Math.max(0.1, Number(state.profile && state.profile.waterTarget) || 3);
+ const GOAL = goalL * 1000;
  const ml = state.days[key] && state.days[key].water || 0;
  const pct = Math.min(100, Math.round(ml / GOAL * 100));
  const [celebrate, setCelebrate] = useState(false);
@@ -2493,7 +2480,7 @@ function WaterCard({
  className: "water-val"
  }, (ml / 1000).toFixed(2), /*#__PURE__*/React.createElement("i", null, "L"), " ", /*#__PURE__*/React.createElement("span", {
  className: "water-goal"
- }, "/ 2.5L"))), /*#__PURE__*/React.createElement("div", {
+ }, "/ " + goalL.toLocaleString("pt-PT") + "L"))), /*#__PURE__*/React.createElement("div", {
  className: "bar water-bar"
  }, /*#__PURE__*/React.createElement("div", {
  className: "bar-fill",
@@ -2530,6 +2517,7 @@ function WaterCard({
 }
 function Section({
  sec,
+ state,
  day,
  toggle,
  setQty,
@@ -2616,7 +2604,7 @@ function Section({
  key: t.id + "_" + dayKey
  }, /*#__PURE__*/React.createElement("span", {
  className: "task-label"
- }, t.label, t.goal && /*#__PURE__*/React.createElement("span", {
+ }, taskLabelFor(t, state), t.goal && /*#__PURE__*/React.createElement("span", {
  className: "task-tag"
  }, /*#__PURE__*/React.createElement(I, {
  name: "target",
@@ -2637,7 +2625,7 @@ function Section({
  size: 13
  })), /*#__PURE__*/React.createElement("span", {
  className: "task-label"
- }, t.label), t.goal && /*#__PURE__*/React.createElement("span", {
+ }, taskLabelFor(t, state)), t.goal && /*#__PURE__*/React.createElement("span", {
  className: "task-tag"
  }, /*#__PURE__*/React.createElement(I, {
  name: "target",
@@ -2650,7 +2638,7 @@ function CardioWeekCard({
  state,
  update
 }) {
- const weekDays = lastNDays(state.days, 7);
+ const weekDays = weekFromMonday(state.days);
  const total = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
  const toggle = key => update(s => {
  s.days[key] = s.days[key] || {
@@ -4359,7 +4347,7 @@ function Coach2027({ state, update, onNavigate }) {
  const losing = weightTrend < -0.2 || (waistTrend!=null && waistTrend < -0.5);
  const tooFast = weightTrend < -3.0;
  const proteinLow = avgProtein > 0 && avgProtein < (prof.proteinTarget||170) * 0.9;
- const trainingLow = wkSessions < 4;
+ const trainingLow = wkSessions < (prof.workoutsTarget||5);
  if(tooFast || (avgSleep>0 && avgSleep<6.5)){
  status=" Recuperação / ritmo a vigiar";
  decision="Não aumentes o défice. Prioriza sono, rendimento e recuperação durante a próxima semana.";
@@ -4376,7 +4364,7 @@ function Coach2027({ state, update, onNavigate }) {
 }
 
  let recovery=0, recoveryParts=0;
- if(avgSleep){ recovery += Math.min(100, avgSleep/8*100); recoveryParts++; }
+ if(avgSleep){ recovery += Math.min(100, avgSleep/(prof.sleepTarget||8)*100); recoveryParts++; }
  if(avgProtein){ recovery += Math.min(100, avgProtein/(prof.proteinTarget||170)*100); recoveryParts++; }
  if(avgW){ recovery += Math.min(100, avgW/(prof.waterTarget||3)*100); recoveryParts++; }
  recovery = recoveryParts ? Math.round(recovery/recoveryParts) : null;
@@ -4384,10 +4372,10 @@ function Coach2027({ state, update, onNavigate }) {
 
  const alerts=[];
  if(avgProtein && avgProtein < (prof.proteinTarget||170)*0.9) alerts.push({text:"Proteína média abaixo de 90% do alvo.", level:"negative", tab:"check"});
- if(avgSleep && avgSleep < 7) alerts.push({text:"Sono médio abaixo de 7 h.", level:"negative", tab:"check"});
+ if(avgSleep && avgSleep < (prof.sleepTarget||8)) alerts.push({text:"Sono médio abaixo do alvo de "+(prof.sleepTarget||8)+" h.", level:"negative", tab:"check"});
  if(avgSteps && avgSteps < (prof.stepsTarget||9000)*0.8) alerts.push({text:"Passos médios abaixo de 80% do alvo.", level:"negative", tab:"check"});
  if(cardio7 < (prof.cardioTarget||90)*0.7) alerts.push({text:"Cardio semanal abaixo de 70% do alvo.", level:"negative", tab:"workout"});
- if(wkSessions >= 5) alerts.push({text:"Meta semanal de 5 treinos atingida.", level:"positive", tab:"workout"});
+ if(wkSessions >= (prof.workoutsTarget||5)) alerts.push({text:"Meta semanal de "+(prof.workoutsTarget||5)+" treino"+((prof.workoutsTarget||5)===1?"":"s")+" atingida.", level:"positive", tab:"workout"});
  if(enoughData && waistTrend!=null && waistTrend<0) alerts.push({text:"Cintura em tendência descendente.", level:"positive", tab:"body"});
 
  const asymSessions=(state.sessions||[]).filter(s => Array.isArray(s.ex) && s.ex.some(e=>/single-arm db chest/i.test(e.name))).slice(-6);
@@ -4474,8 +4462,8 @@ function Coach2027({ state, update, onNavigate }) {
      lines.push("Ainda há poucos dados para tomar uma decisão forte. Prioriza consistência e novas medições.");
    }
    if(avgProtein && avgProtein < (prof.proteinTarget||170)*.9) lines.push("Proteína: abaixo de 90% do alvo médio. É uma prioridade antes de cortar mais calorias.");
-   if(avgSleep && avgSleep < 7) lines.push("Sono: abaixo de 7 h em média. Recuperação deve ser protegida.");
-   if(wkSessions < 4) lines.push("Treino: a frequência desta semana está abaixo de 4 sessões.");
+   if(avgSleep && avgSleep < (prof.sleepTarget||8)) lines.push("Sono: abaixo do alvo médio de "+(prof.sleepTarget||8)+" h. Recuperação deve ser protegida.");
+   if(wkSessions < (prof.workoutsTarget||5)) lines.push("Treino: a frequência desta semana está abaixo do alvo de "+(prof.workoutsTarget||5)+" sessões.");
    if(avgSteps && avgSteps < (prof.stepsTarget||9000)*.8) lines.push("Passos: abaixo de 80% do objetivo médio.");
    if(q.includes("peso") || q.includes("gordura") || q.includes("cintura")) {
      lines.push("Para composição corporal, usa peso médio semanal + cintura + desempenho no treino, e não uma única pesagem.");
@@ -4606,7 +4594,7 @@ function Coach2027({ state, update, onNavigate }) {
      ),
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-insight"},
        "Foco atual: ", decision || "consistência e progressão sustentável.",
-       " · ", wkSessions, "/5 treinos esta semana"
+       " · ", wkSessions, "/",(prof.workoutsTarget||5)," treinos esta semana"
      )
    ),
    /*#__PURE__*/React.createElement("div",{className:"evf-ai-body"},
@@ -4773,7 +4761,7 @@ function Coach2027({ state, update, onNavigate }) {
 
  /*#__PURE__*/React.createElement("div",{className:"card"},
  /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Objetivos semanais"),
- GOALS.filter(g=>g.cat==="Corpo").map(g=>{
+ goalsFor(state).filter(g=>g.cat==="Corpo").map(g=>{
  const z=computeGoal(g,state), done=z.pct>=100;
  return /*#__PURE__*/React.createElement("div",{key:g.id,style:{marginTop:"12px"}},
  /*#__PURE__*/React.createElement("div",{className:"goal-top"},
@@ -4805,7 +4793,7 @@ function Goals({
  key: cat
  }, /*#__PURE__*/React.createElement("div", {
  className: "cat-head"
- }, cat), GOALS.filter(g => g.cat === cat).map(g => {
+ }, cat), goalsFor(state).filter(g => g.cat === cat).map(g => {
  const {
  value,
  pct
@@ -4840,7 +4828,7 @@ function efPearson(xs, ys){
   return dx&&dy ? num/Math.sqrt(dx*dy) : null;
 }
 function WeeklyCoachInsights({state}){
-  const days=lastNDays(state.days,7);
+  const days=weekFromMonday(state.days);
   const paired=(id,fn)=>days.map(w=>{
     const d=w.day||{tasks:{},water:0};
     const v=id==="water" ? Number(d.water||0)/1000 : Number(d.tasks&&d.tasks[id]&&d.tasks[id].value||0);
@@ -4855,13 +4843,14 @@ function WeeklyCoachInsights({state}){
   const corrs=metrics.map(([name,id,unit])=>{
     const p=paired(id); return {name,id,unit,n:p.length,r:efPearson(p.map(x=>x.v),p.map(x=>x.score))};
   }).filter(x=>x.r!=null).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
-  const wk=weekFromMonday(state.days);
+  const wk=days;
   const sessions=(state.sessions||[]).filter(s=>wk.some(w=>w.key===s.date)).length;
   const consistency=Math.round(days.reduce((a,w)=>a+dayPct(w.day,w.key),0)/7);
   const body=[...(state.body||[])].sort((a,b)=>a.date.localeCompare(b.date));
   const last=body.at(-1), prev=body.at(-2);
+  const workoutsTarget=Math.max(1,Number(state.profile&&state.profile.workoutsTarget)||5);
   const suggestion = consistency<65 ? "Prioridade: melhorar consistência antes de alterar o plano."
-    : sessions<4 ? "Prioridade: recuperar a frequência de treino esta semana."
+    : sessions<workoutsTarget ? "Prioridade: recuperar a frequência de treino até ao alvo de "+workoutsTarget+" sessão"+(workoutsTarget===1?"":"ões")+" esta semana."
     : last&&prev&&last.weight<prev.weight ? "Tendência favorável: mantém a estratégia e volta a avaliar com mais dados."
     : "Mantém o plano atual e usa tendência semanal, não um único dia, para decidir ajustes.";
   const weekKey=iso(addDays(TODAY,-((TODAY.getDay()+6)%7)));
@@ -4873,7 +4862,7 @@ function WeeklyCoachInsights({state}){
   return /*#__PURE__*/React.createElement("div",{className:"card"},
     /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Relatório semanal automático"),
     /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
-      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},consistency+"%"), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"consistência · últimos 7 dias")),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},consistency+"%"), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"consistência · semana atual")),
       /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},sessions+" treino"+(sessions===1?"":"s")), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"esta semana"))
     ),
     /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px",fontWeight:650,color:"var(--text)"}},suggestion),
@@ -4947,7 +4936,7 @@ function Report({
  const dark = state.theme === "dark";
  const coach = buildCoach(state, report.waterAvg);
  const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
- const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= 2500);
+ const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= (Number(state.profile && state.profile.waterTarget) || 3) * 1000);
  const workoutStreak = streak(state.days, (d, k) => trainedOn(state, k));
  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
  title: "Relatórios",
@@ -5121,6 +5110,9 @@ function Report({
  }));
 }
 function buildReport(state) {
+ const p = state.profile || {};
+ const workoutsTarget = Math.max(1, Number(p.workoutsTarget) || 5);
+ const waterTarget = Math.max(0.1, Number(p.waterTarget) || 3);
  const week = weekFromMonday(state.days);
  const weekStart = week[0].key;
  const weekEnd = week[week.length - 1].key;
@@ -5128,7 +5120,7 @@ function buildReport(state) {
  const consistency = +(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7).toFixed(1);
  const sumQty = (id, days) => days.reduce((a, w) => a + (w.day && w.day.tasks[id] ? w.day.tasks[id].value || 0 : 0), 0);
  const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
- const waterDays = week.filter(w => ((w.day ? w.day.water : 0) || 0) >= 2500).length;
+ const waterDays = week.filter(w => ((w.day ? w.day.water : 0) || 0) >= waterTarget * 1000).length;
  const treinos = week.filter(w => trainedOn(state, w.key)).length;
  const pages = sumQty("ler", week);
  // chores
@@ -5165,7 +5157,7 @@ function buildReport(state) {
  });
  }
  });
- const wNote = treinos >= 5 ? "Excelente frequência. " : treinos > 0 ? "Frequência abaixo do alvo de 5. " : "";
+ const wNote = treinos >= workoutsTarget ? "Excelente frequência. " : treinos > 0 ? "Frequência abaixo do alvo de " + workoutsTarget + ". " : "";
  const progNote = tot > 0 ? up >= tot * 0.5 ? "Estás a subir a carga na maioria dos exercícios — progressão sólida." : "A carga está estável — considera subir peso ou reps onde já dominas a técnica." : "Regista os treinos para acompanhar a progressão de carga.";
  // body
  const body = [...(state.body || [])].sort((a, b) => a.date.localeCompare(b.date));
@@ -5183,21 +5175,21 @@ function buildReport(state) {
  opps = [],
  recs = [];
  if (consistency >= 75) strong.push("Excelente consistência geral na checklist.");
- if (treinos >= 5) strong.push("Treinos em dia e a subir a carga.");
+ if (treinos >= workoutsTarget) strong.push("Treinos em dia e a subir a carga.");
  if (waterDays >= 4) strong.push("Boa hidratação na maioria dos dias.");
  if (!strong.length) strong.push("Apareceste todos os dias — a base está lá.");
- if (+waterAvg < 2.5) opps.push("Água abaixo do objetivo (média " + waterAvg + "L).");
- if (treinos < 5) opps.push("Faltou treino: " + treinos + "/5.");
+ if (+waterAvg < waterTarget) opps.push("Água abaixo do objetivo (média " + waterAvg + "L; alvo " + waterTarget.toLocaleString("pt-PT") + "L).");
+ if (treinos < workoutsTarget) opps.push("Faltou treino: " + treinos + "/" + workoutsTarget + ".");
  if (!opps.length) opps.push("Poucas fraquezas — foca em manter o ritmo.");
- if (+waterAvg < 2.5) recs.push("Subir a hidratação para 2.5L/dia.");
- recs.push("Manter os 5 treinos e subir carga onde a técnica já é sólida.");
+ if (+waterAvg < waterTarget) recs.push("Subir a hidratação para " + waterTarget.toLocaleString("pt-PT") + "L/dia.");
+ recs.push("Manter a meta de " + workoutsTarget + " treino" + (workoutsTarget === 1 ? "" : "s") + " por semana e subir carga onde a técnica já é sólida.");
  const summary = "Esta semana cumpriste " + consistency + "% do que planeaste. Fizeste " + treinos + " treino(s) e bebeste em média " + waterAvg + "L de água. " + (consistency >= 75 ? "Estás a construir uma rotina forte rumo aos " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + "." : "Uma semana para consolidar hábitos — pequenos ajustes fazem grande diferença até lá.");
  // hoje: corpo e treino
  const trainedToday = trainedOn(state, todayKey);
  const todaySummary = !last
   ? "Ainda não existem medições corporais. Regista uma medição no menu Corpo para acompanhar peso, gordura, IMC e massa muscular."
   : "Hoje " + (trainedToday ? "já treinaste" : "ainda não treinaste") + ". O teu peso atual é " + last.weight + "kg, com " + last.bodyFat + "% de gordura e IMC " + last.bmi + ".";
- const goalResults = GOALS.map(g => ({
+ const goalResults = goalsFor(state).map(g => ({
  g,
  ...computeGoal(g, state)
  }));
@@ -5235,15 +5227,18 @@ function buildReport(state) {
 
 function buildCoach(state, waterAvg) {
  const today = state.days[todayKey];
+ const profile = state.profile || {};
+ const waterTarget = Math.max(0.1, Number(profile.waterTarget) || 3);
+ const stepsTarget = Math.max(1, Number(profile.stepsTarget) || 9000);
  const waterToday = ((today ? today.water : 0) || 0) / 1000;
  const trained = trainedOn(state, todayKey);
- const steps = today && today.tasks.passos ? today.tasks.passos.value : 0;
- const p = [];
- if (trained) p.push("Já treinaste hoje");
- let msg = p.length ? p.join(" ") + ". " : "";
- if (waterToday < 2.5) msg += "Ainda só bebeste " + waterToday.toFixed(1) + "L — faltam " + (2.5 - waterToday).toFixed(1) + "L. ";
- if (steps < 10000) msg += "Faltam " + (10000 - steps).toLocaleString("pt-PT") + " passos para os 10k. ";
- msg += "Mantém a consistência e estás no caminho certo para os " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + ".";
+ const steps = today && today.tasks.passos ? Number(today.tasks.passos.value || 0) : 0;
+ const parts = [];
+ if (trained) parts.push("Já treinaste hoje");
+ let msg = parts.length ? parts.join(" ") + ". " : "";
+ if (waterToday < waterTarget) msg += "Ainda só bebeste " + waterToday.toFixed(1) + "L — faltam " + (waterTarget - waterToday).toFixed(1) + "L para o teu alvo de " + waterTarget.toLocaleString("pt-PT") + "L. ";
+ if (steps < stepsTarget) msg += "Faltam " + Math.max(0, stepsTarget - steps).toLocaleString("pt-PT") + " passos para o teu alvo de " + stepsTarget.toLocaleString("pt-PT") + ". ";
+ msg += "Mantém a consistência e estás no caminho certo para os " + profile.bfTarget + "% até " + longDate(new Date(profile.targetDate)) + ".";
  return msg;
 }
 function ReportBlock({
