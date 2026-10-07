@@ -216,6 +216,14 @@ document.addEventListener("visibilitychange",async()=>{
 });
 </script>
 
+
+<style id="evolvefit-no-ios-input-zoom">
+@media (max-width: 900px) {
+  input, select, textarea, button {
+    font-size: 16px !important;
+  }
+}
+</style>
 </head><body><div id="root"></div><script>
 /**
  * @license React
@@ -1981,6 +1989,34 @@ function Dashboard({
  const stateRef = useRef(state);
  const scrollRef = useRef(null);
  stateRef.current = state;
+
+ // Persistência automática global: qualquer alteração de estado é guardada
+ // imediatamente, sem depender de um botão "Guardar".
+ const autoPersistTimer = useRef(null);
+ const persistEveryStateChange = (nextState) => {
+   try {
+     const safe = normalize(nextState);
+     if (!safe || !uid) return;
+     safe._updatedAt = Date.now();
+     stateRef.current = safe;
+     save(safe, uid);
+     clearTimeout(autoPersistTimer.current);
+     autoPersistTimer.current = setTimeout(() => {
+       try { if (uid) save(stateRef.current, uid); } catch (e) {}
+     }, 150);
+   } catch (e) {
+     console.error("Persistência automática:", e);
+   }
+ };
+
+ // Expor um setter global para os handlers de inputs existentes.
+ // Os handlers atuais continuam a funcionar; esta função acrescenta a
+ // persistência imediata depois da alteração.
+ window.evolveFitPersistNow = () => {
+   try {
+     if (uid && stateRef.current) save(stateRef.current, uid);
+   } catch (e) {}
+ };
 
  // Quando o Firebase termina de autenticar, carregar explicitamente
  // os dados persistidos dessa conta.
@@ -5357,4 +5393,29 @@ ReactDOM.createRoot(document.getElementById("root")).render(
  React.createElement(EvolveFitErrorBoundary, null, React.createElement(App))
 );
 </script>
+
+<script id="evolvefit-auto-persist-global">
+(function(){
+  function persist(){
+    try {
+      if (typeof window.evolveFitPersistNow === "function") {
+        window.evolveFitPersistNow();
+      }
+    } catch(e) {}
+  }
+  document.addEventListener("change", function(e){
+    const el = e.target;
+    if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+      setTimeout(persist, 0);
+    }
+  }, true);
+  document.addEventListener("blur", function(e){
+    const el = e.target;
+    if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+      setTimeout(persist, 0);
+    }
+  }, true);
+})();
+</script>
+
 </body></html>
