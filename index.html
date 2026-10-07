@@ -4278,7 +4278,7 @@ function Coach2027({ state, update, onNavigate }) {
  const [baselineForm, setBaselineForm] = useState({weight:"",bodyFat:"",cintura:""});
  useEffect(() => {
    if (!firstBody) return;
-   const current = stateRef.current?.profile?.coachBaseline;
+   const current = state.profile?.coachBaseline;
    if (!current || current.sourceDate !== firstBody.date) {
      update(s => {
        s.profile = s.profile || {};
@@ -4294,7 +4294,7 @@ function Coach2027({ state, update, onNavigate }) {
  }, [firstBody?.date, firstBody?.weight, firstBody?.bodyFat, firstBody?.cintura]);
 
  const openBaselineEditor = () => {
-   const b = stateRef.current?.profile?.coachBaseline || firstBody || {};
+   const b = state.profile?.coachBaseline || firstBody || {};
    setBaselineForm({
      weight: b.weight ?? "",
      bodyFat: b.bodyFat ?? "",
