@@ -1222,82 +1222,51 @@ function TodayWorkoutCard({
 
 /* ------------------------- checklist structure -------------------------- */
 const SECTIONS = [{
- id: "treino",
- label: "Treino",
- icon: "dumbbell",
- tint: "coral",
- tasks: [{
- id: "forca",
- label: "Treino de força concluído",
- qty: false
- }, {
- id: "cardio",
- label: "Cardio",
- qty: true,
- unit: "min"
- }, {
- id: "passos",
- label: "Passos (8–10k)",
- qty: true,
- unit: "",
- goal: "passos"
- }, {
- id: "calorias",
- label: "Calorias queimadas (total treino)",
- qty: true,
- unit: "kcal"
- }]
+ id: "treino", label: "Treino", icon: "dumbbell", tint: "coral",
+ tasks: [
+  {id:"forca", label:"Treino concluído", qty:false},
+  {id:"cardio", label:"Cardio", qty:true, unit:"min"},
+  {id:"passos", label:"Passos", qty:true, unit:""}
+ ]
 }, {
- id: "nutricao",
- label: "Nutrição",
- icon: "flame",
- tint: "green",
- tasks: [{
- id: "calorias_in",
- label: "Calorias ingeridas (2300–2400)",
- qty: true,
- unit: "kcal"
- }, {
- id: "proteina",
- label: "Proteína (160–180g)",
- qty: true,
- unit: "g"
- }, {
- id: "gordura_in",
- label: "Gordura (60–80g)",
- qty: true,
- unit: "g"
- }, {
- id: "creatina",
- label: "Creatina (5g)",
- qty: false
- }, {
- id: "whey",
- label: "Whey (20–30g se necessário)",
- qty: false
- }]
+ id: "nutricao", label: "Nutrição", icon: "flame", tint: "green",
+ tasks: [
+  {id:"agua", label:"Água", qty:true, unit:"L"},
+  {id:"proteina", label:"Proteína", qty:true, unit:"g"},
+  {id:"calorias_in", label:"Calorias", qty:true, unit:"kcal"}
+ ]
 }, {
- id: "habitos",
- label: "Hábitos & Recuperação",
- icon: "bed",
- tint: "sleep",
- tasks: [{
- id: "pe",
- label: "Tempo de pé (8h)",
- qty: true,
- unit: "h"
- }, {
- id: "sono",
- label: "Sono (7–9h)",
- qty: true,
- unit: "h"
- }, {
- id: "mov_ativo",
- label: "Calorias ativas (Apple Watch, ~800)",
- qty: true,
- unit: "kcal"
- }]
+ id: "recuperacao", label: "Recuperação", icon: "bed", tint: "sleep",
+ tasks: [
+  {id:"sono", label:"Sono", qty:true, unit:"h"},
+  {id:"sono_qualidade", label:"Qualidade do sono", qty:true, unit:"/5"}
+ ]
+}, {
+ id: "habitos", label: "Hábitos", icon: "sparkles", tint: "blue",
+ tasks: [
+  {id:"aprendizagem", label:"Leitura / aprendizagem", qty:true, unit:"min"},
+  {id:"mobilidade", label:"Mobilidade / alongamento", qty:true, unit:"min"},
+  {id:"meditacao", label:"Meditação / respiração", qty:true, unit:"min"}
+ ]
+}, {
+ id: "semanal", label: "Check-in semanal", icon: "calendar", tint: "teal",
+ weeklyOnly: true,
+ tasks: [
+  {id:"peso_semanal", label:"Peso", qty:true, unit:"kg"},
+  {id:"cintura_semanal", label:"Cintura", qty:true, unit:"cm"},
+  {id:"checkin_fisico", label:"Check-in físico", qty:false}
+ ]
 }];
+
+const FIXED_TASKS = SECTIONS.filter(s => !s.weeklyOnly).flatMap(s => s.tasks);
+const WEEKLY_TASKS = SECTIONS.find(s => s.weeklyOnly).tasks;
+const weeklyTasksForKey = key => {
+ const d = new Date(key + "T12:00:00");
+ return d.getDay() === 1 ? WEEKLY_TASKS : [];
+};
+const dayList = key => [...FIXED_TASKS, ...weeklyTasksForKey(key)];
+const isDone = (rec, t) => t.qty ? rec && Number(rec.value) > 0 : !!(rec && rec.done);
+
 const FIXED_TASKS = SECTIONS.flatMap(s => s.chores ? [] : s.groups ? s.groups.flatMap(g => g.tasks) : s.tasks);
 const dayList = key => [...FIXED_TASKS, ...choresForKey(key)];
 const isDone = (rec, t) => t.qty ? rec && rec.value > 0 : !!(rec && rec.done);
@@ -1718,12 +1687,13 @@ function seed() {
 }
 
 /* ------------------------------ helpers --------------------------------- */
-function dayPct(day, key) {
+function dayPct(day, key, state) {
  const list = dayList(key);
  if (!list.length) return 0;
  let d = 0;
  list.forEach(t => {
- if (isDone(day && day.tasks ? day.tasks[t.id] : null, t)) d++;
+   const autoWorkout = t.id === "forca" && state ? trainedOn(state, key) : false;
+   if (autoWorkout || isDone(day && day.tasks ? day.tasks[t.id] : null, t)) d++;
  });
  return Math.round(d / list.length * 100);
 }
@@ -2306,6 +2276,7 @@ function Checklist({
  tasks: {},
  water: 0
  };
+ window.__evolveFitStateForChecklist = state;
  const list = dayList(viewKey);
  const doneCount = list.filter(t => isDone(day.tasks[t.id], t)).length;
  const remainingCount = Math.max(0, list.length - doneCount);
@@ -2535,6 +2506,7 @@ function Section({
  setQty,
  dayKey
 }) {
+ if (sec.weeklyOnly && !weeklyTasksForKey(dayKey || todayKey).length) return null;
  const [open, setOpen] = useState(() => {
  const ts = sec.chores ? choresForKey(dayKey || todayKey) : sec.tasks || [];
  return !(ts.length && ts.every(t => isDone(day.tasks[t.id], t)));
@@ -2586,7 +2558,11 @@ function Section({
  tasks: sec.tasks
  }];
  const all = groups.flatMap(g => g.tasks);
- const done = all.filter(t => isDone(day.tasks[t.id], t)).length;
+ const done = all.filter(t => {
+ const autoWorkout = t.id === "forca" && window.__evolveFitStateForChecklist
+   ? trainedOn(window.__evolveFitStateForChecklist, dayKey || todayKey) : false;
+ return autoWorkout || isDone(day.tasks[t.id], t);
+}).length;
  return /*#__PURE__*/React.createElement("div", {
  className: "card section tint-" + sec.tint
  }, /*#__PURE__*/React.createElement("button", {
