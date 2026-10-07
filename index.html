@@ -1267,10 +1267,6 @@ const weeklyTasksForKey = key => {
 const dayList = key => [...FIXED_TASKS, ...weeklyTasksForKey(key)];
 const isDone = (rec, t) => t.qty ? rec && Number(rec.value) > 0 : !!(rec && rec.done);
 
-const FIXED_TASKS = SECTIONS.flatMap(s => s.chores ? [] : s.groups ? s.groups.flatMap(g => g.tasks) : s.tasks);
-const dayList = key => [...FIXED_TASKS, ...choresForKey(key)];
-const isDone = (rec, t) => t.qty ? rec && rec.value > 0 : !!(rec && rec.done);
-
 /* ------------------------------- goals ---------------------------------- */
 const GOALS = [{
  id: "treinos",
