@@ -741,6 +741,7 @@ const firebaseConfig = {
   measurementId: "G-B5V1CV6H58"
 };
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLA_AQUI") === -1 && typeof firebase !== "undefined";
+let fbAuth = null, fbDb = null;
 /* Cloud AI — Gemini via Firebase Cloud Function. A API key do Gemini nunca fica no HTML. */
 const EVOLVEFIT_AI_ENDPOINT = "https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi";
 const EVOLVEFIT_FIREBASE_PROJECT_ID = "evolvefit2-df25f";
