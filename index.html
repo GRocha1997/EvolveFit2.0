@@ -208,7 +208,7 @@ window.evfEnableNotifications=async function(){
   if(reg) reg.active?.postMessage({type:"TEST_NOTIFICATION"});
   return true;
 };
-window.addEventListener("load",()=>window.evfRegisterSW());
+window.addEventListener("load",()=>{window.evfRegisterSW();try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}});
 window.addEventListener("online",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
 window.addEventListener("offline",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
 document.addEventListener("visibilitychange",async()=>{
@@ -612,11 +612,28 @@ const load = uid => {
  }
 };
 
+const SNAP_KEY = BASE_KEY + "_snapshots";
+let _snapDay = null;
+try { _snapDay = localStorage.getItem(SNAP_KEY + "_day"); } catch (e) {}
+/* Guarda no máximo 1 cópia por dia (últimas 3) para recuperar de qualquer engano. */
+const snapshotDaily = payload => {
+ try {
+   const day = new Date().toISOString().slice(0, 10);
+   if (_snapDay === day) return;
+   const arr = JSON.parse(localStorage.getItem(SNAP_KEY) || "[]");
+   arr.push({day, at: Date.now(), json: payload});
+   while (arr.length > 3) arr.shift();
+   localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+   localStorage.setItem(SNAP_KEY + "_day", day);
+   _snapDay = day;
+ } catch (e) {}
+};
 const save = (s, uid) => {
  try {
    const payload = JSON.stringify(s);
    localStorage.setItem(keyFor(uid), payload);
    localStorage.setItem(DEVICE_BACKUP_KEY, payload);
+   if (s && ((s.body && s.body.length) || (s.sessions && s.sessions.length))) snapshotDaily(payload);
  } catch (e) {
    console.error("Erro de persistência local:", e);
  }
@@ -658,8 +675,13 @@ function normalize(s) {
  if (!Array.isArray(s.profile.planAdjustments)) s.profile.planAdjustments = [];
  if (s.theme == null) s.theme = "light";
  if (!s.menus || typeof s.menus !== "object" || !s.menus.manha || !s.menus.tarde) s.menus = clone(MENUS);
- if (!Array.isArray(s.plano) || s.planoVersion !== PLAN_VERSION) {
+ if (!Array.isArray(s.plano) || !s.plano.length) {
  s.plano = clone(PLAN);
+ s.planoVersion = PLAN_VERSION;
+ } else if (s.planoVersion !== PLAN_VERSION) {
+ // Nunca repor o plano: preserva cargas, reps e edições do utilizador.
+ // Só acrescenta dias do plano base que ainda não existam.
+ PLAN.forEach(pd => { if (!s.plano.some(d => d && d.day === pd.day)) s.plano.push(clone(pd)); });
  s.planoVersion = PLAN_VERSION;
  }
  // Migração Verão 2027: Quinta troca Cable Fly por Single-Arm DB Chest Press (mantém as cargas guardadas)
@@ -841,9 +863,18 @@ function cloudQueueClear(){
 async function evolveFitCloudSave(uid, state){
   if(!uid || !fbDb || !state) return false;
   const payload = toCloud(state);
+  if(payload._json.length > 850000 && !window.__evfSizeWarned){
+    window.__evfSizeWarned = true;
+    console.warn("Dados perto do limite de 1 MB da nuvem:", payload._json.length);
+    try{ alert("Os teus dados estão perto do limite da nuvem (1 MB). Exporta um backup no Relatório e diz-me para dividir o histórico por ano."); }catch(e){}
+  }
   cloudQueueWrite({uid, payload, queuedAt:Date.now()});
   window.evfSetCloudStatus && window.evfSetCloudStatus(navigator.onLine ? "saving" : "offline");
   if(!navigator.onLine) return false;
+  // Só escreve na nuvem depois de a nuvem ter sido lida (evita que um estado
+  // vazio/antigo sobrescreva dados mais recentes). A edição fica guardada
+  // localmente e na fila; é enviada logo a seguir à primeira leitura.
+  if(!window.__evfRemoteSeen) return false;
   try{
     await fbDb.collection("users").doc(uid).set(payload);
     cloudQueueClear();
@@ -859,6 +890,8 @@ async function evolveFitCloudSave(uid, state){
 async function evolveFitFlushCloudQueue(){
   const q=cloudQueueRead();
   if(!q || !navigator.onLine || !fbDb || !q.uid || !q.payload) return;
+  if(!window.__evfRemoteSeen) return;
+  if((Number(q.payload._updatedAt) || 0) < (window.__evfRemoteUpdatedAt || 0)){ cloudQueueClear(); return; }
   try{
     await fbDb.collection("users").doc(q.uid).set(q.payload);
     cloudQueueClear();
@@ -881,7 +914,6 @@ if (CLOUD_ENABLED) {
  fbDb.enablePersistence({synchronizeTabs:true})
    .then(()=>console.log("Firestore offline persistence ativa."))
    .catch(e=>console.warn("Firestore offline persistence:",e.code||e));
- evolveFitFlushCloudQueue();
  } catch (e) {
  console.error("Firebase init falhou:", e);
  }
@@ -1584,6 +1616,13 @@ const lastWeekdayDate = W => {
 
 /* ---------------------------- seed sample data -------------------------- */
 function seed() {
+ const s = seedDemo();
+ s.days = {};
+ s.body = [];
+ s.sessions = [];
+ return s;
+}
+function seedDemo() {
  const days = {},
  body = [],
  sessions = [];
@@ -2036,6 +2075,12 @@ function Dashboard({
  const [wDay, setWDay] = useState(null);
  const [, setDayTick] = useState(0); // força re-render quando o dia civil muda
  const first = useRef(true);
+ const [cloudReady, setCloudReady] = useState(!(uid && fbDb)); // nuvem = fonte principal
+ useEffect(() => {
+   if (cloudReady) return;
+   const t = setTimeout(() => setCloudReady(true), 5000); // offline: usa a cache local
+   return () => clearTimeout(t);
+ }, [cloudReady]);
  const syncedJson = useRef(null); // último JSON já sincronizado com a nuvem
  const writeTimer = useRef(null);
  const stateRef = useRef(state);
@@ -2121,6 +2166,10 @@ function Dashboard({
  } // ignora o eco da própria escrita
  if (!snap.exists) {
  // Primeira vez nesta conta: envia o estado atual para a nuvem.
+ if (snap.metadata.fromCache) return; // cache vazia não significa conta vazia
+ setCloudReady(true);
+ window.__evfRemoteSeen = true;
+ window.__evfRemoteUpdatedAt = 0;
  const j = JSON.stringify(stateRef.current);
  syncedJson.current = j;
  ref.set(toCloud(stateRef.current)).catch(e => console.error(e));
@@ -2128,10 +2177,15 @@ function Dashboard({
  }
  const remote = fromCloud(snap.data());
  const j = JSON.stringify(remote);
+ setCloudReady(true);
+ window.__evfRemoteSeen = true;
+ window.__evfRemoteUpdatedAt = Number(remote && remote._updatedAt) || 0;
  if (j !== syncedJson.current) {
  const localUpdatedAt = stateRef.current._updatedAt || 0;
  const remoteUpdatedAt = remote._updatedAt || 0;
  if (remoteUpdatedAt < localUpdatedAt) {
+   // O local é mais recente (ex.: editado offline): envia-o para a nuvem.
+   evolveFitCloudSave(uid, stateRef.current);
    return;
  }
  if (remoteUpdatedAt === localUpdatedAt &&
@@ -2142,11 +2196,16 @@ function Dashboard({
  window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
  const normalizedRemote = normalize(remote);
  if (normalizedRemote) {
+   try { // cópia de segurança do estado local antes de o substituir
+     const cur = JSON.stringify(stateRef.current);
+     if (cur !== JSON.stringify(normalizedRemote)) localStorage.setItem(BASE_KEY + "_before_remote", cur);
+   } catch (e) {}
    stateRef.current = normalizedRemote;
    setState(normalizedRemote);
  }
  }
  }, err => {
+   setCloudReady(true);
    window.evfSetCloudStatus && window.evfSetCloudStatus("error");
    console.error("Erro de sincronização:", err);
  });
@@ -2222,6 +2281,9 @@ function Dashboard({
    return p;
  }
 });
+ if (!cloudReady) return React.createElement("div", {className: "app-wrap"},
+   React.createElement("div", {className: "phone"},
+     React.createElement("div", {className: "scroll", style: {display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)"}}, "A sincronizar com a nuvem…")));
  const onNavigate = id => {
    setWDay(null);
    setTab(id);
@@ -4255,6 +4317,26 @@ function Body({
 
 
 /* ============================= COACH 2027 ============================== */
+function aiFullHistory(st) {
+  try {
+    const compact = tasks => {
+      const out = {};
+      Object.keys(tasks || {}).forEach(k => {
+        const t = tasks[k];
+        if (t && (t.value != null || t.done)) out[k] = t.value != null ? t.value : 1;
+      });
+      return out;
+    };
+    const dayKeys = Object.keys(st.days || {}).sort().slice(-120);
+    return {
+      perfil: st.profile || {},
+      pesagens: (st.body || []).map(b => ({data:b.date, peso:b.weight, gordura:b.bodyFat, musculo:b.muscle, esqueletico:b.skeletal, visceral:b.visceral, cintura:b.cintura, perna:b.perna, rabo:b.rabo})),
+      diario: dayKeys.map(k => ({data:k, agua:(st.days[k] && st.days[k].water) || 0, registos:compact(st.days[k] && st.days[k].tasks)})),
+      sessoes: (st.sessions || []).slice(-60).map(se => ({data:se.date, dia:se.dayIdx, exercicios:(se.ex || []).map(e => ({nome:e.name, series:e.sets, reps:e.reps, carga:e.weight, rir:e.rir, repsLadoMenor:e.repsS, repsLadoMaior:e.repsB}))})),
+      plano: (st.plano || []).map(d => ({dia:d.day, nome:d.name, exercicios:(d.ex || []).map(x => ({nome:x.name, series:x.sets, reps:x.reps, repsMax:x.repsMax, carga:x.weight, rir:x.rir}))}))
+    };
+  } catch (e) { return null; }
+}
 function Coach2027({ state, update, onNavigate }) {
  const prof = state.profile || {};
  const today = state.days[todayKey] || { tasks:{}, water:0 };
@@ -4456,7 +4538,9 @@ function Coach2027({ state, update, onNavigate }) {
    alerts: alerts.map(a=>({text:a.text,level:a.level})),
    adherence28,
    recentSessions: aiRecentSessions,
-   recentDays: aiRecentDays
+   recentDays: aiRecentDays,
+ fullHistory: aiFullHistory(state),
+ instructions: "Usa TODO o fullHistory (pesagens, diário por dia, sessões, plano e perfil) e correlaciona sempre sono, calorias, proteína, passos, cardio, treino/cargas, peso, gordura e cintura antes de responder. Cita datas e valores concretos."
  };
 
  const localAI = question => {
@@ -4543,9 +4627,11 @@ function Coach2027({ state, update, onNavigate }) {
  const [photos,setPhotos] = useState(()=>{
  try{return JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")}catch(e){return[]}
  });
+ const PH_KEY = "evolvefit_progress_photos_v1";
+ // Fotos ficam só neste dispositivo (por escolha); o resto dos dados vai para a nuvem.
  const savePhotos = arr => {
  setPhotos(arr);
- try{localStorage.setItem("evolvefit_progress_photos_v1",JSON.stringify(arr))}catch(e){alert("Sem espaço local para mais fotografias. Remove algumas antigas.");}
+ try{localStorage.setItem(PH_KEY,JSON.stringify(arr))}catch(e){alert("Sem espaço local para mais fotografias. Remove algumas antigas.");}
  };
  const addPhoto = e => {
  const f=e.target.files && e.target.files[0]; if(!f) return;
@@ -4557,7 +4643,7 @@ function Coach2027({ state, update, onNavigate }) {
  const c=document.createElement("canvas"); c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale);
  c.getContext("2d").drawImage(img,0,0,c.width,c.height);
  const data=c.toDataURL("image/jpeg",.62);
- const arr=[...photos,{id:Date.now(),date:todayKey,data}].slice(-8);
+ const arr=[...photos,{id:Date.now(),date:todayKey,data}].slice(-12);
  savePhotos(arr);
  };
  img.src=ev.target.result;
