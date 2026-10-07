@@ -140,6 +140,81 @@
 })();
 </script>
 
+
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="EvolveFit">
+<meta name="application-name" content="EvolveFit">
+<style id="evolvefit-pro-features-css">
+.ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
+.ef-pro-tile{border:1px solid var(--border);background:var(--surface2);border-radius:14px;padding:12px}
+.ef-pro-title{font-size:14px;font-weight:750;color:var(--text)}
+.ef-pro-note{font-size:12px;line-height:1.45;color:var(--muted);margin-top:5px}
+.ef-pro-btn{width:100%;border:1px solid var(--border);background:var(--surface);color:var(--text);border-radius:12px;padding:10px 12px;font:inherit;font-size:13px;font-weight:700;cursor:pointer;margin-top:9px}
+.ef-pro-btn.primary{background:var(--coral);border-color:var(--coral);color:#fff}
+.ef-pro-btn.good{background:var(--green);border-color:var(--green);color:#fff}
+.ef-pro-status{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 9px;font-size:11px;font-weight:750;background:var(--surface2);color:var(--muted);border:1px solid var(--border)}
+.ef-pro-status.good{color:var(--green);background:rgba(24,134,75,.08)}
+.ef-pro-status.bad{color:var(--bad);background:rgba(192,57,43,.08)}
+.ef-pro-row{display:flex;justify-content:space-between;gap:12px;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)}
+.ef-pro-row:last-child{border-bottom:0}
+.ef-pro-k{font-size:13px;color:var(--muted)}
+.ef-pro-v{font-size:13px;font-weight:700;color:var(--text);text-align:right}
+.ef-pro-input{width:100%;border:1px solid var(--border);background:var(--surface2);color:var(--text);border-radius:11px;padding:10px 11px;font:inherit;font-size:14px;margin-top:8px}
+.ef-pro-details{margin-top:10px}
+.ef-pro-details summary{cursor:pointer;font-size:13px;font-weight:700;color:var(--text)}
+.ef-lib-grid{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:10px}
+.ef-lib-item{display:flex;gap:9px;align-items:center;border:1px solid var(--border);border-radius:12px;padding:9px;background:var(--surface2)}
+.ef-lib-img{width:48px;height:48px;border-radius:10px;background:#eef2f5;display:flex;align-items:center;justify-content:center;flex:none;overflow:hidden}
+.ef-lib-img svg{width:44px;height:44px}
+.ef-lib-name{font-size:12px;font-weight:700;color:var(--text)}
+.ef-lib-sub{font-size:10.5px;color:var(--muted);margin-top:2px}
+.ef-superset{font-size:12.5px;color:var(--text);padding:8px 0;border-bottom:1px solid var(--border)}
+.ef-superset:last-child{border-bottom:0}
+.ef-corr{font-size:12.5px;line-height:1.45;color:var(--text);padding:8px 0;border-bottom:1px solid var(--border)}
+.ef-corr:last-child{border-bottom:0}
+@media(max-width:380px){.ef-pro-grid,.ef-lib-grid{grid-template-columns:1fr}}
+</style>
+<script id="evolvefit-pwa-bootstrap">
+window.EvolveFitCloudStatus = window.EvolveFitCloudStatus || {status:"idle",at:0};
+window.evfSetCloudStatus=function(status){
+  window.EvolveFitCloudStatus={status:status,at:Date.now()};
+  window.dispatchEvent(new CustomEvent("evolvefit-cloud-status",{detail:window.EvolveFitCloudStatus}));
+};
+window.evfRegisterSW=async function(){
+  if(!("serviceWorker" in navigator)) return null;
+  try{return await navigator.serviceWorker.register("./sw.js",{scope:"./"});}catch(e){console.warn("Service worker:",e);return null;}
+};
+window.evfRequestWakeLock=async function(){
+  try{
+    if(!("wakeLock" in navigator)) throw new Error("Wake Lock não suportado neste dispositivo.");
+    if(window.__evfWakeLock) return true;
+    window.__evfWakeLock=await navigator.wakeLock.request("screen");
+    window.__evfWakeLock.addEventListener("release",()=>{window.__evfWakeLock=null;window.dispatchEvent(new Event("evolvefit-wakelock"));});
+    window.dispatchEvent(new Event("evolvefit-wakelock"));
+    return true;
+  }catch(e){console.warn("Wake Lock:",e);return false;}
+};
+window.evfReleaseWakeLock=async function(){
+  try{if(window.__evfWakeLock){await window.__evfWakeLock.release();window.__evfWakeLock=null;}window.dispatchEvent(new Event("evolvefit-wakelock"));}catch(e){}
+};
+window.evfEnableNotifications=async function(){
+  if(!("Notification" in window)) throw new Error("Notificações não suportadas.");
+  const perm=await Notification.requestPermission();
+  if(perm!=="granted") return false;
+  const reg=await window.evfRegisterSW();
+  if(reg) reg.active?.postMessage({type:"TEST_NOTIFICATION"});
+  return true;
+};
+window.addEventListener("load",()=>window.evfRegisterSW());
+window.addEventListener("online",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
+window.addEventListener("offline",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
+document.addEventListener("visibilitychange",async()=>{
+  if(document.visibilityState==="visible" && window.__evfWakeLockWanted) await window.evfRequestWakeLock();
+});
+</script>
+
 </head><body><div id="root"></div><script>
 /**
  * @license React
@@ -1993,8 +2068,10 @@ function Dashboard({
      try {
        const payload = JSON.parse(JSON.stringify(safe));
        syncedJson.current = JSON.stringify(payload);
+       window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
        fbDb.collection("users").doc(uid).set(toCloud(payload))
-         .catch(e => console.error("Erro ao guardar na nuvem:", e));
+         .then(() => window.evfSetCloudStatus && window.evfSetCloudStatus("saved"))
+         .catch(e => { window.evfSetCloudStatus && window.evfSetCloudStatus("error"); console.error("Erro ao guardar na nuvem:", e); });
      } catch (e) { console.error("Erro ao preparar sincronização:", e); }
    }
    return safe;
@@ -2594,7 +2671,11 @@ function Workouts({
  key: k,
  className: "seg-b" + (view === k ? " on" : ""),
  onClick: () => setView(k)
- }, l))), view === "treino" && React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(RestTimer, null), /*#__PURE__*/React.createElement("div", {
+ }, l))), view === "treino" && React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(RestTimer, null), /*#__PURE__*/React.createElement(WorkoutToolkit, {
+ state: state,
+ sel: sel,
+ lastSession: lastSession
+ }), /*#__PURE__*/React.createElement("div", {
  className: "day-picker"
  }, plano.map((d, i) => /*#__PURE__*/React.createElement("button", {
  key: i,
@@ -4311,6 +4392,7 @@ function Coach2027({ state, update, onNavigate }) {
 
  return /*#__PURE__*/React.createElement("div",null,
  /*#__PURE__*/React.createElement(TabHead,{title:"Coach 2027",sub:"Decisões com base nos teus dados"}),
+ /*#__PURE__*/React.createElement(WeeklyCoachInsights,{state:state}),
  /*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
  /*#__PURE__*/React.createElement("div",{className:"coach27-badge"}," Verão 2027"),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"26px",fontWeight:800,marginTop:"10px"}},status),
@@ -4538,6 +4620,190 @@ function Goals({
 }
 
 /* =============================== RELATÓRIOS ============================ */
+
+/* ===================== EVOLVEFIT PRO / PWA FEATURES ===================== */
+function efPearson(xs, ys){
+  const n=Math.min(xs.length,ys.length); if(n<3) return null;
+  const ax=xs.slice(0,n).reduce((a,b)=>a+b,0)/n, ay=ys.slice(0,n).reduce((a,b)=>a+b,0)/n;
+  let num=0,dx=0,dy=0;
+  for(let i=0;i<n;i++){const a=xs[i]-ax,b=ys[i]-ay;num+=a*b;dx+=a*a;dy+=b*b;}
+  return dx&&dy ? num/Math.sqrt(dx*dy) : null;
+}
+function WeeklyCoachInsights({state}){
+  const days=lastNDays(state.days,7);
+  const paired=(id,fn)=>days.map(w=>{
+    const d=w.day||{tasks:{},water:0};
+    const v=id==="water" ? Number(d.water||0)/1000 : Number(d.tasks&&d.tasks[id]&&d.tasks[id].value||0);
+    return {v,score:dayPct(d,w.key)};
+  }).filter(x=>x.v>0);
+  const metrics=[
+    ["Sono","sono","h"],
+    ["Passos","passos",""],
+    ["Proteína","proteina","g"],
+    ["Água","water","L"]
+  ];
+  const corrs=metrics.map(([name,id,unit])=>{
+    const p=paired(id); return {name,id,unit,n:p.length,r:efPearson(p.map(x=>x.v),p.map(x=>x.score))};
+  }).filter(x=>x.r!=null).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  const wk=weekFromMonday(state.days);
+  const sessions=(state.sessions||[]).filter(s=>wk.some(w=>w.key===s.date)).length;
+  const consistency=Math.round(days.reduce((a,w)=>a+dayPct(w.day,w.key),0)/7);
+  const body=[...(state.body||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  const last=body.at(-1), prev=body.at(-2);
+  const suggestion = consistency<65 ? "Prioridade: melhorar consistência antes de alterar o plano."
+    : sessions<4 ? "Prioridade: recuperar a frequência de treino esta semana."
+    : last&&prev&&last.weight<prev.weight ? "Tendência favorável: mantém a estratégia e volta a avaliar com mais dados."
+    : "Mantém o plano atual e usa tendência semanal, não um único dia, para decidir ajustes.";
+  const weekKey=iso(addDays(TODAY,-((TODAY.getDay()+6)%7)));
+  useEffect(()=>{try{
+    const k="evolvefit_weekly_reports_v1";
+    const arr=JSON.parse(localStorage.getItem(k)||"[]");
+    if(!arr.some(x=>x.week===weekKey)){arr.push({week:weekKey,generatedAt:Date.now(),consistency,sessions,suggestion});localStorage.setItem(k,JSON.stringify(arr.slice(-26)));}
+  }catch(e){}},[weekKey,consistency,sessions,suggestion]);
+  return /*#__PURE__*/React.createElement("div",{className:"card"},
+    /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Relatório semanal automático"),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},consistency+"%"), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"consistência · últimos 7 dias")),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},sessions+" treino"+(sessions===1?"":"s")), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"esta semana"))
+    ),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px",fontWeight:650,color:"var(--text)"}},suggestion),
+    corrs.length ? /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Correlações dos teus dados"),
+      corrs.map((c,i)=>/*#__PURE__*/React.createElement("div",{className:"ef-corr",key:c.id},
+        c.name,": ",c.r>0?"associação positiva ":"associação inversa ","(",Math.abs(c.r).toFixed(2),", ",c.n," dias)."
+      )),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Correlação não prova causalidade; usa estes padrões como pistas para testar ao longo de várias semanas.")
+    ) : /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px"}},"Regista pelo menos 3 dias comparáveis de sono, passos, proteína ou água para calcular correlações.")
+  );
+}
+function efExerciseSvg(kind){
+  const common='stroke="#344B60" stroke-width="2.2" fill="none" stroke-linecap="round" stroke-linejoin="round"';
+  if(kind==="legs") return '<svg viewBox="0 0 64 64"><circle cx="32" cy="12" r="5" '+common+'/><path d="M32 17v16m0 0-11 13m11-13 12 13M21 46l-4 9m27-9 4 9M24 27h16" '+common+'/></svg>';
+  if(kind==="pull") return '<svg viewBox="0 0 64 64"><circle cx="32" cy="13" r="5" '+common+'/><path d="M32 18v20m0-15L18 31m14-8 14 8M24 39l-4 14m12-14 12 14M12 8h40" '+common+'/></svg>';
+  return '<svg viewBox="0 0 64 64"><circle cx="32" cy="13" r="5" '+common+'/><path d="M32 18v20m0-14L17 18m15 6 15-6M24 39l-5 14m13-14 13 14M10 17h12m20 0h12" '+common+'/></svg>';
+}
+function WorkoutToolkit({state,sel,lastSession}){
+  const plan=(state.plano||[])[sel]||{ex:[]};
+  const [wake,setWake]=useState(!!window.__evfWakeLock);
+  const [target,setTarget]=useState(()=>Number(plan.ex&&plan.ex[0]&&plan.ex[0].weight||60));
+  const [bar,setBar]=useState(20);
+  const [search,setSearch]=useState("");
+  useEffect(()=>{const f=()=>setWake(!!window.__evfWakeLock);window.addEventListener("evolvefit-wakelock",f);return()=>window.removeEventListener("evolvefit-wakelock",f)},[]);
+  const toggleWake=async()=>{if(wake){window.__evfWakeLockWanted=false;await window.evfReleaseWakeLock();}else{window.__evfWakeLockWanted=true;await window.evfRequestWakeLock();}};
+  const work=Number(target)||0, bw=Number(bar)||0;
+  const warm=[.4,.6,.8].map((p,i)=>({pct:Math.round(p*100),kg:Math.max(bw,Math.round(work*p/2.5)*2.5),reps:[8,5,3][i]})).filter(x=>x.kg<work);
+  const plates=[25,20,15,10,5,2.5,1.25,.5];
+  let rem=Math.max(0,(work-bw)/2), used=[];
+  plates.forEach(pl=>{const n=Math.floor((rem+1e-8)/pl);if(n){used.push(n+"×"+pl);rem-=n*pl;}});
+  const supers=[];
+  for(let i=0;i+1<plan.ex.length;i+=2) if(i>=2) supers.push([plan.ex[i].name,plan.ex[i+1].name]);
+  const compare=lastSession ? plan.ex.map((e,i)=>{
+    const old=lastSession.ex&&lastSession.ex[i]; if(!old||!e.weight) return null;
+    const d=Number(e.weight)-Number(old.weight||0); return d===0?null:{name:e.name,d};
+  }).filter(Boolean) : [];
+  const lib=[
+    ["Incline DB Press","Peito","push"],["Lat Pulldown","Costas","pull"],["Seated Cable Row","Costas","pull"],
+    ["Back Squat","Pernas","legs"],["Romanian Deadlift","Posterior","legs"],["Leg Press","Pernas","legs"],
+    ["Lateral Raise","Ombros","push"],["Face Pull","Deltoide posterior","pull"],["Hammer Curl","Bíceps","pull"],["Rope Pushdown","Tríceps","push"]
+  ].filter(x=>(x[0]+" "+x[1]).toLowerCase().includes(search.toLowerCase()));
+  return /*#__PURE__*/React.createElement("div",{className:"card"},
+    /*#__PURE__*/React.createElement("div",{className:"pc-head"},
+      /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Ferramentas de treino"),
+      /*#__PURE__*/React.createElement("span",{className:"ef-pro-status "+(wake?"good":"")},wake?"Ecrã ativo":"Wake Lock desligado")
+    ),
+    /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn "+(wake?"good":"primary"),onClick:toggleWake},wake?"Permitir que o ecrã desligue":"Manter ecrã ligado durante o treino"),
+    /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Aquecimento automático"),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Com base numa carga de trabalho de ",work||"—"," kg."),
+      warm.length ? warm.map((x,i)=>/*#__PURE__*/React.createElement("div",{className:"ef-pro-row",key:i},
+        /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},x.pct+"%"),
+        /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},x.kg+" kg × "+x.reps+" reps")
+      )) : /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Define uma carga de trabalho acima da barra.")
+    ),
+    /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Calculadora de discos"),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
+        /*#__PURE__*/React.createElement("label",{className:"ef-pro-note"},"Carga total", /*#__PURE__*/React.createElement("input",{className:"ef-pro-input",inputMode:"decimal",value:target,onChange:e=>setTarget(e.target.value)})),
+        /*#__PURE__*/React.createElement("label",{className:"ef-pro-note"},"Barra", /*#__PURE__*/React.createElement("input",{className:"ef-pro-input",inputMode:"decimal",value:bar,onChange:e=>setBar(e.target.value)}))
+      ),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"9px"}},work>=bw ? "Por lado: "+(used.length?used.join(" + "):"sem discos")+(rem>.24?" · faltam "+rem.toFixed(2)+" kg por lado":"") : "A carga total tem de ser ≥ ao peso da barra.")
+    ),
+    /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Superséries sugeridas"),
+      supers.length ? supers.map((s,i)=>/*#__PURE__*/React.createElement("div",{className:"ef-superset",key:i},"A"+(i+1)+": ",s[0]," + ",s[1])) : /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Este treino não tem pares suficientes para sugerir superséries.")
+    ),
+    /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Comparar com a sessão anterior"),
+      !lastSession ? /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Ainda não existe sessão anterior deste treino.") :
+      compare.length ? compare.map((x,i)=>/*#__PURE__*/React.createElement("div",{className:"ef-pro-row",key:i},
+        /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},x.name),
+        /*#__PURE__*/React.createElement("span",{className:"ef-pro-v",style:{color:x.d>0?"var(--green)":"var(--bad)"}},(x.d>0?"+":"")+x.d+" kg")
+      )) : /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"As cargas principais estão iguais à sessão anterior.")
+    ),
+    /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Biblioteca de exercícios"),
+      /*#__PURE__*/React.createElement("input",{className:"ef-pro-input",placeholder:"Pesquisar exercício…",value:search,onChange:e=>setSearch(e.target.value)}),
+      /*#__PURE__*/React.createElement("div",{className:"ef-lib-grid"},
+        lib.map((x,i)=>/*#__PURE__*/React.createElement("div",{className:"ef-lib-item",key:x[0]},
+          /*#__PURE__*/React.createElement("div",{className:"ef-lib-img",dangerouslySetInnerHTML:{__html:efExerciseSvg(x[2])}}),
+          /*#__PURE__*/React.createElement("div",null, /*#__PURE__*/React.createElement("div",{className:"ef-lib-name"},x[0]), /*#__PURE__*/React.createElement("div",{className:"ef-lib-sub"},x[1]))
+        ))
+      )
+    )
+  );
+}
+function EvolveFitSystemCard({state,user,update}){
+  const [online,setOnline]=useState(navigator.onLine);
+  const [cloud,setCloud]=useState(window.EvolveFitCloudStatus||{status:"idle",at:0});
+  const [notif,setNotif]=useState(typeof Notification!=="undefined"?Notification.permission:"unsupported");
+  const fileRef=React.useRef(null);
+  useEffect(()=>{
+    const o=()=>setOnline(navigator.onLine), c=e=>setCloud(e.detail||window.EvolveFitCloudStatus);
+    window.addEventListener("evolvefit-online-state",o);window.addEventListener("evolvefit-cloud-status",c);
+    return()=>{window.removeEventListener("evolvefit-online-state",o);window.removeEventListener("evolvefit-cloud-status",c)}
+  },[]);
+  useEffect(()=>{try{
+    const d=state.days&&state.days[todayKey], list=dayList(todayKey), done=list.filter(t=>isDone(d&&d.tasks&&d.tasks[t.id],t)).length;
+    const pending=Math.max(0,list.length-done);
+    if("setAppBadge" in navigator){pending?navigator.setAppBadge(pending):navigator.clearAppBadge();}
+  }catch(e){}},[state._updatedAt]);
+  const exportData=async()=>{
+    const payload={app:"EvolveFit",version:2,exportedAt:new Date().toISOString(),state,photos:JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")};
+    const file=new File([JSON.stringify(payload,null,2)],"evolvefit-backup-"+todayKey+".json",{type:"application/json"});
+    try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:"Backup EvolveFit"});return;}}catch(e){}
+    const a=document.createElement("a");a.href=URL.createObjectURL(file);a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  };
+  const importData=async e=>{
+    const f=e.target.files&&e.target.files[0]; if(!f)return;
+    try{
+      const data=JSON.parse(await f.text()); const imported=normalize(data.state||data);
+      if(!imported) throw new Error("Backup inválido");
+      if(!confirm("Importar este backup e substituir os dados atuais?")) return;
+      const k=keyFor(user&&user.uid);localStorage.setItem(k,JSON.stringify(imported));
+      if(Array.isArray(data.photos)) localStorage.setItem("evolvefit_progress_photos_v1",JSON.stringify(data.photos));
+      location.reload();
+    }catch(err){alert("Não foi possível importar: "+err.message);}
+    finally{e.target.value="";}
+  };
+  const enableNotif=async()=>{try{const ok=await window.evfEnableNotifications();setNotif(ok?"granted":Notification.permission);if(!ok)alert("Permissão de notificações não concedida.");}catch(e){alert(e.message)}};
+  const cloudText=!user?"Só local":cloud.status==="saving"?"A guardar…":cloud.status==="saved"?"Guardado na nuvem":cloud.status==="error"?"Erro de sincronização":online?"Nuvem ligada":"Offline";
+  return /*#__PURE__*/React.createElement("div",{className:"card"},
+    /*#__PURE__*/React.createElement("div",{className:"pc-head"},
+      /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Dados, offline e notificações"),
+      /*#__PURE__*/React.createElement("span",{className:"ef-pro-status "+(online?"good":"bad")},online?"Online":"Offline")
+    ),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Sincronização"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},cloudText)),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Modo offline"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},"Ativo após a primeira abertura")),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
+      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:exportData},"Exportar backup"),
+      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:()=>fileRef.current&&fileRef.current.click()},"Importar backup")
+    ),
+    /*#__PURE__*/React.createElement("input",{ref:fileRef,type:"file",accept:"application/json,.json",style:{display:"none"},onChange:importData}),
+    /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn "+(notif==="granted"?"good":"primary"),onClick:enableNotif,disabled:notif==="granted"},notif==="granted"?"Notificações ativadas":"Ativar notificações e badge"),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Em iPhone, instala o EvolveFit no ecrã principal para obter a experiência PWA completa. A sincronização de dados pendentes acontece quando a app volta a abrir ou recupera ligação.")
+  );
+}
+
 function Report({
  state,
  update,
@@ -4607,6 +4873,10 @@ function Report({
  c: "#2A8FD6"
  })), /*#__PURE__*/React.createElement(GitCal, {
  days: state.days
+ }), /*#__PURE__*/React.createElement(EvolveFitSystemCard, {
+ state: state,
+ user: user,
+ update: update
  }), !report && /*#__PURE__*/React.createElement("button", {
  className: "big-btn report",
  onClick: generate,
