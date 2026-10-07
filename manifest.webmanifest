@@ -1,0 +1,25 @@
+{
+  "name": "EvolveFit",
+  "short_name": "EvolveFit",
+  "description": "Treino, corpo, progresso e AI Coach.",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#F3F5F6",
+  "theme_color": "#263A4D",
+  "orientation": "portrait-primary",
+  "icons": [
+    {
+      "src": "evolvefit-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "evolvefit-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    }
+  ]
+}
