@@ -2207,6 +2207,7 @@ function Dashboard({
  if (!snap.exists) {
  // Primeira vez nesta conta: envia o estado atual para a nuvem.
  if (snap.metadata.fromCache) return; // cache vazia não significa conta vazia
+ window.__evfDiag = {at: Date.now(), exists: false, fromCache: false};
  setCloudReady(true);
  window.__evfRemoteSeen = true;
  window.__evfRemoteUpdatedAt = 0;
@@ -2217,6 +2218,7 @@ function Dashboard({
  }
  const remote = fromCloud(snap.data());
  const j = JSON.stringify(remote);
+ window.__evfDiag = {at: Date.now(), exists: true, fromCache: !!snap.metadata.fromCache, remoteUpdatedAt: Number(remote && remote._updatedAt) || 0, remoteBody: ((remote && remote.body) || []).length, remoteDays: Object.keys((remote && remote.days) || {}).length};
  setCloudReady(true);
  window.__evfRemoteSeen = true;
  window.__evfRemoteUpdatedAt = Number(remote && remote._updatedAt) || 0;
@@ -5060,6 +5062,30 @@ function EvolveFitSystemCard({state,user,update}){
     finally{e.target.value="";}
   };
   const enableNotif=async()=>{try{const ok=await window.evfEnableNotifications();setNotif(ok?"granted":Notification.permission);if(!ok)alert("Permissão de notificações não concedida.");}catch(e){alert(e.message)}};
+  const [,setTick]=useState(0);
+  useEffect(()=>{const t=setInterval(()=>setTick(x=>x+1),1500);return()=>clearInterval(t)},[]);
+  const fmtT=ms=>ms?new Date(ms).toLocaleString("pt-PT",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
+  const dg=window.__evfDiag;
+  const nuvemTxt=!user||!fbDb?"sem ligação à nuvem":!dg?"sem resposta ainda":!dg.exists?"vazia (sem dados)":dg.remoteBody+" pesagens · "+dg.remoteDays+" dias · "+fmtT(dg.remoteUpdatedAt);
+  const localTxt=((state.body||[]).length)+" pesagens · "+Object.keys(state.days||{}).length+" dias · "+fmtT(state._updatedAt);
+  const forcePush=async()=>{
+    if(!user||!fbDb){alert("Esta sessão não está ligada à nuvem.");return;}
+    if(!confirm("Enviar os dados DESTE dispositivo para a nuvem? O que está agora na nuvem será substituído."))return;
+    try{const sn=JSON.parse(JSON.stringify(state));sn._updatedAt=Date.now();await fbDb.collection("users").doc(user.uid).set(toCloud(sn));window.__evfRemoteSeen=true;window.__evfRemoteUpdatedAt=sn._updatedAt;alert("Enviado. A nuvem tem agora os dados deste dispositivo.");}
+    catch(e){alert("Falhou: "+((e&&(e.code||e.message))||e));}
+  };
+  const forcePull=async()=>{
+    if(!user||!fbDb){alert("Esta sessão não está ligada à nuvem.");return;}
+    if(!confirm("Receber os dados da nuvem e substituir os deste dispositivo?"))return;
+    try{
+      const sn=await fbDb.collection("users").doc(user.uid).get({source:"server"});
+      if(!sn.exists){alert("A nuvem está vazia: não há nada para receber.");return;}
+      const remote=normalize(fromCloud(sn.data()));
+      try{localStorage.setItem(BASE_KEY+"_before_pull",JSON.stringify(state));}catch(e){}
+      update(n=>{Object.keys(n).forEach(k=>{delete n[k];});Object.assign(n,remote);});
+      alert("Dados recebidos da nuvem.");
+    }catch(e){alert("Falhou: "+((e&&(e.code||e.message))||e));}
+  };
   const cloudText=!user?"Só local":cloud.status==="saving"?"A guardar…":(cloud.status==="saved"||cloud.status==="remote")?"Guardado na nuvem":cloud.status==="error"?"Erro de sincronização":online?"Nuvem ligada":"Offline";
   return /*#__PURE__*/React.createElement("div",{className:"card"},
     /*#__PURE__*/React.createElement("div",{className:"pc-head"},
@@ -5068,6 +5094,14 @@ function EvolveFitSystemCard({state,user,update}){
     ),
     /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Sincronização"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},cloudText)),
     /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Modo offline"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},"Ativo após a primeira abertura")),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Conta"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},(user&&user.email)||"sem sessão")),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Na nuvem"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},nuvemTxt)),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Neste dispositivo"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},localTxt)),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Último erro"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},window.__evfLastCloudError||"nenhum")),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
+      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:forcePush},"Enviar deste dispositivo para a nuvem"),
+      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:forcePull},"Receber da nuvem")
+    ),
     /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
       /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:exportData},"Exportar backup"),
       /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:()=>fileRef.current&&fileRef.current.click()},"Importar backup")
