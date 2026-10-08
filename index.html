@@ -183,28 +183,6 @@ window.evfSetCloudStatus=function(status){
   window.EvolveFitCloudStatus={status:status,at:Date.now()};
   window.dispatchEvent(new CustomEvent("evolvefit-cloud-status",{detail:window.EvolveFitCloudStatus}));
 };
-(function(){
-  var css="";
-  var st=document.createElement("style");st.textContent=css;document.head.appendChild(st);
-  var el,timer;
-  function ensure(){if(!el){el=document.createElement("div");el.className="evf-sync";el.addEventListener("click",function(){
-    if(el.dataset.kind==="err")alert("Não foi possível guardar na nuvem.\n\n"+(window.__evfLastCloudError||"Erro desconhecido")+"\n\nSe disser permission-denied, confirma as Regras do Firestore e que tens sessão iniciada.");
-    else if(el.dataset.kind==="local")alert("Esta sessão não está ligada à nuvem, por isso os dados ficam só neste dispositivo.\n\nAbre a app a partir do endereço publicado (GitHub Pages) e inicia sessão com o teu email.");
-  });document.body.appendChild(el);}return el;}
-  function show(text,kind,ms,tap){var e=ensure();clearTimeout(timer);e.textContent=text;e.dataset.kind=kind;e.className="evf-sync on "+({ok:"ok",warn:"warn",err:"err",local:"warn",info:""}[kind]||"")+(tap?" tap":"");if(ms)timer=setTimeout(function(){e.className="evf-sync"},ms);}
-  function render(){
-    if(!document.body)return;
-    var mode=window.__evfSyncMode;if(!mode)return;
-    var s=(window.EvolveFitCloudStatus||{}).status;
-    if(mode==="local")return show("","local",0,true);
-    if(!navigator.onLine)return show("Sem ligação · guardado no telemóvel","warn",0,false);
-    if(s==="error")return show("Não guardou na nuvem · toca para ver","err",0,true);
-    if(s==="saving"){clearTimeout(timer);if(el)el.className="evf-sync";return;}
-    if(s==="saved")return show("✓ Guardado na nuvem","ok",2200,false);
-    if(s==="remote")return show("↓ Atualizado de outro dispositivo","ok",2600,false);
-  }
-  window.addEventListener("evolvefit-cloud-status",render);window.addEventListener("online",render);window.addEventListener("offline",render);
-})();
 window.evfRegisterSW=async function(){
   if(!("serviceWorker" in navigator)) return null;
   try{return await navigator.serviceWorker.register("./sw.js",{scope:"./"});}catch(e){console.warn("Service worker:",e);return null;}
@@ -559,7 +537,7 @@ const {
 /* A chave de cache local é específica de cada conta (uid). Assim, se algum
  dia usares a app com mais do que uma conta no mesmo dispositivo, os dados
  locais de uma não se misturam com os da outra. Sem conta (modo local
- puro, sem nuvem), usa-se uma chave fixa. */
+ puro, ), usa-se uma chave fixa. */
 const BASE_KEY = "lifeos_v4";
 const keyFor = uid => uid ? BASE_KEY + "_u_" + uid : BASE_KEY + "_local";
 const clone = o => window.structuredClone ? structuredClone(o) : JSON.parse(JSON.stringify(o));
@@ -888,7 +866,7 @@ async function evolveFitCloudSave(uid, state){
   if(payload._json.length > 850000 && !window.__evfSizeWarned){
     window.__evfSizeWarned = true;
     console.warn("Dados perto do limite de 1 MB da nuvem:", payload._json.length);
-    try{ alert("Os teus dados estão perto do limite da nuvem (1 MB). Exporta um backup no Relatório e diz-me para dividir o histórico por ano."); }catch(e){}
+    try{ alert("Os teus dados estão perto do limite da nuvem (1 MB). Exporta um backup antes de continuares a guardar muitos dados na nuvem."); }catch(e){}
   }
   cloudQueueWrite({uid, payload, queuedAt:Date.now()});
   window.evfSetCloudStatus && window.evfSetCloudStatus(navigator.onLine ? "saving" : "offline");
@@ -2344,6 +2322,11 @@ function Dashboard({
    setWDay(null);
    setTab(id);
  };
+ React.useEffect(() => {
+   const handler = e => onNavigate(e.detail);
+   window.addEventListener("evfNavigate", handler);
+   return () => window.removeEventListener("evfNavigate", handler);
+ }, []);
  const tabs = [{
  id: "check",
  label: "Hoje",
@@ -2370,7 +2353,7 @@ function Dashboard({
  ref: scrollRef
  }, tab === "check" && /*#__PURE__*/React.createElement(Checklist, {
  state: state,
- update: update, onNavigate: onNavigate,
+ update: update,
  onOpenWorkout: di => {
  setWDay(di);
  setTab("workout");
@@ -2388,11 +2371,6 @@ function Dashboard({
  state: state,
  update: update,
  onNavigate: onNavigate
- }), tab === "report" && /*#__PURE__*/React.createElement(Report, {
- state: state,
- update: update,
- user: user,
- onNavigate: onNavigate
  })), /*#__PURE__*/React.createElement("nav", {
  className: "tabbar"
  }, tabs.map(t => /*#__PURE__*/React.createElement("button", {
@@ -2409,12 +2387,17 @@ function Dashboard({
 }
 
 /* ============================ DAILY CHECKLIST =========================== */
-function Checklist({ state, update, onNavigate }) {
+function Checklist({
+ state,
+ update
+}) {
  const hour = TODAY.getHours();
  const greet = hour < 12 ? "Bom dia" : hour < 19 ? "Boa tarde" : "Boa noite";
  const name = state && state.profile && state.profile.name ? state.profile.name : "";
- const firstName = name ? name.split(/\\s+/)[0] : "";
- const go = id => onNavigate && onNavigate(id);
+ const firstName = name ? name.split(/\s+/)[0] : "";
+ const go = id => {
+   window.dispatchEvent(new CustomEvent("evfNavigate", {detail:id}));
+ };
  return /*#__PURE__*/React.createElement("div", {className:"evf-home-premium"},
    /*#__PURE__*/React.createElement("div", {className:"evf-home-hero"},
      /*#__PURE__*/React.createElement("div", {className:"evf-home-kicker"}, "EVOLVEFIT"),
@@ -2422,7 +2405,9 @@ function Checklist({ state, update, onNavigate }) {
      /*#__PURE__*/React.createElement("div", {className:"evf-home-greeting"}, greet + (firstName ? ", " + firstName : "")),
      /*#__PURE__*/React.createElement("div", {className:"evf-home-date"}, longDate(TODAY)),
      /*#__PURE__*/React.createElement("div", {className:"evf-home-tagline"}, "Train. Track. Evolve."),
-     /*#__PURE__*/React.createElement("div", {className:"evf-home-copy"}, "A tua evolução, organizada num só lugar. Treino, corpo e decisões — simples, premium e focado no progresso.")
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-copy"},
+       "A tua evolução, organizada num só lugar. Treino, corpo e decisões — simples, premium e focado no progresso."
+     )
    ),
    /*#__PURE__*/React.createElement("div", {className:"evf-home-section-title"}, "O teu espaço"),
    /*#__PURE__*/React.createElement("div", {className:"evf-home-grid"},
@@ -2451,6 +2436,312 @@ function Checklist({ state, update, onNavigate }) {
      /*#__PURE__*/React.createElement("div", {className:"evf-home-quote-line"})
    )
  );
+}
+
+// Média móvel dos últimos `windowDays` dias (por defeito 7) até `endDate`,
+// para suavizar flutuações diárias do peso (água, sal, ciclo, etc.).
+const rollingAvgAt = (arr, endDate, key, windowDays = 7) => {
+ const start = iso(addDays(new Date(endDate + "T00:00:00"), -(windowDays - 1)));
+ const win = arr.filter(x => x.date >= start && x.date <= endDate && x[key]);
+ if (!win.length) return null;
+ return +(win.reduce((a, b) => a + (+b[key] || 0), 0) / win.length).toFixed(1);
+};
+const paceProjection = (body, bfTarget) => {
+ if (body.length < 2) return null;
+ const first = body[0],
+ last = body[body.length - 1];
+ const span = daysBetween(new Date(first.date + "T00:00:00"), new Date(last.date + "T00:00:00"));
+ if (span <= 0) return null;
+ const rate = (first.bodyFat - last.bodyFat) / span;
+ if (rate <= 0) return {
+ reached: false,
+ stalled: true
+ };
+ const toGo = +(last.bodyFat - bfTarget).toFixed(2);
+ if (toGo <= 0) return {
+ reached: true
+ };
+ const daysNeeded = Math.ceil(toGo / rate);
+ return {
+ reached: false,
+ stalled: false,
+ date: addDays(TODAY, daysNeeded),
+ days: daysNeeded
+ };
+};
+function WaterCard({
+ state,
+ update,
+ dayKey
+}) {
+ const key = dayKey || todayKey;
+ const GOAL = 2500;
+ const ml = state.days[key] && state.days[key].water || 0;
+ const pct = Math.min(100, Math.round(ml / GOAL * 100));
+ const [celebrate, setCelebrate] = useState(false);
+ const [custom, setCustom] = useState("");
+ const prev = useRef(ml);
+ useEffect(() => {
+ let t;
+ if (prev.current < GOAL && ml >= GOAL) {
+ setCelebrate(true);
+ t = setTimeout(() => setCelebrate(false), 2200);
+ }
+ prev.current = ml;
+ return () => t && clearTimeout(t);
+ }, [ml]);
+ const add = a => update(s => {
+ s.days[key] = s.days[key] || {
+ tasks: {},
+ water: 0
+ };
+ s.days[key].water = Math.max(0, (s.days[key].water || 0) + a);
+ });
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card water"
+ }, celebrate && /*#__PURE__*/React.createElement("div", {
+ className: "celebrate"
+ }, Array.from({
+ length: 14
+ }).map((_, i) => /*#__PURE__*/React.createElement("span", {
+ key: i,
+ className: "confetti",
+ style: {
+ left: i / 14 * 100 + "%",
+ animationDelay: i % 5 * 0.08 + "s",
+ background: ["#2A8FD6", "#2B5FD9", "#1E9E6A", "#6D5BD0", "#C98A1B"][i % 5]
+ }
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "celebrate-txt"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "droplet",
+ size: 16
+ }), " Objetivo atingido!")), /*#__PURE__*/React.createElement("div", {
+ className: "water-top"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "water-title"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "droplet",
+ size: 17
+ }), " Água"), /*#__PURE__*/React.createElement("div", {
+ className: "water-val"
+ }, (ml / 1000).toFixed(2), /*#__PURE__*/React.createElement("i", null, "L"), " ", /*#__PURE__*/React.createElement("span", {
+ className: "water-goal"
+ }, "/ 2.5L"))), /*#__PURE__*/React.createElement("div", {
+ className: "bar water-bar"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bar-fill",
+ style: {
+ width: pct + "%",
+ background: "linear-gradient(90deg,#2A8FD6,#2B6FCF)"
+ }
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "water-pct"
+ }, pct, "%"), /*#__PURE__*/React.createElement("div", {
+ className: "water-btns"
+ }, [250, 500, 750, 1000].map(a => /*#__PURE__*/React.createElement("button", {
+ key: a,
+ className: "chip",
+ onClick: () => add(a)
+ }, "+", a >= 1000 ? "1L" : a + "ml"))), /*#__PURE__*/React.createElement("div", {
+ className: "water-custom"
+ }, /*#__PURE__*/React.createElement("input", {
+ value: custom,
+ onChange: e => setCustom(e.target.value.replace(/\D/g, "")),
+ placeholder: "ml personalizado",
+ inputMode: "numeric"
+ }), /*#__PURE__*/React.createElement("button", {
+ onClick: () => {
+ if (custom) {
+ add(+custom);
+ setCustom("");
+ }
+ }
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "plus",
+ size: 16
+ }))));
+}
+function Section({
+ sec,
+ day,
+ toggle,
+ setQty,
+ dayKey
+}) {
+ const [open, setOpen] = useState(() => {
+ const ts = sec.chores ? choresForKey(dayKey || todayKey) : sec.tasks || [];
+ return !(ts.length && ts.every(t => isDone(day.tasks[t.id], t)));
+ });
+ if (sec.chores) {
+ const key = dayKey || todayKey;
+ const chores = choresForKey(key);
+ const room = CHORES[weekdayOf(key)] ? CHORES[weekdayOf(key)].room : null;
+ const done = chores.filter(t => day.tasks[t.id] && day.tasks[t.id].done).length;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card section tint-teal"
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "section-head",
+ onClick: () => setOpen(o => !o)
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "section-icon"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "home",
+ size: 17
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "section-title"
+ }, "Durante o dia"), /*#__PURE__*/React.createElement("div", {
+ className: "section-count"
+ }, chores.length ? done + "/" + chores.length : ""), /*#__PURE__*/React.createElement(I, {
+ name: "chevron",
+ size: 17,
+ className: "chev" + (open ? " open" : "")
+ })), open && /*#__PURE__*/React.createElement("div", {
+ className: "tasks"
+ }, chores.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+ className: "chore-header"
+ }, "", WD_LONG[weekdayOf(key)], " · ", room), chores.map(t => /*#__PURE__*/React.createElement("button", {
+ key: t.id,
+ className: "task" + (day.tasks[t.id] && day.tasks[t.id].done ? " done" : ""),
+ onClick: () => toggle(t.id)
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "checkbox" + (day.tasks[t.id] && day.tasks[t.id].done ? " on" : "")
+ }, day.tasks[t.id] && day.tasks[t.id].done && /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 13
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "task-label"
+ }, t.label)))) : /*#__PURE__*/React.createElement("div", {
+ className: "chore-header"
+ }, "Fim de semana — sem tarefas de casa")));
+ }
+ const groups = sec.groups || [{
+ label: null,
+ tasks: sec.tasks
+ }];
+ const all = groups.flatMap(g => g.tasks);
+ const done = all.filter(t => isDone(day.tasks[t.id], t)).length;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card section tint-" + sec.tint
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "section-head",
+ onClick: () => setOpen(o => !o)
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "section-icon"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: sec.icon,
+ size: 17
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "section-title"
+ }, sec.label), /*#__PURE__*/React.createElement("div", {
+ className: "section-count"
+ }, done, "/", all.length), /*#__PURE__*/React.createElement(I, {
+ name: "chevron",
+ size: 17,
+ className: "chev" + (open ? " open" : "")
+ })), open && /*#__PURE__*/React.createElement("div", {
+ className: "tasks"
+ }, groups.map((g, gi) => /*#__PURE__*/React.createElement("div", {
+ key: gi
+ }, g.label && /*#__PURE__*/React.createElement("div", {
+ className: "subgroup"
+ }, g.label), g.tasks.map(t => t.qty ? /*#__PURE__*/React.createElement("div", {
+ className: "qty-task",
+ key: t.id + "_" + dayKey
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "task-label"
+ }, t.label, t.goal && /*#__PURE__*/React.createElement("span", {
+ className: "task-tag"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "target",
+ size: 10
+ }))), /*#__PURE__*/React.createElement(QtyInput, {
+ value: day.tasks[t.id] ? day.tasks[t.id].value : 0,
+ unit: t.unit,
+ decimal: t.unit === "h",
+ onCommit: n => setQty(t.id, n)
+ })) : /*#__PURE__*/React.createElement("button", {
+ key: t.id,
+ className: "task" + (day.tasks[t.id] && day.tasks[t.id].done ? " done" : ""),
+ onClick: () => toggle(t.id)
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "checkbox" + (day.tasks[t.id] && day.tasks[t.id].done ? " on" : "")
+ }, day.tasks[t.id] && day.tasks[t.id].done && /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 13
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "task-label"
+ }, t.label), t.goal && /*#__PURE__*/React.createElement("span", {
+ className: "task-tag"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "target",
+ size: 10
+ }))))))));
+}
+/* Caixa de cardio semanal: check + minutos por dia, ligada aos mesmos dados
+ da tarefa "Cardio" do checklist diário. */
+function CardioWeekCard({
+ state,
+ update
+}) {
+ const weekDays = lastNDays(state.days, 7);
+ const total = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
+ const toggle = key => update(s => {
+ s.days[key] = s.days[key] || {
+ tasks: {},
+ water: 0
+ };
+ const t = s.days[key].tasks;
+ if (t.cardio && t.cardio.value > 0) delete t.cardio;else t.cardio = {
+ done: true,
+ value: 30
+ };
+ });
+ const setMin = (key, num) => update(s => {
+ s.days[key] = s.days[key] || {
+ tasks: {},
+ water: 0
+ };
+ const t = s.days[key].tasks;
+ if (!num || num <= 0) delete t.cardio;else t.cardio = {
+ done: true,
+ value: num
+ };
+ });
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card cardio-week"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "cardio-week-head"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "cardio-week-title"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "activity",
+ size: 15
+ }), " Cardio da semana"), /*#__PURE__*/React.createElement("div", {
+ className: "cardio-week-total"
+ }, total, " min")), weekDays.map(w => {
+ const rec = w.day && w.day.tasks.cardio;
+ const val = rec ? rec.value : 0;
+ const checked = val > 0;
+ const isToday = w.key === todayKey;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "cardio-day-row",
+ key: w.key
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "checkbox" + (checked ? " on" : ""),
+ onClick: () => toggle(w.key),
+ "aria-label": "Marcar cardio de " + WD[weekdayOf(w.key)]
+ }, checked && /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 13
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "cardio-day-label" + (isToday ? " today" : "")
+ }, WD[weekdayOf(w.key)], /*#__PURE__*/React.createElement("i", null, new Date(w.key + "T12:00:00").getDate(), isToday ? " · hoje" : "")), /*#__PURE__*/React.createElement(QtyInput, {
+ value: val,
+ unit: "min",
+ onCommit: n => setMin(w.key, n)
+ }));
+ }));
 }
 /* =============================== TREINOS ================================ */
 function Workouts({
@@ -4356,8 +4647,7 @@ function Coach2027({ state, update, onNavigate }) {
  /*#__PURE__*/React.createElement("div",{className:"coach27-connect-grid"},
    /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("check")},"Hoje"),
    /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("workout")},"Treinos"),
-   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("body")},"Corpo"),
-   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("report")},"Relatório")
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("body")},"Corpo")
  )
  ),
  /*#__PURE__*/React.createElement("div",{className:"card evf-ai-card"},
@@ -4652,478 +4942,6 @@ function WeeklyCoachInsights({state}){
     ) : /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px"}},"Regista pelo menos 3 dias comparáveis de sono, passos, proteína ou água para calcular correlações.")
   );
 }
-function EvolveFitSystemCard({state,user,update}){
-  const [online,setOnline]=useState(navigator.onLine);
-  const [cloud,setCloud]=useState(window.EvolveFitCloudStatus||{status:"idle",at:0});
-  const [notif,setNotif]=useState(typeof Notification!=="undefined"?Notification.permission:"unsupported");
-  const fileRef=React.useRef(null);
-  useEffect(()=>{
-    const o=()=>setOnline(navigator.onLine), c=e=>setCloud(e.detail||window.EvolveFitCloudStatus);
-    window.addEventListener("evolvefit-online-state",o);window.addEventListener("evolvefit-cloud-status",c);
-    return()=>{window.removeEventListener("evolvefit-online-state",o);window.removeEventListener("evolvefit-cloud-status",c)}
-  },[]);
-  useEffect(()=>{try{
-    const d=state.days&&state.days[todayKey], list=dayList(todayKey), done=list.filter(t=>isDone(d&&d.tasks&&d.tasks[t.id],t)).length;
-    const pending=Math.max(0,list.length-done);
-    if("setAppBadge" in navigator){pending?navigator.setAppBadge(pending):navigator.clearAppBadge();}
-  }catch(e){}},[state._updatedAt]);
-  const exportData=async()=>{
-    const payload={app:"EvolveFit",version:2,exportedAt:new Date().toISOString(),state,photos:JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")};
-    const file=new File([JSON.stringify(payload,null,2)],"evolvefit-backup-"+todayKey+".json",{type:"application/json"});
-    try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:"Backup EvolveFit"});return;}}catch(e){}
-    const a=document.createElement("a");a.href=URL.createObjectURL(file);a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
-  };
-  const importData=async e=>{
-    const f=e.target.files&&e.target.files[0]; if(!f)return;
-    try{
-      const data=JSON.parse(await f.text()); const imported=normalize(data.state||data);
-      if(!imported) throw new Error("Backup inválido");
-      if(!confirm("Importar este backup e substituir os dados atuais?")) return;
-      const k=keyFor(user&&user.uid);localStorage.setItem(k,JSON.stringify(imported));
-      if(Array.isArray(data.photos)) localStorage.setItem("evolvefit_progress_photos_v1",JSON.stringify(data.photos));
-      location.reload();
-    }catch(err){alert("Não foi possível importar: "+err.message);}
-    finally{e.target.value="";}
-  };
-  const enableNotif=async()=>{try{const ok=await window.evfEnableNotifications();setNotif(ok?"granted":Notification.permission);if(!ok)alert("Permissão de notificações não concedida.");}catch(e){alert(e.message)}};
-  const [,setTick]=useState(0);
-  useEffect(()=>{const t=setInterval(()=>setTick(x=>x+1),1500);return()=>clearInterval(t)},[]);
-  const fmtT=ms=>ms?new Date(ms).toLocaleString("pt-PT",{day:"2-digit",month:"2-digit",hour:"2-digit",minute:"2-digit"}):"—";
-  const dg=window.__evfDiag;
-  const nuvemTxt=!user||!fbDb?"sem ligação à nuvem":!dg?"sem resposta ainda":!dg.exists?"vazia (sem dados)":dg.remoteBody+" pesagens · "+dg.remoteDays+" dias · "+fmtT(dg.remoteUpdatedAt);
-  const localTxt=((state.body||[]).length)+" pesagens · "+Object.keys(state.days||{}).length+" dias · "+fmtT(state._updatedAt);
-  const forcePush=async()=>{
-    if(!user||!fbDb){alert("Esta sessão não está ligada à nuvem.");return;}
-    if(!confirm("Enviar os dados DESTE dispositivo para a nuvem? O que está agora na nuvem será substituído."))return;
-    try{const sn=JSON.parse(JSON.stringify(state));sn._updatedAt=Date.now();await fbDb.collection("users").doc(user.uid).set(toCloud(sn));window.__evfRemoteSeen=true;window.__evfRemoteUpdatedAt=sn._updatedAt;alert("Enviado. A nuvem tem agora os dados deste dispositivo.");}
-    catch(e){alert("Falhou: "+((e&&(e.code||e.message))||e));}
-  };
-  const forcePull=async()=>{
-    if(!user||!fbDb){alert("Esta sessão não está ligada à nuvem.");return;}
-    if(!confirm("Receber os dados da nuvem e substituir os deste dispositivo?"))return;
-    try{
-      const sn=await fbDb.collection("users").doc(user.uid).get({source:"server"});
-      if(!sn.exists){alert("A nuvem está vazia: não há nada para receber.");return;}
-      const remote=normalize(fromCloud(sn.data()));
-      try{localStorage.setItem(BASE_KEY+"_before_pull",JSON.stringify(state));}catch(e){}
-      update(n=>{Object.keys(n).forEach(k=>{delete n[k];});Object.assign(n,remote);});
-      alert("Dados recebidos da nuvem.");
-    }catch(e){alert("Falhou: "+((e&&(e.code||e.message))||e));}
-  };
-  const cloudText=!user?"Só local":cloud.status==="saving"?"A guardar…":(cloud.status==="saved"||cloud.status==="remote")?"Guardado na nuvem":cloud.status==="error"?"Erro de sincronização":online?"Nuvem ligada":"Offline";
-  return /*#__PURE__*/React.createElement("div",{className:"card"},
-    /*#__PURE__*/React.createElement("div",{className:"pc-head"},
-      /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Dados, offline e notificações"),
-      /*#__PURE__*/React.createElement("span",{className:"ef-pro-status "+(online?"good":"bad")},online?"Online":"Offline")
-    ),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Sincronização"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},cloudText)),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Modo offline"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},"Ativo após a primeira abertura")),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Conta"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},(user&&user.email)||"sem sessão")),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Na nuvem"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},nuvemTxt)),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Neste dispositivo"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},localTxt)),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Último erro"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},window.__evfLastCloudError||"nenhum")),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
-      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:forcePush},"Enviar deste dispositivo para a nuvem"),
-      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:forcePull},"Receber da nuvem")
-    ),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
-      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:exportData},"Exportar backup"),
-      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:()=>fileRef.current&&fileRef.current.click()},"Importar backup")
-    ),
-    /*#__PURE__*/React.createElement("input",{ref:fileRef,type:"file",accept:"application/json,.json",style:{display:"none"},onChange:importData}),
-    /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn "+(notif==="granted"?"good":"primary"),onClick:enableNotif,disabled:notif==="granted"},notif==="granted"?"Notificações ativadas":"Ativar notificações e badge"),
-    /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Em iPhone, instala o EvolveFit no ecrã principal para obter a experiência PWA completa. A sincronização de dados pendentes acontece quando a app volta a abrir ou recupera ligação.")
-  );
-}
-
-function Report({
- state,
- update,
- user
-}) {
- const [report, setReport] = useState(null);
- const [gen, setGen] = useState(false);
- const dark = state.theme === "dark";
- const week = lastNDays(state.days, 7);
- const consistency = Math.round(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7);
- const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
- const coach = buildCoach(state, waterAvg);
- const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
- const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= 2500);
- const workoutStreak = streak(state.days, (d, k) => trainedOn(state, k));
- const generate = () => {
- setGen(true);
- setReport(buildReport(state));
- setGen(false);
- };
- return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
- title: "Relatórios",
- sub: "A tua semana, analisada",
- right: /*#__PURE__*/React.createElement("button", {
- className: "theme-toggle",
- onClick: () => update(s => {
- s.theme = dark ? "light" : "dark";
- })
- }, /*#__PURE__*/React.createElement("svg", {
- width: 18,
- height: 18,
- viewBox: "0 0 24 24",
- fill: "none",
- stroke: "currentColor",
- strokeWidth: 2,
- strokeLinecap: "round",
- strokeLinejoin: "round"
- }, dark ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("circle", {
- cx: 12,
- cy: 12,
- r: 4
- }), /*#__PURE__*/React.createElement("path", {
- d: "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
- })) : /*#__PURE__*/React.createElement("path", {
- d: "M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"
- })))
- }), /*#__PURE__*/React.createElement("div", {
- className: "card coach"
- }, /*#__PURE__*/React.createElement("div", {
- className: "coach-tag"
- }, /*#__PURE__*/React.createElement(I, {
- name: "zap",
- size: 14
- }), " Resumo do Dia"), /*#__PURE__*/React.createElement("p", null, coach)), /*#__PURE__*/React.createElement("div", {
- className: "streaks"
- }, /*#__PURE__*/React.createElement(StreakPill, {
- v: checkStreak,
- l: "Checklist",
- c: "#2B5FD9"
- }), /*#__PURE__*/React.createElement(StreakPill, {
- v: workoutStreak,
- l: "Treino",
- c: "#C98A1B"
- }), /*#__PURE__*/React.createElement(StreakPill, {
- v: waterStreak,
- l: "Água",
- c: "#2A8FD6"
- })), /*#__PURE__*/React.createElement(GitCal, {
- days: state.days
- }), /*#__PURE__*/React.createElement(EvolveFitSystemCard, {
- state: state,
- user: user,
- update: update
- }), !report && /*#__PURE__*/React.createElement("button", {
- className: "big-btn report",
- onClick: generate,
- disabled: gen
- }, gen ? "A analisar os teus dados..." : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(I, {
- name: "barChart",
- size: 18
- }), " Gerar relatório da semana")), report && /*#__PURE__*/React.createElement("div", {
- className: "report-body"
- }, /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Resumo geral"
- }, /*#__PURE__*/React.createElement("div", {
- className: "big-stat"
- }, /*#__PURE__*/React.createElement("span", {
- className: "bs-v"
- }, report.consistency, "%"), /*#__PURE__*/React.createElement("span", {
- className: "bs-l"
- }, "consistência semanal")), /*#__PURE__*/React.createElement("p", {
- style: {
- marginTop: 12
- }
- }, report.summary), /*#__PURE__*/React.createElement("p", {
- style: {
- marginTop: 8,
- fontWeight: 600
- }
- }, report.todaySummary)), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Água"
- }, /*#__PURE__*/React.createElement("p", null, "Média de ", /*#__PURE__*/React.createElement("b", null, report.waterAvg, "L"), "/dia. Objetivo atingido em ", /*#__PURE__*/React.createElement("b", null, report.waterDays, "/7"), " dias.")), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Treino",
- tint: "teal"
- }, /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Treinos"), /*#__PURE__*/React.createElement("span", null, report.workout.count, "/5")), /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Volume total"), /*#__PURE__*/React.createElement("span", null, (report.workout.volume / 1000).toFixed(1), "k kg")), /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Cardio"), /*#__PURE__*/React.createElement("span", null, report.workout.cardio, " min")), /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Calorias treino"), /*#__PURE__*/React.createElement("span", null, report.workout.kcal, " kcal")), report.workout.rir != null && /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "RIR médio"), /*#__PURE__*/React.createElement("span", null, report.workout.rir)), /*#__PURE__*/React.createElement("p", {
- style: {
- marginTop: 8
- }
- }, report.workout.note)), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Corpo"
- }, /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Peso (7 dias)"), /*#__PURE__*/React.createElement("span", {
- className: report.body.grams > 0 ? "good" : ""
- }, report.body.grams > 0 ? "−" : report.body.grams < 0 ? "+" : "", Math.abs(report.body.grams), " g")), /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Gordura corporal"), /*#__PURE__*/React.createElement("span", null, report.body.bf, "% (", report.body.bfDiff <= 0 ? "↓" : "↑", Math.abs(report.body.bfDiff), ")")), /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "IMC"), /*#__PURE__*/React.createElement("span", null, report.body.bmi)), /*#__PURE__*/React.createElement("div", {
- className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Massa muscular"), /*#__PURE__*/React.createElement("span", null, report.body.muscle, " kg (", report.body.muscleDiff >= 0 ? "↑" : "↓", Math.abs(report.body.muscleDiff), ")")), /*#__PURE__*/React.createElement("p", {
- style: {
- marginTop: 8
- }
- }, report.body.note)), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Objetivos semanais"
- }, report.goalResults.map(({
- g,
- value,
- pct
- }) => {
- const done = pct >= 100;
- return /*#__PURE__*/React.createElement("div", {
- className: "rg-row",
- key: g.id
- }, /*#__PURE__*/React.createElement("span", null, g.label), /*#__PURE__*/React.createElement("span", {
- className: done ? "good" : pct >= 60 ? "" : "warn"
- }, goalLabel(g, value), " ", done ? "" : pct >= 60 ? "" : "!"));
- })), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Padrões & ciência",
- tint: "violet"
- }, report.patterns.map((s, i) => /*#__PURE__*/React.createElement("p", {
- key: i
- }, s))), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Pontos fortes",
- tint: "green"
- }, /*#__PURE__*/React.createElement("ul", null, report.strong.map((s, i) => /*#__PURE__*/React.createElement("li", {
- key: i
- }, s)))), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Oportunidades de melhoria",
- tint: "amber"
- }, /*#__PURE__*/React.createElement("ul", null, report.opps.map((s, i) => /*#__PURE__*/React.createElement("li", {
- key: i
- }, s)))), /*#__PURE__*/React.createElement(ReportBlock, {
- title: "Recomendações",
- tint: "violet"
- }, /*#__PURE__*/React.createElement("ul", null, report.recs.map((s, i) => /*#__PURE__*/React.createElement("li", {
- key: i
- }, s)))), /*#__PURE__*/React.createElement("div", {
- className: "disclaimer"
- }, "Análises informativas geradas a partir dos teus registos — não substituem aconselhamento médico profissional.")), /*#__PURE__*/React.createElement("button", {
- className: "reset-btn",
- style: user ? {
- marginBottom: "6px"
- } : {
- display: "none"
- },
- onClick: () => {
- if (fbAuth) fbAuth.signOut();
- }
- }, user ? "Terminar sessão (" + (user.email || "conta") + ")" : ""), /*#__PURE__*/React.createElement("button", {
- className: "reset-btn",
- style: {
- color: "var(--coral)"
- },
- onClick: () => {
- if (confirm("Eliminar todos os registos? Isto apaga o histórico de tarefas, corpo e treinos e fica tudo a zeros. Não pode ser desfeito.")) {
- update(s => {
- s.days = {};
- s.body = [];
- s.sessions = [];
- });
- }
- }
- }, "Eliminar todos os registos"), /*#__PURE__*/React.createElement("div", {
- className: "pad"
- }));
-}
-function buildReport(state) {
- const week = weekFromMonday(state.days);
- const consistency = +(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7).toFixed(1);
- const sumQty = (id, days) => days.reduce((a, w) => a + (w.day && w.day.tasks[id] ? w.day.tasks[id].value || 0 : 0), 0);
- const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
- const waterDays = week.filter(w => ((w.day ? w.day.water : 0) || 0) >= 2500).length;
- const treinos = week.filter(w => trainedOn(state, w.key)).length;
- const pages = sumQty("ler", week);
- // chores
- let choreDone = 0,
- choreTotal = 0;
- week.forEach(w => {
- const ch = CHORES[weekdayOf(w.key)];
- if (ch) {
- choreTotal++;
- if (ch.items.every(([id]) => w.day && w.day.tasks[id] && w.day.tasks[id].done)) choreDone++;
- }
- });
- const house = ["Arrumaste a casa em " + choreDone + "/" + choreTotal + " dia(s) útil(eis) desta semana.", choreDone >= choreTotal - 1 ? "Rotina de casa muito consistente." : "Há dias de casa por fechar — tenta apanhá-los para a próxima."];
- // workout
- const vol = state.sessions.filter(s => week.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
- const cardio = sumQty("cardio", week);
- const wkcal = sumQty("calorias", week);
- const rirVals = state.sessions.filter(se => week.some(w => w.key === se.date)).flatMap(se => se.ex.filter(e => e.rir != null).map(e => e.rir));
- const rirAvg = rirVals.length ? +(rirVals.reduce((a, b) => a + b, 0) / rirVals.length).toFixed(1) : null;
- const rirNote = rirAvg == null ? "" : rirAvg < 1.5 ? " RIR médio de " + rirAvg + ": treinos muito perto da falha — vigia a recuperação. " : rirAvg > 3 ? " RIR médio de " + rirAvg + ": há margem para subir cargas. " : " RIR médio de " + rirAvg + ": intensidade na zona certa. ";
- // progression across all plan days (recent vs previous session per exercise)
- let up = 0,
- tot = 0;
- state.plano.forEach((pd, di) => {
- const ds = state.sessions.filter(s => s.dayIdx === di).sort((a, b) => a.date.localeCompare(b.date));
- if (ds.length >= 2) {
- const a = ds[ds.length - 2],
- b = ds[ds.length - 1];
- b.ex.forEach((e, i) => {
- if (a.ex[i]) {
- tot++;
- if (e.weight > a.ex[i].weight) up++;
- }
- });
- }
- });
- const wNote = treinos >= 5 ? "Excelente frequência. " : treinos > 0 ? "Frequência abaixo do alvo de 5. " : "";
- const progNote = tot > 0 ? up >= tot * 0.5 ? "Estás a subir a carga na maioria dos exercícios — progressão sólida." : "A carga está estável — considera subir peso ou reps onde já dominas a técnica." : "Regista os treinos para acompanhar a progressão de carga.";
- // body
- const body = [...state.body].sort((a, b) => a.date.localeCompare(b.date));
- const last = body[body.length - 1];
- const weekAgo = body.filter(b => b.date <= iso(addDays(TODAY, -6))).pop() || body[0];
- const grams = Math.round((weekAgo.weight - last.weight) * 1000);
- const prevBody = body.length > 1 ? body[body.length - 2] : last;
- const bfDiff = +(last.bodyFat - prevBody.bodyFat).toFixed(1);
- const muscleDiff = +(last.muscle - prevBody.muscle).toFixed(1);
- const bodyNote = grams > 0 && last.bodyFat <= prevBody.bodyFat ? "Perda de gordura no bom ritmo, mantendo (ou ganhando) músculo — exatamente o que queres para os " + state.profile.bfTarget + "%." : "Ritmo mais lento esta semana. O peso oscila com água/ciclo; olha a tendência de várias semanas, não um dia.";
- // patterns / science
- const patterns = ["Em geral, estudos associam treino regular e boa hidratação a melhor humor, energia e produtividade — os teus dados são o teste real para ti."];
- // strong / opps / recs
- const strong = [],
- opps = [],
- recs = [];
- if (consistency >= 75) strong.push("Excelente consistência geral na checklist.");
- if (treinos >= 5) strong.push("Treinos em dia e a subir a carga.");
- if (waterDays >= 4) strong.push("Boa hidratação na maioria dos dias.");
- if (!strong.length) strong.push("Apareceste todos os dias — a base está lá.");
- if (+waterAvg < 2.5) opps.push("Água abaixo do objetivo (média " + waterAvg + "L).");
- if (treinos < 5) opps.push("Faltou treino: " + treinos + "/5.");
- if (!opps.length) opps.push("Poucas fraquezas — foca em manter o ritmo.");
- if (+waterAvg < 2.5) recs.push("Subir a hidratação para 2.5L/dia.");
- recs.push("Manter os 5 treinos e subir carga onde a técnica já é sólida.");
- const summary = "Esta semana cumpriste " + consistency + "% do que planeaste. Fizeste " + treinos + " treino(s) e bebeste em média " + waterAvg + "L de água. " + (consistency >= 75 ? "Estás a construir uma rotina forte rumo aos " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + "." : "Uma semana para consolidar hábitos — pequenos ajustes fazem grande diferença até lá.");
- // hoje: corpo e treino
- const trainedToday = trainedOn(state, todayKey);
- const todaySummary = "Hoje " + (trainedToday ? "já treinaste" : "ainda não treinaste") + ". O teu peso atual é " + last.weight + "kg, com " + last.bodyFat + "% de gordura e IMC " + last.bmi + ".";
- const goalResults = GOALS.map(g => ({
- g,
- ...computeGoal(g, state)
- }));
- return {
- consistency,
- summary,
- todaySummary,
- house,
- waterAvg,
- waterDays,
- workout: {
- count: treinos,
- volume: vol,
- cardio,
- kcal: wkcal,
- rir: rirAvg,
- note: wNote + progNote + rirNote.trimEnd()
- },
- body: {
- grams,
- bf: last.bodyFat,
- bfDiff,
- bmi: last.bmi,
- muscle: last.muscle,
- muscleDiff,
- note: bodyNote
- },
- patterns,
- goalResults,
- strong,
- opps,
- recs
- };
-}
-
-function buildCoach(state, waterAvg) {
- const today = state.days[todayKey];
- const waterToday = ((today ? today.water : 0) || 0) / 1000;
- const trained = trainedOn(state, todayKey);
- const steps = today && today.tasks.passos ? today.tasks.passos.value : 0;
- const p = [];
- if (trained) p.push("Já treinaste hoje");
- let msg = p.length ? p.join(" ") + ". " : "";
- if (waterToday < 2.5) msg += "Ainda só bebeste " + waterToday.toFixed(1) + "L — faltam " + (2.5 - waterToday).toFixed(1) + "L. ";
- if (steps < 10000) msg += "Faltam " + (10000 - steps).toLocaleString("pt-PT") + " passos para os 10k. ";
- msg += "Mantém a consistência e estás no caminho certo para os " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + ".";
- return msg;
-}
-function ReportBlock({
- title,
- children,
- tint
-}) {
- return /*#__PURE__*/React.createElement("div", {
- className: "card rblock" + (tint ? " tint-" + tint : "")
- }, /*#__PURE__*/React.createElement("div", {
- className: "rblock-title"
- }, title), children);
-}
-function StreakPill({
- v,
- l,
- c
-}) {
- return /*#__PURE__*/React.createElement("div", {
- className: "streak-pill"
- }, /*#__PURE__*/React.createElement("div", {
- className: "streak-flame",
- style: {
- color: c
- }
- }, /*#__PURE__*/React.createElement(I, {
- name: "flame",
- size: 15
- }), /*#__PURE__*/React.createElement("span", null, v)), /*#__PURE__*/React.createElement("div", {
- className: "streak-l"
- }, l));
-}
-function GitCal({
- days
-}) {
- const weeks = 15,
- cells = [];
- const start = addDays(TODAY, -(weeks * 7 - 1 - (6 - TODAY.getDay())));
- for (let i = 0; i < weeks * 7; i++) {
- const d = addDays(start, i);
- if (d > TODAY) {
- cells.push(null);
- continue;
- }
- const p = dayPct(days[iso(d)], iso(d));
- cells.push({
- lvl: p === 0 ? 0 : p < 30 ? 1 : p < 55 ? 2 : p < 80 ? 3 : 4
- });
- }
- const cols = [];
- for (let c = 0; c < weeks; c++) cols.push(cells.slice(c * 7, c * 7 + 7));
- return /*#__PURE__*/React.createElement("div", {
- className: "card gitcal"
- }, /*#__PURE__*/React.createElement("div", {
- className: "gitcal-title"
- }, "Consistência"), /*#__PURE__*/React.createElement("div", {
- className: "gitcal-grid"
- }, cols.map((col, ci) => /*#__PURE__*/React.createElement("div", {
- className: "gitcal-col",
- key: ci
- }, col.map((cell, ri) => /*#__PURE__*/React.createElement("div", {
- key: ri,
- className: "gcell " + (cell ? "lvl-" + cell.lvl : "empty")
- }))))), /*#__PURE__*/React.createElement("div", {
- className: "gitcal-legend"
- }, /*#__PURE__*/React.createElement("span", null, "menos"), [0, 1, 2, 3, 4].map(l => /*#__PURE__*/React.createElement("div", {
- key: l,
- className: "gcell lvl-" + l
- })), /*#__PURE__*/React.createElement("span", null, "mais")));
-}
-/* ============================ LOGIN / SESSÃO =========================== */
 function Login() {
  const [mode, setMode] = useState("in"); // "in" = entrar, "up" = criar conta
  const [email, setEmail] = useState("");
@@ -5428,7 +5246,38 @@ button,input,select,textarea{font-family:inherit;}
 #root .log-fillall{flex:1 1 100%!important;}
 #root .evf-ai-card{padding:0!important;}
 #root .evf-ai-sub{max-width:none!important;}
+
+.evf-home-premium{padding:4px 0 28px}
+.evf-home-hero{
+  position:relative;overflow:hidden;border-radius:28px;padding:34px 26px 32px;
+  background:linear-gradient(145deg,#172b3d 0%,#29465c 58%,#3f6f8b 100%);
+  color:#fff;min-height:390px;display:flex;flex-direction:column;justify-content:flex-end;
+  box-shadow:0 18px 45px rgba(24,48,67,.18)
+}
+.evf-home-hero:before,.evf-home-hero:after{content:"";position:absolute;border-radius:999px;border:1px solid rgba(255,255,255,.12)}
+.evf-home-hero:before{width:240px;height:240px;right:-90px;top:-75px}
+.evf-home-hero:after{width:150px;height:150px;right:-25px;top:-30px}
+.evf-home-kicker{position:absolute;top:26px;left:26px;font-size:11px;font-weight:800;letter-spacing:3px;opacity:.65}
+.evf-home-brand{position:absolute;top:52px;left:26px;font-size:17px;font-weight:800;letter-spacing:.2px}
+.evf-home-greeting{font-size:30px;font-weight:800;letter-spacing:-.8px;position:relative;z-index:1}
+.evf-home-date{font-size:13px;opacity:.68;margin-top:7px;position:relative;z-index:1}
+.evf-home-tagline{font-size:17px;font-weight:750;margin-top:34px;letter-spacing:.1px;position:relative;z-index:1}
+.evf-home-copy{font-size:14px;line-height:1.55;max-width:430px;margin-top:9px;color:rgba(255,255,255,.76);position:relative;z-index:1}
+.evf-home-section-title{font-size:14px;font-weight:800;margin:24px 4px 12px;letter-spacing:.1px}
+.evf-home-grid{display:grid;grid-template-columns:1fr;gap:11px}
+.evf-home-tile{
+  position:relative;text-align:left;border:1px solid #e3e8ec;background:#fff;border-radius:20px;
+  padding:18px 50px 18px 18px;min-height:105px;box-shadow:0 7px 22px rgba(20,40,55,.055);
+  color:inherit;cursor:pointer
+}
+.evf-home-tile-dark{background:#f0f5f8;border-color:#dce6ec}
+.evf-home-tile-icon{width:43px;height:43px;border-radius:13px;background:#e9eff3;display:flex;align-items:center;justify-content:center;color:#35566d;margin-bottom:12px}
+.evf-home-tile-title{font-size:17px;font-weight:800}
+.evf-home-tile-sub{font-size:12px;color:var(--muted);margin-top:4px}
+.evf-home-arrow{position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:23px;color:#7d8b96}
+.evf-home-quote{margin:25px 4px 0;padding:20px 2px 4px}
+.evf-home-quote-mark{font-family:Georgia,serif;font-size:42px;line-height:.7;color:#527d96}
+.evf-home-quote-text{font-size:14px;font-weight:700;line-height:1.5;color:#50616d;max-width:390px}
+.evf-home-quote-line{height:2px;width:34px;background:#527d96;margin-top:12px;border-radius:2px}
 </style>
-<style id="evolvefit-home-premium">
-.evf-home-premium{padding:4px 0 28px}.evf-home-hero{position:relative;overflow:hidden;border-radius:28px;padding:34px 26px 32px;background:linear-gradient(145deg,#172b3d 0%,#29465c 58%,#3f6f8b 100%);color:#fff;min-height:390px;display:flex;flex-direction:column;justify-content:flex-end;box-shadow:0 18px 45px rgba(24,48,67,.18)}.evf-home-hero:before,.evf-home-hero:after{content:"";position:absolute;border-radius:999px;border:1px solid rgba(255,255,255,.12)}.evf-home-hero:before{width:240px;height:240px;right:-90px;top:-75px}.evf-home-hero:after{width:150px;height:150px;right:-25px;top:-30px}.evf-home-kicker{position:absolute;top:26px;left:26px;font-size:11px;font-weight:800;letter-spacing:3px;opacity:.65}.evf-home-brand{position:absolute;top:52px;left:26px;font-size:17px;font-weight:800}.evf-home-greeting{font-size:30px;font-weight:800;letter-spacing:-.8px;position:relative;z-index:1}.evf-home-date{font-size:13px;opacity:.68;margin-top:7px;position:relative;z-index:1}.evf-home-tagline{font-size:17px;font-weight:750;margin-top:34px;position:relative;z-index:1}.evf-home-copy{font-size:14px;line-height:1.55;max-width:430px;margin-top:9px;color:rgba(255,255,255,.76);position:relative;z-index:1}.evf-home-section-title{font-size:14px;font-weight:800;margin:24px 4px 12px}.evf-home-grid{display:grid;grid-template-columns:1fr;gap:11px}.evf-home-tile{position:relative;text-align:left;border:1px solid var(--border);background:var(--surface);border-radius:20px;padding:18px 50px 18px 18px;min-height:105px;box-shadow:0 7px 22px rgba(20,40,55,.055);color:inherit;cursor:pointer}.evf-home-tile-dark{background:#f0f5f8;border-color:#dce6ec}.evf-home-tile-icon{width:43px;height:43px;border-radius:13px;background:#e9eff3;display:flex;align-items:center;justify-content:center;color:#35566d;margin-bottom:12px}.evf-home-tile-title{font-size:17px;font-weight:800}.evf-home-tile-sub{font-size:12px;color:var(--muted);margin-top:4px}.evf-home-arrow{position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:23px;color:#7d8b96}.evf-home-quote{margin:25px 4px 0;padding:20px 2px 4px}.evf-home-quote-mark{font-family:Georgia,serif;font-size:42px;line-height:.7;color:#527d96}.evf-home-quote-text{font-size:14px;font-weight:700;line-height:1.5;color:#50616d;max-width:390px}.evf-home-quote-line{height:2px;width:34px;background:#527d96;margin-top:12px;border-radius:2px}
-</style></body></html>
+</body></html>
