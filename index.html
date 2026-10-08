@@ -199,7 +199,7 @@ window.evfSetCloudStatus=function(status){
     if(mode==="local")return show("Só neste dispositivo · sem nuvem","local",0,true);
     if(!navigator.onLine)return show("Sem ligação · guardado no telemóvel","warn",0,false);
     if(s==="error")return show("Não guardou na nuvem · toca para ver","err",0,true);
-    if(s==="saving")return show("A guardar na nuvem…","info",0,false);
+    if(s==="saving"){clearTimeout(timer);if(el)el.className="evf-sync";return;}
     if(s==="saved")return show("✓ Guardado na nuvem","ok",2200,false);
     if(s==="remote")return show("↓ Atualizado de outro dispositivo","ok",2600,false);
   }
