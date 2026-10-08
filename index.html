@@ -3350,11 +3350,7 @@ function WorkoutLogger({
  }
  })), /*#__PURE__*/React.createElement("span", {
  className: "log-progress-l"
- }, doneCount, "/", exercises.length, " concluídos"), !!last && /*#__PURE__*/React.createElement("button", {
- type: "button",
- className: "log-fillall",
- onClick: fillAllFromLast
- }, "Igual ao treino anterior")), exercises.map((x, i) => {
+ }, doneCount, "/", exercises.length, " concluídos")), exercises.map((x, i) => {
  const r = row(x, i);
  const tgt = rirOf(x);
  const prev = last && last.ex.find(e => e.name === x.name);
