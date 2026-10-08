@@ -1807,9 +1807,7 @@ function weekFromMonday(days) {
  return out;
 }
 function trainedOn(state, key) {
- return !!(state.trainingCompleted && state.trainingCompleted[key]) ||
-   state.sessions.some(s => s.date === key) ||
-   !!(state.days[key] && state.days[key].tasks && state.days[key].tasks.forca && state.days[key].tasks.forca.value > 0);
+ return !!(state.trainingCompleted && state.trainingCompleted[key]);
 }
 function computeGoal(g, state) {
  const days = state.days,
@@ -2815,11 +2813,8 @@ function Workouts({
  ex
  };
  if (i >= 0) s.sessions[i] = rec;else s.sessions.push(rec);
- // Interligação: o treino registado alimenta automaticamente a checklist do mesmo dia.
- s.days[todayKey] = s.days[todayKey] || { tasks:{}, water:0 };
- s.days[todayKey].tasks = s.days[todayKey].tasks || {};
- s.days[todayKey].tasks.forca = { done:true, value:1 };
- });
+ // O registo dos exercícios é independente do botão "Treinei". Só "Treinei" conta para as estatísticas.
+
  const setPlanEx = (di, xi, f, val) => update(s => {
  s.plano[di].ex[xi][f] = f === "name" || f === "notes" ? val : f === "weight" ? normDecInput(val) : parseInt(val, 10) || 0;
  });
