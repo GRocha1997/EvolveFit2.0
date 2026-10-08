@@ -4452,12 +4452,10 @@ function Coach2027({ state, update, onNavigate }) {
  const recLabel = recovery==null ? "Sem dados" : recovery>=80 ? "Boa" : recovery>=65 ? "Moderada" : "Baixa";
 
  const alerts=[];
- if(avgProtein && avgProtein < (prof.proteinTarget||170)*0.9) alerts.push({text:"Proteína média abaixo de 90% do alvo.", level:"negative", tab:"check"});
- if(avgSleep && avgSleep < 7) alerts.push({text:"Sono médio abaixo de 7 h.", level:"negative", tab:"check"});
- if(avgSteps && avgSteps < (prof.stepsTarget||9000)*0.8) alerts.push({text:"Passos médios abaixo de 80% do alvo.", level:"negative", tab:"check"});
- if(cardio7 < (prof.cardioTarget||90)*0.7) alerts.push({text:"Cardio semanal abaixo de 70% do alvo.", level:"negative", tab:"workout"});
  if(wkSessions >= 5) alerts.push({text:"Meta semanal de 5 treinos atingida.", level:"positive", tab:"workout"});
+ else if(wkSessions > 0) alerts.push({text:wkSessions + (wkSessions===1 ? " treino registado esta semana." : " treinos registados esta semana."), level:"neutral", tab:"workout"});
  if(enoughData && waistTrend!=null && waistTrend<0) alerts.push({text:"Cintura em tendência descendente.", level:"positive", tab:"body"});
+ if(enoughData && weightTrend!=null && Math.abs(weightTrend)<0.2 && (waistTrend==null || Math.abs(waistTrend)<0.3)) alerts.push({text:"Peso e cintura estão estáveis. Continua a registar para confirmar a tendência.", level:"neutral", tab:"body"});
 
  const asymSessions=(state.sessions||[]).filter(s => Array.isArray(s.ex) && s.ex.some(e=>/single-arm db chest/i.test(e.name))).slice(-6);
  const asymRows=asymSessions.map(s=>{
