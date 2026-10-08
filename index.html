@@ -2814,6 +2814,7 @@ function Workouts({
  };
  if (i >= 0) s.sessions[i] = rec;else s.sessions.push(rec);
  // O registo dos exercícios é independente do botão "Treinei". Só "Treinei" conta para as estatísticas.
+ });
 
  const setPlanEx = (di, xi, f, val) => update(s => {
  s.plano[di].ex[xi][f] = f === "name" || f === "notes" ? val : f === "weight" ? normDecInput(val) : parseInt(val, 10) || 0;
