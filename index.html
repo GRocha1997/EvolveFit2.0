@@ -183,6 +183,28 @@ window.evfSetCloudStatus=function(status){
   window.EvolveFitCloudStatus={status:status,at:Date.now()};
   window.dispatchEvent(new CustomEvent("evolvefit-cloud-status",{detail:window.EvolveFitCloudStatus}));
 };
+(function(){
+  var css=".evf-sync{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 78px);transform:translateX(-50%);z-index:60;max-width:92vw;padding:7px 13px;border-radius:999px;font:600 12px/1.2 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#fff;background:#3E5569;box-shadow:0 6px 20px rgba(20,30,40,.22);opacity:0;pointer-events:none;transition:opacity .25s;white-space:nowrap}.evf-sync.on{opacity:1}.evf-sync.tap{pointer-events:auto;cursor:pointer}.evf-sync.ok{background:#19864D}.evf-sync.warn{background:#B7791F}.evf-sync.err{background:#C33F32}";
+  var st=document.createElement("style");st.textContent=css;document.head.appendChild(st);
+  var el,timer;
+  function ensure(){if(!el){el=document.createElement("div");el.className="evf-sync";el.addEventListener("click",function(){
+    if(el.dataset.kind==="err")alert("Não foi possível guardar na nuvem.\n\n"+(window.__evfLastCloudError||"Erro desconhecido")+"\n\nSe disser permission-denied, confirma as Regras do Firestore e que tens sessão iniciada.");
+    else if(el.dataset.kind==="local")alert("Esta sessão não está ligada à nuvem, por isso os dados ficam só neste dispositivo.\n\nAbre a app a partir do endereço publicado (GitHub Pages) e inicia sessão com o teu email.");
+  });document.body.appendChild(el);}return el;}
+  function show(text,kind,ms,tap){var e=ensure();clearTimeout(timer);e.textContent=text;e.dataset.kind=kind;e.className="evf-sync on "+({ok:"ok",warn:"warn",err:"err",local:"warn",info:""}[kind]||"")+(tap?" tap":"");if(ms)timer=setTimeout(function(){e.className="evf-sync"},ms);}
+  function render(){
+    if(!document.body)return;
+    var mode=window.__evfSyncMode;if(!mode)return;
+    var s=(window.EvolveFitCloudStatus||{}).status;
+    if(mode==="local")return show("Só neste dispositivo · sem nuvem","local",0,true);
+    if(!navigator.onLine)return show("Sem ligação · guardado no telemóvel","warn",0,false);
+    if(s==="error")return show("Não guardou na nuvem · toca para ver","err",0,true);
+    if(s==="saving")return show("A guardar na nuvem…","info",0,false);
+    if(s==="saved")return show("✓ Guardado na nuvem","ok",2200,false);
+    if(s==="remote")return show("↓ Atualizado de outro dispositivo","ok",2600,false);
+  }
+  window.addEventListener("evolvefit-cloud-status",render);window.addEventListener("online",render);window.addEventListener("offline",render);
+})();
 window.evfRegisterSW=async function(){
   if(!("serviceWorker" in navigator)) return null;
   try{return await navigator.serviceWorker.register("./sw.js",{scope:"./"});}catch(e){console.warn("Service worker:",e);return null;}
@@ -208,7 +230,7 @@ window.evfEnableNotifications=async function(){
   if(reg) reg.active?.postMessage({type:"TEST_NOTIFICATION"});
   return true;
 };
-window.addEventListener("load",()=>window.evfRegisterSW());
+window.addEventListener("load",()=>{window.evfRegisterSW();try{if(navigator.storage&&navigator.storage.persist)navigator.storage.persist();}catch(e){}});
 window.addEventListener("online",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
 window.addEventListener("offline",()=>window.dispatchEvent(new Event("evolvefit-online-state")));
 document.addEventListener("visibilitychange",async()=>{
@@ -612,11 +634,28 @@ const load = uid => {
  }
 };
 
+const SNAP_KEY = BASE_KEY + "_snapshots";
+let _snapDay = null;
+try { _snapDay = localStorage.getItem(SNAP_KEY + "_day"); } catch (e) {}
+/* Guarda no máximo 1 cópia por dia (últimas 3) para recuperar de qualquer engano. */
+const snapshotDaily = payload => {
+ try {
+   const day = new Date().toISOString().slice(0, 10);
+   if (_snapDay === day) return;
+   const arr = JSON.parse(localStorage.getItem(SNAP_KEY) || "[]");
+   arr.push({day, at: Date.now(), json: payload});
+   while (arr.length > 3) arr.shift();
+   localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
+   localStorage.setItem(SNAP_KEY + "_day", day);
+   _snapDay = day;
+ } catch (e) {}
+};
 const save = (s, uid) => {
  try {
    const payload = JSON.stringify(s);
    localStorage.setItem(keyFor(uid), payload);
    localStorage.setItem(DEVICE_BACKUP_KEY, payload);
+   if (s && ((s.body && s.body.length) || (s.sessions && s.sessions.length))) snapshotDaily(payload);
  } catch (e) {
    console.error("Erro de persistência local:", e);
  }
@@ -627,7 +666,6 @@ const save = (s, uid) => {
 function normalize(s) {
  if (!s || typeof s !== "object") return null;
  s.days = s.days && typeof s.days === "object" ? s.days : {};
- Object.keys(s.days).forEach(k => { const tk = s.days[k] && s.days[k].tasks; if (tk) { delete tk.ler; delete tk.back2; delete tk.nytalks; } });
  s.body = Array.isArray(s.body) ? s.body : [];
  s.body = s.body.filter(x => x && typeof x === "object" && /^\d{4}-\d{2}-\d{2}$/.test(String(x.date || ""))).map(x => ({
    date: String(x.date),
@@ -659,8 +697,13 @@ function normalize(s) {
  if (!Array.isArray(s.profile.planAdjustments)) s.profile.planAdjustments = [];
  if (s.theme == null) s.theme = "light";
  if (!s.menus || typeof s.menus !== "object" || !s.menus.manha || !s.menus.tarde) s.menus = clone(MENUS);
- if (!Array.isArray(s.plano) || s.planoVersion !== PLAN_VERSION) {
+ if (!Array.isArray(s.plano) || !s.plano.length) {
  s.plano = clone(PLAN);
+ s.planoVersion = PLAN_VERSION;
+ } else if (s.planoVersion !== PLAN_VERSION) {
+ // Nunca repor o plano: preserva cargas, reps e edições do utilizador.
+ // Só acrescenta dias do plano base que ainda não existam.
+ PLAN.forEach(pd => { if (!s.plano.some(d => d && d.day === pd.day)) s.plano.push(clone(pd)); });
  s.planoVersion = PLAN_VERSION;
  }
  // Migração Verão 2027: Quinta troca Cable Fly por Single-Arm DB Chest Press (mantém as cargas guardadas)
@@ -732,7 +775,6 @@ function normalize(s) {
  projeto → As tuas apps → Configuração do SDK). Enquanto isto estiver
  com "COLA_AQUI", a app funciona só localmente (sem sincronização).
  ===================================================================== */
-var fbAuth = null, fbDb = null; // declarados para não rebentar quando o Firebase não carrega (offline)
 const firebaseConfig = {
   apiKey: "AIzaSyCsEptCfG9WeujlaHSpUKIdN2mQgElGXLc",
   authDomain: "evolvefit2-df25f.firebaseapp.com",
@@ -743,6 +785,7 @@ const firebaseConfig = {
   measurementId: "G-B5V1CV6H58"
 };
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLA_AQUI") === -1 && typeof firebase !== "undefined";
+let fbAuth = null, fbDb = null;
 /* Cloud AI — Gemini via Firebase Cloud Function. A API key do Gemini nunca fica no HTML. */
 const EVOLVEFIT_AI_ENDPOINT = "https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi";
 const EVOLVEFIT_FIREBASE_PROJECT_ID = "evolvefit2-df25f";
@@ -842,29 +885,57 @@ function cloudQueueClear(){
 async function evolveFitCloudSave(uid, state){
   if(!uid || !fbDb || !state) return false;
   const payload = toCloud(state);
+  if(payload._json.length > 850000 && !window.__evfSizeWarned){
+    window.__evfSizeWarned = true;
+    console.warn("Dados perto do limite de 1 MB da nuvem:", payload._json.length);
+    try{ alert("Os teus dados estão perto do limite da nuvem (1 MB). Exporta um backup no Relatório e diz-me para dividir o histórico por ano."); }catch(e){}
+  }
   cloudQueueWrite({uid, payload, queuedAt:Date.now()});
   window.evfSetCloudStatus && window.evfSetCloudStatus(navigator.onLine ? "saving" : "offline");
   if(!navigator.onLine) return false;
+  // Só escreve na nuvem depois de a nuvem ter sido lida (evita que um estado
+  // vazio/antigo sobrescreva dados mais recentes). A edição fica guardada
+  // localmente e na fila; é enviada logo a seguir à primeira leitura.
+  if(!window.__evfRemoteSeen) return false;
+  // Junta alterações seguidas (ex.: a escrever um número) numa só escrita ~0,6 s depois.
+  window.__evfPending = {uid, payload};
+  clearTimeout(window.__evfTimer);
+  window.__evfTimer = setTimeout(evolveFitCloudWriteNow, 600);
+  return true;
+}
+async function evolveFitCloudWriteNow(){
+  clearTimeout(window.__evfTimer);
+  const pend = window.__evfPending;
+  if(!pend || !fbDb) return false;
+  window.__evfPending = null;
   try{
-    await fbDb.collection("users").doc(uid).set(payload);
-    cloudQueueClear();
-    window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
+    await fbDb.collection("users").doc(pend.uid).set(pend.payload);
+    if(!window.__evfPending){
+      cloudQueueClear();
+      window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
+    }
     return true;
   }catch(e){
+    window.__evfLastCloudError = ((e && (e.code || e.name)) || "erro") + ": " + ((e && e.message) || "");
     window.evfSetCloudStatus && window.evfSetCloudStatus("error");
     console.error("Erro ao guardar na nuvem:",e);
     return false;
   }
 }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") evolveFitCloudWriteNow(); });
+window.addEventListener("pagehide",()=>{ evolveFitCloudWriteNow(); });
 
 async function evolveFitFlushCloudQueue(){
   const q=cloudQueueRead();
   if(!q || !navigator.onLine || !fbDb || !q.uid || !q.payload) return;
+  if(!window.__evfRemoteSeen) return;
+  if((Number(q.payload._updatedAt) || 0) < (window.__evfRemoteUpdatedAt || 0)){ cloudQueueClear(); return; }
   try{
     await fbDb.collection("users").doc(q.uid).set(q.payload);
     cloudQueueClear();
     window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
   }catch(e){
+    window.__evfLastCloudError = ((e && (e.code || e.name)) || "erro") + ": " + ((e && e.message) || "");
     window.evfSetCloudStatus && window.evfSetCloudStatus("error");
     console.error("Erro ao sincronizar fila:",e);
   }
@@ -882,7 +953,6 @@ if (CLOUD_ENABLED) {
  fbDb.enablePersistence({synchronizeTabs:true})
    .then(()=>console.log("Firestore offline persistence ativa."))
    .catch(e=>console.warn("Firestore offline persistence:",e.code||e));
- evolveFitFlushCloudQueue();
  } catch (e) {
  console.error("Firebase init falhou:", e);
  }
@@ -1001,7 +1071,7 @@ const daysBetween = (a, b) => Math.round((b - a) / 86400000);
 const WD = ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"];
 const WD_LONG = ["Domingo", "Segunda-Feira", "Terça-Feira", "Quarta-Feira", "Quinta-Feira", "Sexta-Feira", "Sábado"];
 const MO = ["janeiro", "fevereiro", "março", "abril", "maio", "junho", "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"];
-const longDate = d => WD[d.getDay()] + ", " + d.getDate() + " de " + MO[d.getMonth()];
+const longDate = d => { const t = WD[d.getDay()] + ", " + d.getDate() + " de " + MO[d.getMonth()]; return t.charAt(0).toUpperCase() + t.slice(1); };
 const weekdayOf = key => new Date(key + "T12:00:00").getDay();
 
 /* --------------------------- weekday chores ----------------------------- */
@@ -1302,15 +1372,6 @@ const SECTIONS = [{
 }];
 const FIXED_TASKS = SECTIONS.flatMap(s => s.chores ? [] : s.groups ? s.groups.flatMap(g => g.tasks) : s.tasks);
 const dayList = key => [...FIXED_TASKS, ...choresForKey(key)];
-const taskLabel = (t, p) => {
- p = p || {};
- const f = v => String(v).replace(".", ",");
- if (t.id === "passos" && p.stepsTarget) return "Passos (meta " + Number(p.stepsTarget).toLocaleString("pt-PT") + ")";
- if (t.id === "calorias_in" && p.kcalTarget) return "Calorias ingeridas (meta " + f(p.kcalTarget) + ")";
- if (t.id === "proteina" && p.proteinTarget) return "Proteína (meta " + f(p.proteinTarget) + "g)";
- if (t.id === "gordura_in" && p.fatTarget) return "Gordura (meta " + f(p.fatTarget) + "g)";
- return t.label;
-};
 const isDone = (rec, t) => t.qty ? rec && rec.value > 0 : !!(rec && rec.done);
 
 /* ------------------------------- goals ---------------------------------- */
@@ -1324,7 +1385,7 @@ const GOALS = [{
  id: "passos",
  cat: "Corpo",
  label: "Passos",
- target: 63000,
+ target: 70000,
  type: "steps"
 }, {
  id: "calgastas",
@@ -1336,7 +1397,7 @@ const GOALS = [{
  id: "agua",
  cat: "Corpo",
  label: "Água (média)",
- target: 3,
+ target: 2.5,
  unit: "L",
  type: "wateravg"
 }, {
@@ -1372,11 +1433,6 @@ const GOALS = [{
  type: "hoursavg",
  src: "sono"
 }];
-function goalsFor(state) {
- const p = (state && state.profile) || {};
- const m = { passos: (p.stepsTarget || 9000) * 7, agua: p.waterTarget || 3, proteinaavg: p.proteinTarget || 170, cardiomin: p.cardioTarget || 90 };
- return GOALS.map(g => m[g.id] != null ? Object.assign({}, g, { target: m[g.id] }) : g);
-}
 function goalLabel(g, v) {
  if (g.type === "wateravg") return v + "L / " + g.target + "L";
  if (g.type === "steps") return (v / 1000).toFixed(1) + "k / " + g.target / 1000 + "k";
@@ -1599,31 +1655,144 @@ const lastWeekdayDate = W => {
 
 /* ---------------------------- seed sample data -------------------------- */
 function seed() {
- const now = {};
- now[todayKey] = { tasks: {}, water: 0 };
+ const s = seedDemo();
+ s.days = {};
+ s.body = [];
+ s.sessions = [];
+ return s;
+}
+function seedDemo() {
+ const days = {},
+ body = [],
+ sessions = [];
+ for (let i = 89; i >= 0; i--) {
+ const d = addDays(TODAY, -i),
+ k = iso(d);
+ const rate = i > 60 ? 0.55 : i > 30 ? 0.72 : 0.85;
+ const tasks = {};
+ dayList(k).forEach(t => {
+ if (t.qty) {
+ if (Math.random() < rate) {
+ let v = 1;
+ if (t.id === "passos") v = Math.round((6000 + Math.random() * 7000) / 100) * 100;else if (t.id === "cardio") v = Math.round(10 + Math.random() * 30);else if (t.id === "forca") v = Math.round(35 + Math.random() * 30);else if (t.id === "lily") v = Math.round(15 + Math.random() * 20);else if (t.id === "calorias") v = Math.round(250 + Math.random() * 250);else if (t.id === "ler") v = Math.round(8 + Math.random() * 32);else if (t.id === "back2") v = Math.round(Math.random() * 2 * 10) / 10;
+ if (v > 0) tasks[t.id] = {
+ done: true,
+ value: v
+ };
+ }
+ } else if (Math.random() < rate * (0.7 + Math.random() * 0.5)) tasks[t.id] = {
+ done: true
+ };
+ });
+ days[k] = {
+ tasks,
+ water: Math.round((1600 + Math.random() * 1400) / 250) * 250
+ };
+ }
+ days[todayKey] = {
+ tasks: {
+ higiene: {
+ done: true
+ },
+ skincare_am: {
+ done: true
+ },
+ vestir: {
+ done: true
+ },
+ outlook: {
+ done: true
+ },
+ intencao: {
+ done: true
+ },
+ forca: {
+ done: true,
+ value: 45
+ },
+ cardio: {
+ done: true,
+ value: 20
+ },
+ passos: {
+ done: true,
+ value: 6200
+ },
+ calorias: {
+ done: true,
+ value: 340
+ },
+ ler: {
+ done: true,
+ value: 22
+ },
+ nytalks: {
+ done: true
+ },
+ back2: {
+ done: true,
+ value: 1.5
+ }
+ },
+ water: 1400
+ };
+ for (let w = 8; w >= 0; w--) {
+ const s = 8 - w;
+ body.push({
+ date: iso(addDays(TODAY, -w * 7)),
+ weight: +(74.5 - s * 0.35 + Math.random() * 0.2).toFixed(1),
+ bmi: +(26.4 - s * 0.12).toFixed(1),
+ bodyFat: +(36.8 - s * 0.42).toFixed(1),
+ muscle: +(44.2 + s * 0.15).toFixed(1),
+ skeletal: +(24.8 + s * 0.1).toFixed(1),
+ visceral: +(8.5 - s * 0.08).toFixed(1),
+ cintura: +(84 - s * 0.7).toFixed(1),
+ perna: +(55 + s * 0.25).toFixed(1),
+ rabo: +(96 + s * 0.4).toFixed(1)
+ });
+ }
+ PLAN.forEach((pd, di) => {
+ const base = lastWeekdayDate(di + 1);
+ for (let wk = 5; wk >= 1; wk--) {
+ const date = iso(addDays(base, -(wk - 1) * 7));
+ const ex = pd.ex.map(x => ({
+ name: x.name,
+ sets: x.sets,
+ reps: x.reps,
+ weight: x.weight === 0 ? 0 : Math.max(0, Math.round(x.weight - (wk - 1) * 2)),
+ rir: Math.max(0, Math.min(4, DEFAULT_RIR + Math.floor(Math.random() * 3) - 1)),
+ rirAlvo: DEFAULT_RIR
+ }));
+ sessions.push({
+ id: "s" + di + "_" + wk,
+ date,
+ dayIdx: di,
+ name: pd.name,
+ ex
+ });
+ }
+ });
  return {
-   theme: "light",
-   profile: {
-     name: "Gonçalo",
-     bfStart: 27.5,
-     bfTarget: 15,
-     targetDate: "2026-11-19",
-     summerTargetDate: "2027-06-01",
-     kcalTarget: 2350,
-     proteinTarget: 170,
-     fatTarget: 70,
-     stepsTarget: 9000,
-     waterTarget: 3,
-     cardioTarget: 90,
-     height: 180
-   },
-   days: now,
-   body: [],
-   sessions: [],
-   menus: clone(MENUS),
-   plano: clone(PLAN),
-   planoVersion: PLAN_VERSION,
-   _updatedAt: 0
+ theme: "light",
+ profile: {
+ name: "Gonçalo",
+ bfStart: 27.5,
+ bfTarget: 15,
+ targetDate: "2026-11-19",
+ summerTargetDate: "2027-06-01",
+ kcalTarget: 2350,
+ proteinTarget: 170,
+ fatTarget: 70,
+ stepsTarget: 9000,
+ waterTarget: 3,
+ cardioTarget: 90,
+ height: 180
+ },
+ days,
+ body,
+ sessions,
+ plano: clone(PLAN),
+ planoVersion: PLAN_VERSION
  };
 }
 
@@ -1660,7 +1829,7 @@ function weekFromMonday(days) {
  return out;
 }
 function trainedOn(state, key) {
- return state.sessions.some(s => s.date === key) || (state.days[key] && state.days[key].tasks.forca ? (state.days[key].tasks.forca.done === true || state.days[key].tasks.forca.value > 0) : false);
+ return state.sessions.some(s => s.date === key) || (state.days[key] && state.days[key].tasks.forca ? state.days[key].tasks.forca.value > 0 : false);
 }
 function computeGoal(g, state) {
  const days = state.days,
@@ -1696,7 +1865,7 @@ function computeGoal(g, state) {
  };
  }
  if (g.type === "calories") {
- const v = Math.round(sumQty("calorias"));
+ const v = Math.round(sumQty("calorias") + sumQty("passos") * 0.04);
  return {
  value: v,
  pct: cp(v / g.target * 100)
@@ -1936,26 +2105,30 @@ function Dashboard({
  user
 }) {
  const uid = user ? user.uid : null;
- const hasCloud = !!(uid && fbDb);
  useEffect(() => { if(uid) evolveFitFlushCloudQueue(); }, [uid]);
  const [state, setState] = useState(() => {
-   const saved = load(uid);
-   return saved ? normalize(saved) : seed();
+ const saved = load(uid);
+ return saved ? normalize(saved) : seed();
  });
- const [cloudReady, setCloudReady] = useState(() => !hasCloud);
- const cloudHydrated = useRef(!hasCloud);
  const [tab, setTab] = useState("check");
  const [wDay, setWDay] = useState(null);
- const [, setDayTick] = useState(0);
+ const [, setDayTick] = useState(0); // força re-render quando o dia civil muda
  const first = useRef(true);
- const syncedJson = useRef(null);
+ const [listenKey, setListenKey] = useState(0);
+ const [cloudReady, setCloudReady] = useState(!(uid && fbDb)); // nuvem = fonte principal
+ useEffect(() => {
+   if (cloudReady) return;
+   const t = setTimeout(() => setCloudReady(true), 5000); // offline: usa a cache local
+   return () => clearTimeout(t);
+ }, [cloudReady]);
+ const syncedJson = useRef(null); // último JSON já sincronizado com a nuvem
+ const writeTimer = useRef(null);
  const stateRef = useRef(state);
  const scrollRef = useRef(null);
  stateRef.current = state;
 
- // Persistência local imediata. A cloud só é escrita depois da primeira
- // leitura do documento da conta; isto impede que um seed/local vazio
- // sobrescreva os dados reais antes do carregamento do Firestore.
+ // Persistência automática global: qualquer alteração de estado é guardada
+ // imediatamente, sem depender de um botão "Guardar".
  const autoPersistTimer = useRef(null);
  const persistEveryStateChange = (nextState) => {
    try {
@@ -1972,169 +2145,3630 @@ function Dashboard({
      console.error("Persistência automática:", e);
    }
  };
+
+ // Expor um setter global para os handlers de inputs existentes.
+ // Os handlers atuais continuam a funcionar; esta função acrescenta a
+ // persistência imediata depois da alteração.
  window.evolveFitPersistNow = () => {
    try {
      if (uid && stateRef.current) save(stateRef.current, uid);
    } catch (e) {}
  };
 
- // Se a app ficar sem resposta do backend, não prende o utilizador num
- // ecrã de carregamento para sempre. A cache/local continua disponível e
- // a sincronização retoma quando a ligação voltar.
+ // Quando o Firebase termina de autenticar, carregar explicitamente
+ // os dados persistidos dessa conta.
  useEffect(() => {
-   if (!hasCloud) return;
-   const t = setTimeout(() => {
-     if (!cloudHydrated.current) {
-       // Permite ver a cache/local sem considerar a cloud "carregada".
-       // Qualquer alteração feita entretanto fica apenas local até o
-       // onSnapshot inicial decidir qual é a versão mais recente.
-       setCloudReady(true);
-       window.evfSetCloudStatus && window.evfSetCloudStatus("offline");
-     }
-   }, 5000);
-   return () => clearTimeout(t);
+   if (!uid) return;
+   const savedForUser = load(uid);
+   if (!savedForUser) return;
+   const normalized = normalize(savedForUser);
+   if (!normalized) return;
+
+   const currentAt = Number(stateRef.current && stateRef.current._updatedAt) || 0;
+   const savedAt = Number(normalized._updatedAt) || 0;
+
+   if (savedAt >= currentAt) {
+     stateRef.current = normalized;
+     setState(normalized);
+   }
  }, [uid]);
-
- // Carrega a conta do Firestore em tempo real. Na primeira leitura:
- //   - cloud existente e mais recente -> cloud vence;
- //   - cache local mais recente -> sobe para a cloud;
- //   - sem cloud e sem cache real -> cria estado vazio.
+ // Volta ao topo sempre que mudas de separador, em vez de manter a posição
+ // de scroll do separador anterior (o que fazia abrir "a meio" o ecrã).
  useEffect(() => {
-   if (!hasCloud) {
-     cloudHydrated.current = true;
-     setCloudReady(true);
-     return;
-   }
-   cloudHydrated.current = false;
-   setCloudReady(false);
-   let firstSnapshot = true;
-   const ref = fbDb.collection("users").doc(uid);
-   const unsub = ref.onSnapshot(snap => {
-     if (snap.metadata.hasPendingWrites && !snap.exists) {
-       window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
-       return;
-     }
-
-     const localSaved = load(uid);
-     const localState = localSaved ? normalize(localSaved) : null;
-     const localAt = Number(localState && localState._updatedAt) || 0;
-
-     if (!snap.exists) {
-       const chosen = localAt > 0 ? localState : normalize(seed());
-       if (chosen) {
-         stateRef.current = chosen;
-         syncedJson.current = JSON.stringify(chosen);
-         save(chosen, uid);
-         setState(chosen);
-         if (localAt > 0) {
-           window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
-           evolveFitCloudSave(uid, chosen);
-         } else {
-           ref.set(toCloud(chosen)).catch(e => console.error("Erro ao criar dados cloud:", e));
-         }
-       }
-       firstSnapshot = false;
-       cloudHydrated.current = true;
-       setCloudReady(true);
-       return;
-     }
-
-     const remoteRaw = fromCloud(snap.data());
-     const remote = normalize(remoteRaw);
-     if (!remote) return;
-     const remoteAt = Number(remote._updatedAt) || 0;
-
-     if (localAt > remoteAt) {
-       // O dispositivo tem alterações mais recentes do que a cloud.
-       stateRef.current = localState;
-       syncedJson.current = JSON.stringify(localState);
-       setState(localState);
-       window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
-       evolveFitCloudSave(uid, localState);
-     } else {
-       // A cloud é igual ou mais recente: aplica-a imediatamente ao dispositivo.
-       stateRef.current = remote;
-       syncedJson.current = JSON.stringify(remote);
-       setState(remote);
-       window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
-     }
-
-     firstSnapshot = false;
-     cloudHydrated.current = true;
-     setCloudReady(true);
-   }, err => {
-     window.evfSetCloudStatus && window.evfSetCloudStatus("error");
-     console.error("Erro de sincronização:", err);
-     cloudHydrated.current = true;
-     setCloudReady(true);
-   });
-   return unsub;
- }, [uid, hasCloud]);
-
- // Volta ao topo quando mudas de separador.
- useEffect(() => {
-   if (scrollRef.current) scrollRef.current.scrollTop = 0;
+ if (scrollRef.current) scrollRef.current.scrollTop = 0;
  }, [tab]);
-
- // Corrige o dia civil quando a app passa pela meia-noite/background.
+ // Corrige o bug de "app aberta em segundo plano depois da meia-noite":
+ // verifica periodicamente (e sempre que a app volta ao ecrã) se o dia
+ // civil mudou; se mudou, actualiza TODAY/todayKey e força um re-render,
+ // sem precisar de recarregar a página.
  useEffect(() => {
-   const check = () => {
-     if (refreshTodayIfNeeded()) setDayTick(t => t + 1);
-   };
-   check();
-   const interval = setInterval(check, 60000);
-   document.addEventListener("visibilitychange", check);
-   window.addEventListener("focus", check);
-   return () => {
-     clearInterval(interval);
-     document.removeEventListener("visibilitychange", check);
-     window.removeEventListener("focus", check);
-   };
+ const check = () => {
+ if (refreshTodayIfNeeded()) setDayTick(t => t + 1);
+ };
+ check();
+ const interval = setInterval(check, 60000);
+ document.addEventListener("visibilitychange", check);
+ window.addEventListener("focus", check);
+ return () => {
+ clearInterval(interval);
+ document.removeEventListener("visibilitychange", check);
+ window.removeEventListener("focus", check);
+ };
  }, []);
-
- // Guarda alterações locais e envia-as automaticamente para o Firestore.
- // Importante: não corre antes da hidratação inicial da cloud.
+ // Ouve alterações vindas da nuvem (ex.: gravaste no PC, chega ao iPhone).
  useEffect(() => {
-   if (first.current) {
-     first.current = false;
-     return;
-   }
-   save(state, uid);
-   if (hasCloud && cloudReady && cloudHydrated.current) {
-     const j = JSON.stringify(state);
-     if (j !== syncedJson.current) {
-       syncedJson.current = j;
-       evolveFitCloudSave(uid, state);
-     }
-   }
- }, [state, uid, hasCloud, cloudReady]);
-
+ if (!uid || !fbDb) return;
+ const ref = fbDb.collection("users").doc(uid);
+ const unsub = ref.onSnapshot(snap => {
+ if (snap.metadata.hasPendingWrites) {
+   window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
+   return;
+ } // ignora o eco da própria escrita
+ if (!snap.exists) {
+ // Primeira vez nesta conta: envia o estado atual para a nuvem.
+ if (snap.metadata.fromCache) return; // cache vazia não significa conta vazia
+ setCloudReady(true);
+ window.__evfRemoteSeen = true;
+ window.__evfRemoteUpdatedAt = 0;
+ const j = JSON.stringify(stateRef.current);
+ syncedJson.current = j;
+ ref.set(toCloud(stateRef.current)).catch(e => console.error(e));
+ return;
+ }
+ const remote = fromCloud(snap.data());
+ const j = JSON.stringify(remote);
+ setCloudReady(true);
+ window.__evfRemoteSeen = true;
+ window.__evfRemoteUpdatedAt = Number(remote && remote._updatedAt) || 0;
+ if (j !== syncedJson.current) {
+ const localUpdatedAt = stateRef.current._updatedAt || 0;
+ const remoteUpdatedAt = remote._updatedAt || 0;
+ if (remoteUpdatedAt < localUpdatedAt) {
+   // O local é mais recente (ex.: editado offline): envia-o para a nuvem.
+   evolveFitCloudSave(uid, stateRef.current);
+   return;
+ }
+ if (remoteUpdatedAt === localUpdatedAt &&
+     j !== JSON.stringify(stateRef.current)) {
+   return;
+ }
+ syncedJson.current = j;
+ window.evfSetCloudStatus && window.evfSetCloudStatus("remote");
+ const normalizedRemote = normalize(remote);
+ if (normalizedRemote) {
+   try { // cópia de segurança do estado local antes de o substituir
+     const cur = JSON.stringify(stateRef.current);
+     if (cur !== JSON.stringify(normalizedRemote)) localStorage.setItem(BASE_KEY + "_before_remote", cur);
+   } catch (e) {}
+   stateRef.current = normalizedRemote;
+ syncedJson.current = JSON.stringify(normalizedRemote); // evita reenviar para a nuvem o que acabou de chegar
+ setState(normalizedRemote);
+ }
+ }
+ }, err => {
+ setCloudReady(true);
+ window.__evfLastCloudError = ((err && (err.code || err.name)) || "erro") + ": " + ((err && err.message) || "");
+ window.evfSetCloudStatus && window.evfSetCloudStatus("error");
+ console.error("Erro de sincronização:", err);
+ });
+ return unsub;
+ }, [uid, listenKey]);
+ // No iPhone a ligação em tempo real adormece em background: ao voltar, liga-se de novo e puxa o mais recente.
  useEffect(() => {
-   document.documentElement.setAttribute("data-theme", state.theme);
+ if (!uid || !fbDb) return;
+ const bump = () => { if (document.visibilityState === "visible" && navigator.onLine) setListenKey(k => k + 1); };
+ document.addEventListener("visibilitychange", bump);
+ window.addEventListener("online", bump);
+ return () => { document.removeEventListener("visibilitychange", bump); window.removeEventListener("online", bump); };
+ }, [uid]);
+ useEffect(() => {
+ window.__evfSyncMode = (uid && fbDb) ? "cloud" : "local";
+ window.dispatchEvent(new CustomEvent("evolvefit-cloud-status", {detail: window.EvolveFitCloudStatus}));
+ }, [uid]);
+ useEffect(() => {
+ if (first.current) {
+ first.current = false;
+ return;
+ }
+ save(state, uid); // cache local (rápido + offline)
+ if (uid && fbDb) {
+ const j = JSON.stringify(state);
+ if (j !== syncedJson.current) {
+ syncedJson.current = j;
+ evolveFitCloudSave(uid, state);
+ }
+ }
+ }, [state, uid]);
+ useEffect(() => {
+ document.documentElement.setAttribute("data-theme", state.theme);
  }, [state.theme]);
 
- // Última salvaguarda quando a página fica em background/fecha.
+ // Garantia extra de persistência no iPhone/Safari:
+ // grava o estado atual quando a página é fechada, suspensa ou enviada para background.
  useEffect(() => {
-   const flush = () => {
-     try {
-       const current = stateRef.current;
-       if (!current) return;
-       save(current, uid);
-       if (hasCloud && cloudReady && cloudHydrated.current) {
-         evolveFitCloudSave(uid, current);
-       }
-     } catch (e) {}
-   };
-   const onVisibility = () => {
-     if (document.visibilityState === "hidden") flush();
-   };
-   window.addEventListener("pagehide", flush);
-   window.addEventListener("beforeunload", flush);
-   document.addEventListener("visibilitychange", onVisibility);
-   return () => {
-     window.removeEventListener("pagehide", flush);
-     window.removeEventListener("beforeunload", flush);
-     document.removeEventListener("visibilitychange", onVisibility);
-   };
- }, [uid, hasCloud, cloudReady]);
+ const flush = () => {
+   try {
+     const current = stateRef.current;
+     if (!current) return;
+     save(current, uid);
+     if (uid && fbDb) {
+       evolveFitCloudSave(uid, current);
+     }
+   } catch (e) {}
+ };
+ const onVisibility = () => {
+   if (document.visibilityState === "hidden") flush();
+ };
+ window.addEventListener("pagehide", flush);
+ window.addEventListener("beforeunload", flush);
+ document.addEventListener("visibilitychange", onVisibility);
+ return () => {
+   window.removeEventListener("pagehide", flush);
+   window.removeEventListener("beforeunload", flush);
+   document.removeEventListener("visibilitychange", onVisibility);
+ };
+ }, [uid]);
  const update = fn => setState(p => {
+ try {
+   const n = clone(p);
+   if (!n.days || typeof n.days !== "object") n.days = {};
+   if (!Array.isArray(n.body)) n.body = [];
+   if (!Array.isArray(n.sessions)) n.sessions = [];
+   if (!n.profile || typeof n.profile !== "object") n.profile = {};
+   if (!n.menus || typeof n.menus !== "object") n.menus = {};
+   fn(n);
+   const safe = normalize(n);
+   safe._updatedAt = Date.now();
+   try { save(safe, uid); } catch (e) { console.error("Erro ao guardar localmente:", e); }
+   stateRef.current = safe;
+   if (uid && fbDb) {
+     try {
+       const payload = JSON.parse(JSON.stringify(safe));
+       syncedJson.current = JSON.stringify(payload);
+       window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
+       evolveFitCloudSave(uid, payload);
+     } catch (e) { console.error("Erro ao preparar sincronização:", e); }
+   }
+   return safe;
+ } catch (e) {
+   console.error("Erro ao atualizar dados:", e);
+   return p;
+ }
+});
+ if (!cloudReady) return React.createElement("div", {className: "app-wrap"},
+   React.createElement("div", {className: "phone"},
+     React.createElement("div", {className: "scroll", style: {display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)"}}, "A sincronizar com a nuvem…")));
+ const onNavigate = id => {
+   setWDay(null);
+   setTab(id);
+ };
+ const tabs = [{
+ id: "check",
+ label: "Hoje",
+ icon: "home"
+ }, {
+ id: "workout",
+ label: "Treinos",
+ icon: "dumbbell"
+ }, {
+ id: "body",
+ label: "Corpo",
+ icon: "activity"
+ }, {
+ id: "goals",
+ label: "Coach",
+ icon: "target"
+ }, {
+ id: "report",
+ label: "Relatório",
+ icon: "barChart"
+ }];
+ return /*#__PURE__*/React.createElement("div", {
+ className: "app-wrap"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "phone"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "scroll",
+ ref: scrollRef
+ }, tab === "check" && /*#__PURE__*/React.createElement(Checklist, {
+ state: state,
+ update: update,
+ onOpenWorkout: di => {
+ setWDay(di);
+ setTab("workout");
+ }
+ }), tab === "workout" && /*#__PURE__*/React.createElement(Workouts, {
+ state: state,
+ update: update,
+ initialDay: wDay,
+ onNavigate: onNavigate
+ }), tab === "body" && /*#__PURE__*/React.createElement(Body, {
+ state: state,
+ update: update,
+ onNavigate: onNavigate
+ }), tab === "goals" && /*#__PURE__*/React.createElement(Coach2027, {
+ state: state,
+ update: update,
+ onNavigate: onNavigate
+ }), tab === "report" && /*#__PURE__*/React.createElement(Report, {
+ state: state,
+ update: update,
+ user: user,
+ onNavigate: onNavigate
+ })), /*#__PURE__*/React.createElement("nav", {
+ className: "tabbar"
+ }, tabs.map(t => /*#__PURE__*/React.createElement("button", {
+ key: t.id,
+ className: "tab" + (tab === t.id ? " on" : ""),
+ onClick: () => {
+ setWDay(null);
+ setTab(t.id);
+ }
+ }, /*#__PURE__*/React.createElement(I, {
+ name: t.icon,
+ size: 21
+ }), /*#__PURE__*/React.createElement("span", null, t.label))))));
+}
+
+/* ============================ DAILY CHECKLIST =========================== */
+function Checklist({
+ state,
+ update,
+ onOpenWorkout
+}) {
+ const [viewDate, setViewDate] = useState(TODAY);
+ const viewKey = iso(viewDate);
+ const isToday = viewKey === todayKey;
+ const day = state.days[viewKey] || {
+ tasks: {},
+ water: 0
+ };
+ const list = dayList(viewKey);
+ const doneCount = list.filter(t => isDone(day.tasks[t.id], t)).length;
+ const remainingCount = Math.max(0, list.length - doneCount);
+ const pct = list.length ? Math.round(doneCount / list.length * 100) : 0;
+ const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
+ const hour = TODAY.getHours();
+ const greet = hour < 12 ? "Bom dia" : hour < 19 ? "Boa tarde" : "Boa noite";
+ const goDay = n => setViewDate(d => addDays(d, n));
+ const goToday = () => setViewDate(TODAY);
+ const toggle = id => update(s => {
+ s.days[viewKey] = s.days[viewKey] || {
+ tasks: {},
+ water: 0
+ };
+ const t = s.days[viewKey].tasks;
+ if (t[id] && t[id].done) delete t[id];else t[id] = {
+ done: true
+ };
+ });
+ const setQty = (id, num) => update(s => {
+ s.days[viewKey] = s.days[viewKey] || {
+ tasks: {},
+ water: 0
+ };
+ const t = s.days[viewKey].tasks;
+ if (!num || num <= 0) delete t[id];else t[id] = {
+ done: true,
+ value: num
+ };
+ });
+ return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("header", {
+ className: "head"
+ }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ className: "greet"
+ }, greet, ", ", state.profile.name, " "), /*#__PURE__*/React.createElement("div", {
+ className: "date-nav"
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "date-nav-btn",
+ onClick: () => goDay(-1),
+ "aria-label": "Dia anterior"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "arrowRight",
+ size: 14,
+ style: {
+ transform: "rotate(180deg)"
+ }
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "subdate" + (isToday ? "" : " tappable"),
+ onClick: isToday ? undefined : goToday,
+ title: isToday ? undefined : "Voltar a hoje"
+ }, longDate(viewDate), !isToday && /*#__PURE__*/React.createElement("span", {
+ className: "today-pill"
+ }, "Hoje")), /*#__PURE__*/React.createElement("button", {
+ className: "date-nav-btn",
+ onClick: () => goDay(1),
+ "aria-label": "Dia seguinte"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "arrowRight",
+ size: 14
+ }))), checkStreak > 0 ? /*#__PURE__*/React.createElement("div", {
+ className: "home-streak"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "flame",
+ size: 13
+ }), /*#__PURE__*/React.createElement("span", null, checkStreak, " dia", checkStreak === 1 ? "" : "s", " seguidos — não quebres a sequência")) : /*#__PURE__*/React.createElement("div", {
+ className: "home-streak muted"
+ }, "Começa hoje a tua sequência")), /*#__PURE__*/React.createElement(Ring, {
+ pct: pct,
+ size: 58,
+ stroke: 6
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "ring-pct"
+ }, pct, /*#__PURE__*/React.createElement("i", null, "%")))), /*#__PURE__*/React.createElement("div", {
+ className: "progress-line"
+ }, /*#__PURE__*/React.createElement("span", null, remainingCount === 0 ? "✓ Todas as tarefas concluídas" : "✓ " + remainingCount + (remainingCount === 1 ? " tarefa por concluir" : " tarefas por concluir")), /*#__PURE__*/React.createElement("span", {
+ className: "dot"
+ }, "•"), /*#__PURE__*/React.createElement("span", null, doneCount, "/", list.length, " concluídas · ", pct, "%")), /*#__PURE__*/React.createElement(TodayWorkoutCard, {
+ state: state,
+ dayKey: viewKey,
+ onOpen: onOpenWorkout
+ }), /*#__PURE__*/React.createElement(WaterCard, {
+ state: state,
+ update: update,
+ dayKey: viewKey
+ }), /*#__PURE__*/React.createElement(MenuCard, {
+ state: state,
+ update: update
+ }), SECTIONS.map(sec => /*#__PURE__*/React.createElement(Section, {
+ key: sec.id,
+ sec: sec,
+ day: day,
+ toggle: toggle,
+ setQty: setQty,
+ dayKey: viewKey
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "pad"
+ }));
+}
+// Média móvel dos últimos `windowDays` dias (por defeito 7) até `endDate`,
+// para suavizar flutuações diárias do peso (água, sal, ciclo, etc.).
+const rollingAvgAt = (arr, endDate, key, windowDays = 7) => {
+ const start = iso(addDays(new Date(endDate + "T00:00:00"), -(windowDays - 1)));
+ const win = arr.filter(x => x.date >= start && x.date <= endDate && x[key]);
+ if (!win.length) return null;
+ return +(win.reduce((a, b) => a + (+b[key] || 0), 0) / win.length).toFixed(1);
+};
+const paceProjection = (body, bfTarget) => {
+ if (body.length < 2) return null;
+ const first = body[0],
+ last = body[body.length - 1];
+ const span = daysBetween(new Date(first.date + "T00:00:00"), new Date(last.date + "T00:00:00"));
+ if (span <= 0) return null;
+ const rate = (first.bodyFat - last.bodyFat) / span;
+ if (rate <= 0) return {
+ reached: false,
+ stalled: true
+ };
+ const toGo = +(last.bodyFat - bfTarget).toFixed(2);
+ if (toGo <= 0) return {
+ reached: true
+ };
+ const daysNeeded = Math.ceil(toGo / rate);
+ return {
+ reached: false,
+ stalled: false,
+ date: addDays(TODAY, daysNeeded),
+ days: daysNeeded
+ };
+};
+function WaterCard({
+ state,
+ update,
+ dayKey
+}) {
+ const key = dayKey || todayKey;
+ const GOAL = 2500;
+ const ml = state.days[key] && state.days[key].water || 0;
+ const pct = Math.min(100, Math.round(ml / GOAL * 100));
+ const [celebrate, setCelebrate] = useState(false);
+ const [custom, setCustom] = useState("");
+ const prev = useRef(ml);
+ useEffect(() => {
+ let t;
+ if (prev.current < GOAL && ml >= GOAL) {
+ setCelebrate(true);
+ t = setTimeout(() => setCelebrate(false), 2200);
+ }
+ prev.current = ml;
+ return () => t && clearTimeout(t);
+ }, [ml]);
+ const add = a => update(s => {
+ s.days[key] = s.days[key] || {
+ tasks: {},
+ water: 0
+ };
+ s.days[key].water = Math.max(0, (s.days[key].water || 0) + a);
+ });
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card water"
+ }, celebrate && /*#__PURE__*/React.createElement("div", {
+ className: "celebrate"
+ }, Array.from({
+ length: 14
+ }).map((_, i) => /*#__PURE__*/React.createElement("span", {
+ key: i,
+ className: "confetti",
+ style: {
+ left: i / 14 * 100 + "%",
+ animationDelay: i % 5 * 0.08 + "s",
+ background: ["#2A8FD6", "#2B5FD9", "#1E9E6A", "#6D5BD0", "#C98A1B"][i % 5]
+ }
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "celebrate-txt"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "droplet",
+ size: 16
+ }), " Objetivo atingido!")), /*#__PURE__*/React.createElement("div", {
+ className: "water-top"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "water-title"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "droplet",
+ size: 17
+ }), " Água"), /*#__PURE__*/React.createElement("div", {
+ className: "water-val"
+ }, (ml / 1000).toFixed(2), /*#__PURE__*/React.createElement("i", null, "L"), " ", /*#__PURE__*/React.createElement("span", {
+ className: "water-goal"
+ }, "/ 2.5L"))), /*#__PURE__*/React.createElement("div", {
+ className: "bar water-bar"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bar-fill",
+ style: {
+ width: pct + "%",
+ background: "linear-gradient(90deg,#2A8FD6,#2B6FCF)"
+ }
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "water-pct"
+ }, pct, "%"), /*#__PURE__*/React.createElement("div", {
+ className: "water-btns"
+ }, [250, 500, 750, 1000].map(a => /*#__PURE__*/React.createElement("button", {
+ key: a,
+ className: "chip",
+ onClick: () => add(a)
+ }, "+", a >= 1000 ? "1L" : a + "ml"))), /*#__PURE__*/React.createElement("div", {
+ className: "water-custom"
+ }, /*#__PURE__*/React.createElement("input", {
+ value: custom,
+ onChange: e => setCustom(e.target.value.replace(/\D/g, "")),
+ placeholder: "ml personalizado",
+ inputMode: "numeric"
+ }), /*#__PURE__*/React.createElement("button", {
+ onClick: () => {
+ if (custom) {
+ add(+custom);
+ setCustom("");
+ }
+ }
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "plus",
+ size: 16
+ }))));
+}
+function Section({
+ sec,
+ day,
+ toggle,
+ setQty,
+ dayKey
+}) {
+ const [open, setOpen] = useState(() => {
+ const ts = sec.chores ? choresForKey(dayKey || todayKey) : sec.tasks || [];
+ return !(ts.length && ts.every(t => isDone(day.tasks[t.id], t)));
+ });
+ if (sec.chores) {
+ const key = dayKey || todayKey;
+ const chores = choresForKey(key);
+ const room = CHORES[weekdayOf(key)] ? CHORES[weekdayOf(key)].room : null;
+ const done = chores.filter(t => day.tasks[t.id] && day.tasks[t.id].done).length;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card section tint-teal"
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "section-head",
+ onClick: () => setOpen(o => !o)
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "section-icon"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "home",
+ size: 17
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "section-title"
+ }, "Durante o dia"), /*#__PURE__*/React.createElement("div", {
+ className: "section-count"
+ }, chores.length ? done + "/" + chores.length : ""), /*#__PURE__*/React.createElement(I, {
+ name: "chevron",
+ size: 17,
+ className: "chev" + (open ? " open" : "")
+ })), open && /*#__PURE__*/React.createElement("div", {
+ className: "tasks"
+ }, chores.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+ className: "chore-header"
+ }, "", WD_LONG[weekdayOf(key)], " · ", room), chores.map(t => /*#__PURE__*/React.createElement("button", {
+ key: t.id,
+ className: "task" + (day.tasks[t.id] && day.tasks[t.id].done ? " done" : ""),
+ onClick: () => toggle(t.id)
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "checkbox" + (day.tasks[t.id] && day.tasks[t.id].done ? " on" : "")
+ }, day.tasks[t.id] && day.tasks[t.id].done && /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 13
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "task-label"
+ }, t.label)))) : /*#__PURE__*/React.createElement("div", {
+ className: "chore-header"
+ }, "Fim de semana — sem tarefas de casa")));
+ }
+ const groups = sec.groups || [{
+ label: null,
+ tasks: sec.tasks
+ }];
+ const all = groups.flatMap(g => g.tasks);
+ const done = all.filter(t => isDone(day.tasks[t.id], t)).length;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card section tint-" + sec.tint
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "section-head",
+ onClick: () => setOpen(o => !o)
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "section-icon"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: sec.icon,
+ size: 17
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "section-title"
+ }, sec.label), /*#__PURE__*/React.createElement("div", {
+ className: "section-count"
+ }, done, "/", all.length), /*#__PURE__*/React.createElement(I, {
+ name: "chevron",
+ size: 17,
+ className: "chev" + (open ? " open" : "")
+ })), open && /*#__PURE__*/React.createElement("div", {
+ className: "tasks"
+ }, groups.map((g, gi) => /*#__PURE__*/React.createElement("div", {
+ key: gi
+ }, g.label && /*#__PURE__*/React.createElement("div", {
+ className: "subgroup"
+ }, g.label), g.tasks.map(t => t.qty ? /*#__PURE__*/React.createElement("div", {
+ className: "qty-task",
+ key: t.id + "_" + dayKey
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "task-label"
+ }, t.label, t.goal && /*#__PURE__*/React.createElement("span", {
+ className: "task-tag"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "target",
+ size: 10
+ }))), /*#__PURE__*/React.createElement(QtyInput, {
+ value: day.tasks[t.id] ? day.tasks[t.id].value : 0,
+ unit: t.unit,
+ decimal: t.unit === "h",
+ onCommit: n => setQty(t.id, n)
+ })) : /*#__PURE__*/React.createElement("button", {
+ key: t.id,
+ className: "task" + (day.tasks[t.id] && day.tasks[t.id].done ? " done" : ""),
+ onClick: () => toggle(t.id)
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "checkbox" + (day.tasks[t.id] && day.tasks[t.id].done ? " on" : "")
+ }, day.tasks[t.id] && day.tasks[t.id].done && /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 13
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "task-label"
+ }, t.label), t.goal && /*#__PURE__*/React.createElement("span", {
+ className: "task-tag"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "target",
+ size: 10
+ }))))))));
+}
+/* Caixa de cardio semanal: check + minutos por dia, ligada aos mesmos dados
+ da tarefa "Cardio" do checklist diário. */
+function CardioWeekCard({
+ state,
+ update
+}) {
+ const weekDays = lastNDays(state.days, 7);
+ const total = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
+ const toggle = key => update(s => {
+ s.days[key] = s.days[key] || {
+ tasks: {},
+ water: 0
+ };
+ const t = s.days[key].tasks;
+ if (t.cardio && t.cardio.value > 0) delete t.cardio;else t.cardio = {
+ done: true,
+ value: 30
+ };
+ });
+ const setMin = (key, num) => update(s => {
+ s.days[key] = s.days[key] || {
+ tasks: {},
+ water: 0
+ };
+ const t = s.days[key].tasks;
+ if (!num || num <= 0) delete t.cardio;else t.cardio = {
+ done: true,
+ value: num
+ };
+ });
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card cardio-week"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "cardio-week-head"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "cardio-week-title"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "activity",
+ size: 15
+ }), " Cardio da semana"), /*#__PURE__*/React.createElement("div", {
+ className: "cardio-week-total"
+ }, total, " min")), weekDays.map(w => {
+ const rec = w.day && w.day.tasks.cardio;
+ const val = rec ? rec.value : 0;
+ const checked = val > 0;
+ const isToday = w.key === todayKey;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "cardio-day-row",
+ key: w.key
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "checkbox" + (checked ? " on" : ""),
+ onClick: () => toggle(w.key),
+ "aria-label": "Marcar cardio de " + WD[weekdayOf(w.key)]
+ }, checked && /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 13
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "cardio-day-label" + (isToday ? " today" : "")
+ }, WD[weekdayOf(w.key)], /*#__PURE__*/React.createElement("i", null, new Date(w.key + "T12:00:00").getDate(), isToday ? " · hoje" : "")), /*#__PURE__*/React.createElement(QtyInput, {
+ value: val,
+ unit: "min",
+ onCommit: n => setMin(w.key, n)
+ }));
+ }));
+}
+/* =============================== TREINOS ================================ */
+function Workouts({
+ state,
+ update,
+ initialDay
+}) {
+ const plano = state.plano || [];
+ const todayIdx = (() => {
+ const wd = TODAY.getDay();
+ return wd >= 1 && wd <= 5 ? wd - 1 : 0;
+ })();
+ const [sel, setSel] = useState(initialDay != null ? initialDay : todayIdx);
+ const [showPlan, setShowPlan] = useState(false);
+ const [view, setView] = useState("treino");
+ const [planDay, setPlanDay] = useState(initialDay != null ? initialDay : todayIdx);
+ const [showRir, setShowRir] = useState(false);
+ const weekDays = weekFromMonday(state.days);
+ const treinos = weekDays.filter(w => trainedOn(state, w.key)).length;
+ const volWeek = state.sessions.filter(s => weekDays.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
+ const kcal = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
+ const cardio = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
+ const loggedToday = state.sessions.some(s => s.date === todayKey && s.dayIdx === sel);
+ const loggedDayIdx = new Set(state.sessions.filter(s => weekDays.some(w => w.key === s.date)).map(s => s.dayIdx));
+ const saveSession = entries => update(s => {
+ entries.forEach((e, i) => {
+ if (s.plano[sel].ex[i]) {
+ s.plano[sel].ex[i].weight = parseNum(e.weight);
+ s.plano[sel].ex[i].notes = e.notes || "";
+ }
+ });
+ const ex = s.plano[sel].ex.map((x, i) => ({
+ name: x.name,
+ sets: x.sets,
+ reps: x.reps,
+ repsMax: x.repsMax || 0,
+ weight: x.weight,
+ notes: x.notes || "",
+ rir: entries[i] && entries[i].rir != null ? entries[i].rir : null,
+ repsS: parseInt(entries[i] && entries[i].repsS, 10) || 0,
+ repsB: parseInt(entries[i] && entries[i].repsB, 10) || 0,
+ rirAlvo: rirOf(x)
+ }));
+ const i = s.sessions.findIndex(se => se.date === todayKey && se.dayIdx === sel);
+ const rec = {
+ id: "s" + Date.now(),
+ date: todayKey,
+ dayIdx: sel,
+ name: s.plano[sel].name,
+ ex
+ };
+ if (i >= 0) s.sessions[i] = rec;else s.sessions.push(rec);
+ // Interligação: o treino registado alimenta automaticamente a checklist do mesmo dia.
+ s.days[todayKey] = s.days[todayKey] || { tasks:{}, water:0 };
+ s.days[todayKey].tasks = s.days[todayKey].tasks || {};
+ s.days[todayKey].tasks.forca = { done:true, value:1 };
+ });
+ const setPlanEx = (di, xi, f, val) => update(s => {
+ s.plano[di].ex[xi][f] = f === "name" || f === "notes" ? val : f === "weight" ? normDecInput(val) : parseInt(val, 10) || 0;
+ });
+ const setPlanName = (di, val) => update(s => {
+ s.plano[di].name = val;
+ });
+ const addPlanEx = di => update(s => s.plano[di].ex.push({
+ name: "",
+ sets: 3,
+ reps: 10,
+ repsMax: 0,
+ weight: 0,
+ rir: DEFAULT_RIR
+ }));
+ const delPlanEx = (di, xi) => update(s => s.plano[di].ex.splice(xi, 1));
+ const reorderPlanEx = (di, order) => update(s => {
+ s.plano[di].ex = order.map(i => s.plano[di].ex[i]);
+ });
+ const daySessions = [...state.sessions].filter(s => s.dayIdx === sel).sort((a, b) => a.date.localeCompare(b.date));
+ const todaySession = daySessions.find(se => se.date === todayKey) || null;
+ const lastSession = daySessions.filter(se => se.date !== todayKey).pop() || null;
+ const progression = plano[sel].ex.map((ex, i) => {
+ const rirSeries = daySessions.map(s => s.ex[i] ? s.ex[i].rir : null).filter(v => v != null);
+ const lastRir = rirSeries.length ? rirSeries[rirSeries.length - 1] : null;
+ const series = daySessions.map(s => s.ex[i] ? s.ex[i].weight : null).filter(v => v != null && v > 0);
+ const first = series[0],
+ last = series[series.length - 1];
+ const dir = series.length < 2 ? "flat" : last > first ? "up" : last < first ? "down" : "flat";
+ return {
+ name: ex.name,
+ series,
+ first,
+ last,
+ dir,
+ lastRir
+ };
+ });
+ const upCount = progression.filter(p => p.dir === "up").length;
+ return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
+ title: "Treinos",
+ sub: "Regista o treino do dia, o RIR e acompanha a carga"
+ }), /*#__PURE__*/React.createElement("div", {
+ className: "seg"
+ }, [["treino", "Treino"], ["progresso", "Progresso"], ["historico", "Histórico"], ["plano", "Plano"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+ key: k,
+ className: "seg-b" + (view === k ? " on" : ""),
+ onClick: () => setView(k)
+ }, l))), view === "treino" && React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(RestTimer, null), /*#__PURE__*/React.createElement("div", {
+ className: "day-picker"
+ }, plano.map((d, i) => /*#__PURE__*/React.createElement("button", {
+ key: i,
+ className: "dp" + (sel === i ? " on" : ""),
+ onClick: () => setSel(i)
+ }, d.day.slice(0, 3), loggedDayIdx.has(i) && /*#__PURE__*/React.createElement("span", {
+ className: "dp-dot"
+ })))), /*#__PURE__*/React.createElement("div", {
+ className: "card logger"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "logger-head"
+ }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ className: "logger-title"
+ }, plano[sel].name), /*#__PURE__*/React.createElement("div", {
+ className: "logger-sub"
+ }, plano[sel].day, sel === todayIdx ? " · hoje" : "")), loggedToday && /*#__PURE__*/React.createElement("div", {
+ className: "logged-badge"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 12
+ }), " Registado")), /*#__PURE__*/React.createElement("button", {
+ className: "menu-btn",
+ style: {
+ margin: "0 0 8px"
+ },
+ onClick: () => setShowRir(v => !v)
+ }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
+ className: "rir-help"
+ }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
+ key: sel,
+ exercises: plano[sel].ex,
+ history: state.sessions,
+ onSave: saveSession,
+ loggedToday: loggedToday,
+ today: todaySession,
+ last: lastSession
+ }))), view === "progresso" && React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+ className: "stat-grid"
+ }, /*#__PURE__*/React.createElement(Stat, {
+ icon: "dumbbell",
+ tint: "coral",
+ v: treinos,
+ l: "treinos esta semana"
+ }), /*#__PURE__*/React.createElement(Stat, {
+ icon: "barChart",
+ tint: "violet",
+ v: (volWeek / 1000).toFixed(1) + "k",
+ l: "volume (kg)"
+ }), /*#__PURE__*/React.createElement(Stat, {
+ icon: "flame",
+ tint: "amber",
+ v: kcal,
+ l: "kcal do treino"
+ }), /*#__PURE__*/React.createElement(Stat, {
+ icon: "activity",
+ tint: "teal",
+ v: cardio + "m",
+ l: "cardio"
+ })), /*#__PURE__*/React.createElement(AsymmetryCard, {
+ state: state
+ }), /*#__PURE__*/React.createElement(TrainingAnalysis, {
+ state: state,
+ daySessions: daySessions,
+ progression: progression,
+ upCount: upCount
+ }), /*#__PURE__*/React.createElement(CardioWeekCard, {
+ state: state,
+ update: update
+ })), view === "historico" && /*#__PURE__*/React.createElement(TrainingHistory, {
+ state: state,
+ update: update
+ }), view === "plano" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+ className: "day-picker"
+ }, plano.map((d, i) => /*#__PURE__*/React.createElement("button", {
+ key: i,
+ className: "dp" + (planDay === i ? " on" : ""),
+ onClick: () => setPlanDay(i)
+ }, d.day.slice(0, 3)))), /*#__PURE__*/React.createElement(PlanDayCard, {
+ key: planDay,
+ d: plano[planDay],
+ di: planDay,
+ onEditName: setPlanName,
+ onEditField: setPlanEx,
+ onAdd: addPlanEx,
+ onDelete: delPlanEx,
+ onReorder: reorderPlanEx
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "pad"
+ }));
+}
+/* ---- RIR (Repetitions In Reserve) ---------------------------------------
+ 0 = falha, 1..3 = reps que ainda davam para fazer, 4 = "4 ou mais".
+ Cada exercício do plano tem um RIR alvo; ao registar o treino guardas o RIR
+ real da última série e a app compara os dois. */
+const DEFAULT_RIR = 2;
+const RIR_OPTS = [0, 1, 2, 3, 4];
+const RIR_COLORS = ["#C0392B", "#C98A1B", "#1E9E6A", "#0E8F9E", "#5B6BC0"];
+const rirOf = x => x && x.rir != null ? x.rir : DEFAULT_RIR;
+const rirLabel = v => v >= 4 ? "4+" : String(v);
+function rirAdvice(rir, target) {
+ if (rir == null) return null;
+ const d = rir - target;
+ const head = "RIR " + rirLabel(rir) + " vs alvo " + rirLabel(target) + " — ";
+ if (d >= 2) return {
+ k: "up",
+ t: head + "muita reserva, sobe a carga na próxima."
+ };
+ if (d === 1) return {
+ k: "up",
+ t: head + "ainda há espaço, sobe ligeiramente a carga."
+ };
+ if (d === 0) return {
+ k: "ok",
+ t: head + "no alvo, mantém a carga."
+ };
+ if (d === -1) return {
+ k: "warn",
+ t: head + "mais duro do que o previsto, mantém a carga e consolida."
+ };
+ return {
+ k: "down",
+ t: head + "demasiado perto da falha, baixa um pouco a carga."
+ };
+}
+function RirChips({
+ value,
+ target,
+ onChange,
+ small,
+ clearable
+}) {
+ return /*#__PURE__*/React.createElement("div", {
+ className: "rir-chips" + (small ? " sm" : "")
+ }, RIR_OPTS.map(n => /*#__PURE__*/React.createElement("button", {
+ key: n,
+ type: "button",
+ className: "rir-chip" + (value === n ? " on" : "") + (target === n && value !== n ? " tgt" : ""),
+ "aria-label": "RIR " + rirLabel(n),
+ "aria-pressed": value === n,
+ onClick: () => onChange(clearable && value === n ? null : n)
+ }, rirLabel(n))));
+}
+function TrainingAnalysis({
+ state,
+ daySessions,
+ progression,
+ upCount
+}) {
+ const [tab, setTab] = useState("prog");
+ const rows = [];
+ state.sessions.filter(se => daysBetween(new Date(se.date), TODAY) < 14).forEach(se => se.ex.forEach(e => {
+ if (e.name && e.rir != null) rows.push(e);
+ }));
+ const mean = a => a.reduce((x, y) => x + y, 0) / a.length;
+ const avg = rows.length ? mean(rows.map(e => e.rir)) : null;
+ const tgt = rows.length ? mean(rows.map(e => e.rirAlvo != null ? e.rirAlvo : DEFAULT_RIR)) : DEFAULT_RIR;
+ const counts = RIR_OPTS.map(n => rows.filter(e => Math.min(4, e.rir) === n).length);
+ const max = Math.max(1, ...counts);
+ const status = avg == null ? "" : avg < tgt - 0.5 ? "Estás a treinar mais perto da falha do que o planeado — atenção à recuperação." : avg > tgt + 0.5 ? "Sobra reserva na maioria das séries — há margem para subir cargas." : "Intensidade alinhada com o plano.";
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card progress-card"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "period-tabs"
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "period-btn" + (tab === "prog" ? " active" : ""),
+ onClick: () => setTab("prog")
+ }, "Progressão"), /*#__PURE__*/React.createElement("button", {
+ className: "period-btn" + (tab === "rir" ? " active" : ""),
+ onClick: () => setTab("rir")
+ }, "Intensidade")), /*#__PURE__*/React.createElement("div", {
+ className: "pc-head"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "pc-title"
+ }, tab === "prog" ? "Progressão de carga" : "Intensidade (RIR)"), tab === "prog" ? /*#__PURE__*/React.createElement("div", {
+ className: "pc-badge" + (upCount > 0 ? " up" : "")
+ }, upCount > 0 ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(I, {
+ name: "arrowUp",
+ size: 12
+ }), " A aumentar") : "Estável") : /*#__PURE__*/React.createElement("div", {
+ className: "pc-badge"
+ }, "últimos 14 dias")), tab === "prog" ? daySessions.length < 2 ? /*#__PURE__*/React.createElement("div", {
+ className: "pc-empty"
+ }, "Regista mais treinos deste dia para veres a evolução dos pesos.") : progression.map((p, i) => /*#__PURE__*/React.createElement("div", {
+ className: "prog-row",
+ key: i
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "prog-info"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "prog-name"
+ }, p.name), /*#__PURE__*/React.createElement("div", {
+ className: "prog-vals"
+ }, p.series.length ? p.first + " → " + p.last + " kg" : "—", p.lastRir != null && /*#__PURE__*/React.createElement("span", null, "· RIR ", rirLabel(p.lastRir)), p.dir === "up" && /*#__PURE__*/React.createElement(I, {
+ name: "arrowUp",
+ size: 13,
+ className: "pu"
+ }), p.dir === "down" && /*#__PURE__*/React.createElement(I, {
+ name: "arrowDown",
+ size: 13,
+ className: "pd"
+ }), p.dir === "flat" && /*#__PURE__*/React.createElement(I, {
+ name: "arrowRight",
+ size: 13,
+ className: "pf"
+ }))), /*#__PURE__*/React.createElement(Spark, {
+ data: p.series,
+ color: p.dir === "down" ? "#2B5FD9" : "#1E9E6A",
+ height: 34,
+ w: 90
+ }))) : avg == null ? /*#__PURE__*/React.createElement("div", {
+ className: "pc-empty"
+ }, "Regista o RIR nos exercícios ao guardar um treino para veres aqui a tua intensidade.") : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+ className: "rir-avg"
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "rir-avg-v"
+ }, avg.toFixed(1)), /*#__PURE__*/React.createElement("span", {
+ className: "rir-avg-l"
+ }, "RIR médio · alvo ", tgt.toFixed(1), " · ", rows.length, " exercício", rows.length === 1 ? "" : "s")), /*#__PURE__*/React.createElement("div", {
+ className: "rir-status"
+ }, status), RIR_OPTS.map(n => /*#__PURE__*/React.createElement("div", {
+ className: "rir-dist-row",
+ key: n
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "rir-dist-k"
+ }, "RIR ", rirLabel(n), n === 0 ? " · falha" : ""), /*#__PURE__*/React.createElement("div", {
+ className: "rir-dist-bar"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "rir-dist-fill",
+ style: {
+ width: counts[n] / max * 100 + "%",
+ background: RIR_COLORS[n]
+ }
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "rir-dist-n"
+ }, counts[n])))));
+}
+function arrayMove(arr, from, to) {
+ const a = [...arr];
+ const [item] = a.splice(from, 1);
+ a.splice(to, 0, item);
+ return a;
+}
+function PlanDayCard({
+ d,
+ di,
+ onEditName,
+ onEditField,
+ onAdd,
+ onDelete,
+ onReorder
+}) {
+ const h = React.createElement;
+ const move = (i, dir) => {
+ const o = d.ex.map((_, k) => k);
+ const j = i + dir;
+ if (j < 0 || j >= o.length) return;
+ [o[i], o[j]] = [o[j], o[i]];
+ onReorder(di, o);
+ };
+ const field = (label, i, f, val, mode, ph) => h("div", {
+ className: "pl-f"
+ }, h("label", null, label), h("input", {
+ className: "in",
+ inputMode: mode,
+ placeholder: ph || "",
+ value: val,
+ onChange: e => onEditField(di, i, f, e.target.value)
+ }));
+ const ico = (name, on, dis, lbl) => h("button", {
+ className: "pl-ico",
+ disabled: dis,
+ "aria-label": lbl,
+ onClick: on
+ }, h(I, {
+ name,
+ size: 15
+ }));
+ return h("div", {
+ className: "card plano-day"
+ }, h("div", {
+ className: "plano-head-static"
+ }, h("span", {
+ className: "plano-day-tag"
+ }, d.day), h("input", {
+ className: "in plano-name-input",
+ value: d.name,
+ placeholder: "Nome do treino",
+ "aria-label": "Nome do treino",
+ onChange: e => onEditName(di, e.target.value)
+ })), d.ex.map((x, i) => h("div", {
+ className: "pl-ex",
+ key: i
+ }, h("div", {
+ className: "pl-top"
+ }, h("input", {
+ className: "in",
+ value: x.name,
+ placeholder: "Nome do exercício",
+ onChange: e => onEditField(di, i, "name", e.target.value)
+ }), ico("arrowUp", () => move(i, -1), i === 0, "Subir"), ico("arrowDown", () => move(i, 1), i === d.ex.length - 1, "Descer"), ico("trash", () => onDelete(di, i), false, "Apagar exercício")), h("div", {
+ className: "pl-grid"
+ }, field("Séries", i, "sets", x.sets || "", "numeric"), field("Reps mín", i, "reps", x.reps || "", "numeric"), field("Reps máx", i, "repsMax", x.repsMax || "", "numeric", "opc."), field("Carga (kg)", i, "weight", x.weight ? fmtNum(x.weight) : "", "decimal", "0")), h("div", {
+ className: "pex-rir",
+ style: {
+ paddingLeft: 0,
+ marginBottom: 10
+ }
+ }, h("span", {
+ className: "rir-lbl"
+ }, "RIR alvo"), h(RirChips, {
+ value: rirOf(x),
+ small: true,
+ onChange: v => onEditField(di, i, "rir", v)
+ })), h("input", {
+ className: "in",
+ value: x.notes || "",
+ placeholder: "Nota (opcional)",
+ onChange: e => onEditField(di, i, "notes", e.target.value)
+ }))), h("button", {
+ className: "add-ex",
+ onClick: () => onAdd(di)
+ }, h(I, {
+ name: "plus",
+ size: 14
+ }), " Adicionar exercício"));
+}
+function TrainingHistory({
+ state,
+ update
+}) {
+ const [expanded, setExpanded] = useState(false);
+ const sessions = [...state.sessions].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+ const shown = expanded ? sessions : sessions.slice(0, 5);
+ const del = id => update(s => {
+ const i = s.sessions.findIndex(x => x.id === id);
+ if (i >= 0) s.sessions.splice(i, 1);
+ });
+ const fmt = key => {
+ const d = new Date(key + "T12:00:00");
+ return WD_LONG[d.getDay()] + ", " + d.getDate() + " " + MO[d.getMonth()].slice(0, 3);
+ };
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card progress-card"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "pc-head"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "pc-title"
+ }, "Histórico de treinos"), /*#__PURE__*/React.createElement("div", {
+ className: "pc-badge"
+ }, sessions.length + (sessions.length === 1 ? " treino" : " treinos"))), sessions.length === 0 ? /*#__PURE__*/React.createElement("div", {
+ className: "pc-empty"
+ }, "Ainda não registaste nenhum treino. Guarda um treino acima para começares o histórico.") : /*#__PURE__*/React.createElement(React.Fragment, null, shown.map(s => /*#__PURE__*/React.createElement("div", {
+ className: "hist-row",
+ key: s.id
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "hist-top"
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "hist-date"
+ }, fmt(s.date)), /*#__PURE__*/React.createElement("span", {
+ className: "hist-name"
+ }, s.name), /*#__PURE__*/React.createElement("button", {
+ className: "hist-del",
+ onClick: () => del(s.id),
+ "aria-label": "Apagar treino"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "trash",
+ size: 13
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "hist-ex"
+ }, s.ex.filter(e => e.name).map(e => e.name + " " + e.sets + "×" + repsLbl(e) + (e.weight ? " · " + fmtNum(e.weight) + "kg" : "") + (e.rir != null ? " · RIR " + rirLabel(e.rir) : "")).join(" · ")), s.ex.filter(e => e.name && e.notes).map((e, ni) => /*#__PURE__*/React.createElement("div", {
+ className: "hist-note",
+ key: ni
+ }, /*#__PURE__*/React.createElement("strong", null, e.name, ": "), e.notes)))), sessions.length > 5 && /*#__PURE__*/React.createElement("button", {
+ className: "collapse-btn",
+ style: {
+ marginTop: 8,
+ marginBottom: 0
+ },
+ onClick: () => setExpanded(v => !v)
+ }, expanded ? "Mostrar menos" : "Ver histórico completo (" + sessions.length + ")", /*#__PURE__*/React.createElement(I, {
+ name: "chevron",
+ size: 15,
+ className: "chev" + (expanded ? " open" : "")
+ }))));
+}
+function WorkoutLogger({
+ history = [],
+ exercises,
+ onSave,
+ loggedToday,
+ today,
+ last
+}) {
+ const initRow = x => {
+ const t = today && today.ex.find(e => e.name === x.name);
+ return {
+ weight: fmtNum(x.weight),
+ notes: x.notes || "",
+ rir: t && t.rir != null ? t.rir : null,
+ repsS: t && t.repsS ? String(t.repsS) : "",
+ repsB: t && t.repsB ? String(t.repsB) : ""
+ };
+ };
+ const firstIncomplete = rows => {
+ const idx = rows.findIndex(r => r.rir == null);
+ return idx === -1 ? null : idx;
+ };
+ const [draft, setDraft] = useState(exercises.map(initRow));
+ const [openIdx, setOpenIdx] = useState(() => firstIncomplete(exercises.map(initRow)));
+ const [openNotes, setOpenNotes] = useState(() => {
+ const o = {};
+ exercises.forEach((x, i) => {
+ if (x.notes) o[i] = true;
+ });
+ return o;
+ });
+ useEffect(() => {
+ if (draft.length !== exercises.length) {
+ const next = exercises.map((x, i) => draft[i] || initRow(x));
+ setDraft(next);
+ setOpenIdx(firstIncomplete(next));
+ }
+ }, [exercises.length]);
+ const row = (x, i) => draft[i] || initRow(x);
+ const setField = (i, field, val) => {
+ const d = [...draft];
+ d[i] = {
+ ...row(exercises[i], i),
+ [field]: val
+ };
+ setDraft(d);
+ if (field === "rir" && val != null) {
+ const nextIdx = exercises.findIndex((x, xi) => xi > i && (d[xi] || initRow(x)).rir == null);
+ setOpenIdx(nextIdx === -1 ? null : nextIdx);
+ }
+ };
+ const quickToggle = (i, x, r, tgt) => {
+ if (r.rir != null) {
+ setField(i, "rir", null);
+ setOpenIdx(i);
+ } else {
+ setField(i, "rir", tgt);
+ }
+ };
+ const fillOneFromLast = (i, x, prev) => {
+ if (!prev) return;
+ const d = [...draft];
+ d[i] = {
+ ...row(x, i),
+ weight: fmtNum(prev.weight),
+ rir: prev.rir != null ? prev.rir : rirOf(x)
+ };
+ setDraft(d);
+ const nextIdx = exercises.findIndex((y, xi) => xi > i && (d[xi] || initRow(y)).rir == null);
+ setOpenIdx(nextIdx === -1 ? null : nextIdx);
+ };
+ const fillAllFromLast = () => {
+ if (!last) return;
+ const d = exercises.map((x, i) => {
+ const prev = last.ex.find(e => e.name === x.name);
+ return prev ? {
+ weight: fmtNum(prev.weight),
+ notes: row(x, i).notes,
+ rir: prev.rir != null ? prev.rir : rirOf(x),
+ repsS: "",
+ repsB: ""
+ } : row(x, i);
+ });
+ setDraft(d);
+ setOpenIdx(null);
+ };
+ const doneCount = exercises.filter((x, i) => row(x, i).rir != null).length;
+ return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ className: "log-progress"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "log-progress-bar"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "log-progress-fill",
+ style: {
+ width: doneCount / exercises.length * 100 + "%"
+ }
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "log-progress-l"
+ }, doneCount, "/", exercises.length, " concluídos"), !!last && /*#__PURE__*/React.createElement("button", {
+ type: "button",
+ className: "log-fillall",
+ onClick: fillAllFromLast
+ }, "Igual ao treino anterior")), exercises.map((x, i) => {
+ const r = row(x, i);
+ const tgt = rirOf(x);
+ const prev = last && last.ex.find(e => e.name === x.name);
+ const adv = rirAdvice(r.rir, tgt);
+ const parts = [];
+ if (prev && prev.weight) parts.push(fmtNum(prev.weight) + " kg");
+ if (prev && prev.rir != null) parts.push("RIR " + rirLabel(prev.rir));
+ const hint = adv || {
+ k: "",
+ t: "Alvo RIR " + rirLabel(tgt) + (parts.length ? " · última vez " + parts.join(" · ") : "")
+ };
+ const done = r.rir != null;
+ const isUni = /single-arm db chest/i.test(x.name);
+ const sug = progressionTip(history.filter(se => se.date !== todayKey), x.name, parseNum(r.weight), tgt);
+ const isOpen = openIdx === i;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "log-entry" + (isOpen ? " open" : ""),
+ key: i
+ }, /*#__PURE__*/React.createElement("button", {
+ type: "button",
+ className: "log-row-btn",
+ onClick: () => setOpenIdx(isOpen ? null : i)
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "log-check" + (done ? " on" : ""),
+ role: "button",
+ tabIndex: 0,
+ "aria-label": done ? "Marcar " + x.name + " por registar" : "Marcar " + x.name + " como concluído",
+ onClick: e => {
+ e.stopPropagation();
+ quickToggle(i, x, r, tgt);
+ },
+ onKeyDown: e => {
+ if (e.key === "Enter" || e.key === " ") {
+ e.preventDefault();
+ e.stopPropagation();
+ quickToggle(i, x, r, tgt);
+ }
+ }
+ }, done && /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 11
+ })), /*#__PURE__*/React.createElement("span", {
+ className: "log-name"
+ }, x.name), /*#__PURE__*/React.createElement("span", {
+ className: "log-sr"
+ }, x.sets, "×", repsLbl(x)), /*#__PURE__*/React.createElement("span", {
+ className: "log-summary" + (done ? "" : " muted")
+ }, done ? (r.weight ? fmtNum(r.weight) + "kg · " : "") + "RIR " + rirLabel(r.rir) : "por registar"), /*#__PURE__*/React.createElement(I, {
+ name: "chevron",
+ size: 14,
+ className: "log-chev" + (isOpen ? " open" : "")
+ })), isOpen && /*#__PURE__*/React.createElement("div", {
+ className: "log-panel"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "log-panel-row"
+ }, /*#__PURE__*/React.createElement("input", {
+ className: "log-w",
+ inputMode: "decimal",
+ value: r.weight,
+ onChange: e => setField(i, "weight", normDecInput(e.target.value))
+ }), /*#__PURE__*/React.createElement("span", {
+ className: "log-panel-kg"
+ }, "kg"), !!prev && /*#__PURE__*/React.createElement("button", {
+ type: "button",
+ className: "log-quickfill",
+ onClick: () => fillOneFromLast(i, x, prev)
+ }, "Igual à última vez"), /*#__PURE__*/React.createElement("button", {
+ type: "button",
+ className: "log-note-toggle" + (r.notes ? " has" : ""),
+ "aria-label": "Nota do exercício",
+ onClick: () => setOpenNotes(o => ({
+ ...o,
+ [i]: !o[i]
+ }))
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "note",
+ size: 15
+ }))), isUni && /*#__PURE__*/React.createElement("div", {
+ className: "pl-grid",
+ style: {
+ gridTemplateColumns: "1fr 1fr"
+ }
+ }, [["repsS", "Lado menor (reps)"], ["repsB", "Lado maior (reps)"]].map(([f, l]) => /*#__PURE__*/React.createElement("div", {
+ className: "pl-f",
+ key: f
+ }, /*#__PURE__*/React.createElement("label", null, l), /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "numeric",
+ value: r[f],
+ onChange: e => setField(i, f, e.target.value.replace(/\D/g, "").slice(0, 3))
+ })))), !!sug && /*#__PURE__*/React.createElement("button", {
+ type: "button",
+ className: "log-quickfill",
+ style: {
+ margin: "0 0 8px"
+ },
+ onClick: () => setField(i, "weight", fmtNum(sug.nw))
+ }, "Sobe para " + fmtNum(sug.nw) + " kg (RIR no alvo em 2 treinos)"), /*#__PURE__*/React.createElement("div", {
+ className: "rir-row"
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "rir-lbl"
+ }, "RIR"), /*#__PURE__*/React.createElement(RirChips, {
+ value: r.rir,
+ target: tgt,
+ clearable: true,
+ onChange: v => setField(i, "rir", v)
+ })), /*#__PURE__*/React.createElement("div", {
+ className: "rir-hint " + hint.k
+ }, hint.t), openNotes[i] && /*#__PURE__*/React.createElement("input", {
+ className: "log-note",
+ placeholder: "Nota (ex: técnica, sensação, próxima carga...)",
+ value: r.notes,
+ onChange: e => setField(i, "notes", e.target.value)
+ })));
+ }), /*#__PURE__*/React.createElement("button", {
+ className: "big-btn coral log-save",
+ onClick: () => onSave(exercises.map((x, i) => row(x, i)))
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "check",
+ size: 17
+ }), " ", loggedToday ? "Atualizar treino de hoje" : "Guardar treino de hoje"));
+}
+
+/* --------------------- temporizador, progressão, assimetria -------------------- */
+function RestTimer() {
+ const h = React.createElement;
+ const [end, setEnd] = useState(null);
+ const [left, setLeft] = useState(0);
+ const [total, setTotal] = useState(0);
+ const beep = () => {
+ try {
+ navigator.vibrate && navigator.vibrate([200, 100, 200, 100, 400]);
+ } catch (e) {}
+ try {
+ const C = window.AudioContext || window.webkitAudioContext,
+ c = new C();
+ [0, 0.35, 0.7].forEach(t => {
+ const o = c.createOscillator(),
+ g = c.createGain();
+ o.frequency.value = 880;
+ o.connect(g);
+ g.connect(c.destination);
+ g.gain.setValueAtTime(0.25, c.currentTime + t);
+ g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + t + 0.25);
+ o.start(c.currentTime + t);
+ o.stop(c.currentTime + t + 0.3);
+ });
+ } catch (e) {}
+ };
+ useEffect(() => {
+ if (!end) return;
+ const t = setInterval(() => {
+ const l = Math.ceil((end - Date.now()) / 1000);
+ if (l <= 0) {
+ setLeft(0);
+ setEnd(null);
+ beep();
+ } else setLeft(l);
+ }, 250);
+ return () => clearInterval(t);
+ }, [end]);
+ const start = sec => {
+ setTotal(sec);
+ setLeft(sec);
+ setEnd(Date.now() + sec * 1000);
+ };
+ const add = () => {
+ setTotal(t => t + 30);
+ setEnd(e => e + 30000);
+ };
+ const mmss = n => Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
+ return h("div", {
+ className: "card rt-card"
+ }, h("div", {
+ className: "water-top",
+ style: {
+ marginBottom: 8
+ }
+ }, h("div", {
+ className: "water-title"
+ }, "Descanso"), h("span", {
+ className: "menu-sub"
+ }, "unilateral ~90 s · compostos 2–3 min")), end ? h("div", null, h("div", {
+ className: "rt-time"
+ }, mmss(left)), h("div", {
+ className: "rt-bar"
+ }, h("div", {
+ className: "rt-fill",
+ style: {
+ width: Math.max(0, left / total * 100) + "%"
+ }
+ })), h("div", {
+ className: "menu-actions",
+ style: {
+ justifyContent: "flex-start"
+ }
+ }, h("button", {
+ className: "menu-btn",
+ onClick: add
+ }, "+30 s"), h("button", {
+ className: "menu-btn",
+ onClick: () => setEnd(null)
+ }, "Parar"))) : h("div", {
+ className: "menu-actions",
+ style: {
+ justifyContent: "flex-start",
+ marginTop: 0
+ }
+ }, [[60, "60 s"], [90, "90 s"], [120, "2 min"], [180, "3 min"]].map(([sec, l]) => h("button", {
+ key: sec,
+ className: "menu-btn",
+ onClick: () => start(sec)
+ }, l))));
+}
+const progressionTip = (history, name, curW, tgt) => {
+ const rec = [...history].sort((a, b) => a.date.localeCompare(b.date)).map(se => (se.ex || []).find(e => e.name === name)).filter(e => e && e.weight > 0 && e.rir != null).slice(-2);
+ if (rec.length < 2 || rec[0].weight !== rec[1].weight || rec[1].weight !== curW) return null;
+ if (!rec.every(e => e.rir >= (e.rirAlvo != null ? e.rirAlvo : tgt))) return null;
+ const inc = curW < 20 ? 1 : curW < 60 ? 2.5 : 5;
+ return {
+ nw: curW + inc
+ };
+};
+function AsymmetryCard({
+ state
+}) {
+ const h = React.createElement;
+ const by = {};
+ [...state.sessions].sort((a, b) => a.date.localeCompare(b.date)).forEach(se => (se.ex || []).forEach(e => {
+ if (e.repsS > 0 && e.repsB > 0) (by[e.name] = by[e.name] || []).push({
+ date: se.date,
+ s: e.repsS,
+ b: e.repsB,
+ w: e.weight
+ });
+ }));
+ const names = Object.keys(by);
+ const fd = d => d.slice(8, 10) + "/" + d.slice(5, 7);
+ return h("div", {
+ className: "card"
+ }, h("div", {
+ className: "water-title",
+ style: {
+ marginBottom: 8
+ }
+ }, "Assimetria (lado menor vs maior)"), names.length === 0 ? h("div", {
+ className: "menu-sub"
+ }, "Regista as reps de cada lado no Single-Arm DB Chest Press (Quinta) para acompanhar a diferença.") : names.map(n => {
+ const L = by[n],
+ diffs = L.map(r => r.b - r.s),
+ avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+ const trend = L.length >= 4 ? avg(diffs.slice(-2)) - avg(diffs.slice(0, 2)) : null;
+ return h("div", {
+ key: n,
+ style: {
+ marginBottom: 10
+ }
+ }, h("div", {
+ className: "menu-m"
+ }, n), trend != null && h("div", {
+ className: "menu-sub",
+ style: {
+ margin: "2px 0 4px"
+ }
+ }, trend < 0 ? "A diferença está a diminuir (" + trend.toFixed(1) + " reps)" : trend > 0 ? "A diferença aumentou (+" + trend.toFixed(1) + " reps)" : "Diferença estável"), L.slice(-6).reverse().map((r, i) => h("div", {
+ className: "menu-row",
+ key: i,
+ style: {
+ padding: "6px 0"
+ }
+ }, h("div", {
+ className: "menu-h"
+ }, fd(r.date)), h("div", {
+ style: {
+ flex: 1
+ }
+ }, "menor " + r.s + " · maior " + r.b + (r.w ? " · " + fmtNum(r.w) + " kg" : "")), h("div", {
+ className: "menu-sub"
+ }, "dif. " + (r.b - r.s)))));
+ }));
+}
+/* ============================ PROGRESSO CORPO =========================== */
+const BODY_METRICS = [{
+ k: "weight",
+ label: "Peso",
+ unit: "kg",
+ color: "#2B5FD9",
+ better: "down"
+}, {
+ k: "bmi",
+ label: "IMC",
+ unit: "",
+ color: "#C98A1B",
+ better: "down"
+}, {
+ k: "bodyFat",
+ label: "Gordura corporal",
+ unit: "%",
+ color: "#B4425A",
+ better: "down"
+}, {
+ k: "muscle",
+ label: "Massa muscular",
+ unit: "kg",
+ color: "#1E9E6A",
+ better: "up"
+}, {
+ k: "skeletal",
+ label: "Massa esquelética",
+ unit: "kg",
+ color: "#0E8F9E",
+ better: "up"
+}];
+const CIRC_METRICS = [{
+ k: "cintura",
+ label: "Cintura",
+ unit: "cm",
+ color: "#B4425A",
+ better: "down"
+}];
+function WeekCompareCard({
+ list,
+ days = 7,
+ title = "Média · 7 dias vs bloco anterior",
+ emptyLabel = "Ainda não há registos nos últimos 7 dias."
+}) {
+ const avg = (arr, k) => arr.length ? +(arr.reduce((a, b) => a + (+b[k] || 0), 0) / arr.length).toFixed(1) : null;
+ const curStart = iso(addDays(TODAY, -(days - 1)));
+ const prevStart = iso(addDays(TODAY, -(2 * days - 1)));
+ const prevEnd = iso(addDays(TODAY, -days));
+ const curWeek = list.filter(b => b.date >= curStart && b.date <= todayKey);
+ const prevWeek = list.filter(b => b.date >= prevStart && b.date <= prevEnd);
+ const metrics = [{
+ k: "weight",
+ label: "Peso",
+ unit: "kg"
+ }, {
+ k: "bmi",
+ label: "IMC",
+ unit: ""
+ }, {
+ k: "bodyFat",
+ label: "Gordura corporal",
+ unit: "%"
+ }];
+ const rows = metrics.map(m => {
+ const curAvg = avg(curWeek, m.k);
+ const prevAvg = avg(prevWeek, m.k);
+ const diff = curAvg !== null && prevAvg !== null ? +(curAvg - prevAvg).toFixed(1) : null;
+ return {
+ ...m,
+ curAvg,
+ prevAvg,
+ diff
+ };
+ });
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card progress-card"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "pc-head"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "pc-title"
+ }, title), /*#__PURE__*/React.createElement("div", {
+ className: "pc-badge"
+ }, curWeek.length, " registo", curWeek.length === 1 ? "" : "s")), curWeek.length === 0 ? /*#__PURE__*/React.createElement("div", {
+ className: "pc-empty"
+ }, emptyLabel) : rows.map(r => /*#__PURE__*/React.createElement("div", {
+ key: r.k,
+ className: "prog-row"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "prog-name"
+ }, r.label), /*#__PURE__*/React.createElement("div", {
+ className: "prog-vals"
+ }, r.curAvg !== null ? r.curAvg.toFixed(1) + r.unit : "—", r.prevAvg !== null ? /*#__PURE__*/React.createElement(React.Fragment, null, " vs ", r.prevAvg.toFixed(1) + r.unit, " ", /*#__PURE__*/React.createElement("span", {
+ className: r.diff === 0 ? "pf" : r.diff < 0 ? "pu" : "pd"
+ }, "(", r.diff > 0 ? "+" : "", r.diff.toFixed(1), r.unit, ")")) : /*#__PURE__*/React.createElement("span", {
+ className: "pf"
+ }, " sem bloco anterior")))));
+}
+function Body({
+ state,
+ update
+}) {
+ const [form, setForm] = useState(false);
+ const [editStart, setEditStart] = useState(false);
+ const [startVal, setStartVal] = useState(String(state.profile.bfStart));
+ useEffect(() => {
+ if (!editStart) setStartVal(String(state.profile.bfStart));
+ }, [state.profile.bfStart, editStart]);
+ const saveStart = () => {
+ const v = parseFloat(String(startVal).replace(",", "."));
+ if (!isNaN(v) && v > 0) update(s => {
+ s.profile.bfStart = v;
+ });
+ setEditStart(false);
+ };
+ const [editGoal, setEditGoal] = useState(false);
+ const [goalVal, setGoalVal] = useState(String(state.profile.bfTarget));
+ useEffect(() => {
+ if (!editGoal) setGoalVal(String(state.profile.bfTarget));
+ }, [state.profile.bfTarget, editGoal]);
+ const saveGoal = () => {
+ const v = parseFloat(String(goalVal).replace(",", "."));
+ if (!isNaN(v) && v > 0) update(s => {
+ s.profile.bfTarget = v;
+ });
+ setEditGoal(false);
+ };
+ const [editDate, setEditDate] = useState(false);
+ const [dateVal, setDateVal] = useState(state.profile.targetDate);
+ useEffect(() => {
+ if (!editDate) setDateVal(state.profile.targetDate);
+ }, [state.profile.targetDate, editDate]);
+ const saveDate = () => {
+ if (dateVal) update(s => {
+ s.profile.targetDate = dateVal;
+ });
+ setEditDate(false);
+ };
+ const empty = {
+ weight: "",
+ bmi: "",
+ bodyFat: "",
+ muscle: "",
+ skeletal: "",
+ visceral: "",
+ cintura: ""
+ };
+ const [d, setD] = useState(empty);
+ const [date, setDate] = useState(todayKey);
+ useEffect(() => {
+ if (!form) return;
+ const r = (state.body || []).find(x => x.date === date);
+ setD(r ? {
+ weight: r.weight ? fmtNum(r.weight) : "",
+ bmi: r.bmi ? fmtNum(r.bmi) : "",
+ bodyFat: r.bodyFat ? fmtNum(r.bodyFat) : "",
+ muscle: r.muscle ? fmtNum(r.muscle) : "",
+ skeletal: r.skeletal ? fmtNum(r.skeletal) : "",
+ visceral: r.visceral ? fmtNum(r.visceral) : "",
+ cintura: r.cintura ? fmtNum(r.cintura) : ""
+ } : empty);
+ }, [date, form]);
+ const list = [...(state.body || [])].sort((a, b) => a.date.localeCompare(b.date));
+ const has = list.length > 0;
+ const last = has ? list[list.length - 1] : null;
+ const PERIODS = [{
+ k: "semana",
+ label: "Semana",
+ days: 7
+ }, {
+ k: "mes",
+ label: "Mês",
+ days: 30
+ }, {
+ k: "ano",
+ label: "Ano",
+ days: 365
+ }];
+ const [period, setPeriod] = useState("semana");
+ const activePeriod = PERIODS.find(p => p.k === period) || PERIODS[0];
+ const periodStart = iso(addDays(TODAY, -(activePeriod.days - 1)));
+ const periodList = has ? list.filter(x => x.date >= periodStart) : [];
+ const weekAgo = has ? list.filter(b => b.date <= iso(addDays(TODAY, -(activePeriod.days - 1)))).pop() || list[0] : null;
+ const gramsLost = has ? Math.round((weekAgo.weight - last.weight) * 1000) : 0;
+ const weightAvg7 = has ? rollingAvgAt(list, last.date, "weight", 7) : null;
+ const bfDiff = has ? +(last.bodyFat - weekAgo.bodyFat).toFixed(1) : 0;
+ const bmiDiff = has ? +(last.bmi - weekAgo.bmi).toFixed(1) : 0;
+ const toGo = has ? +(last.bodyFat - state.profile.bfTarget).toFixed(1) : 0;
+ const progressing = has ? last.bodyFat < list[0].bodyFat : false;
+ const status = toGo <= 0 ? "Já atingiste o objetivo de " + state.profile.bfTarget + "%! A manter." : progressing ? "No bom caminho — faltam " + toGo.toFixed(1) + "% de gordura para os " + state.profile.bfTarget + "%. Mantém o défice suave e a proteína alta." : "Ainda a " + toGo.toFixed(1) + "% do objetivo. Foca na consistência de treino e hidratação.";
+ const save = () => {
+   const clean = v => {
+     const n = parseNum(v);
+     return Number.isFinite(n) && n >= 0 ? n : 0;
+   };
+   const rec = {
+     date: /^\d{4}-\d{2}-\d{2}$/.test(String(date)) ? String(date) : todayKey,
+     weight: clean(d.weight),
+     bmi: clean(d.bmi),
+     bodyFat: clean(d.bodyFat),
+     muscle: clean(d.muscle),
+     skeletal: clean(d.skeletal),
+     visceral: clean(d.visceral),
+     cintura: clean(d.cintura),
+     perna: 0,
+     rabo: 0
+   };
+   try {
+     update(s => {
+       const i = s.body.findIndex(x => x.date === rec.date);
+       const previous = i >= 0 ? s.body[i] : {};
+       rec.perna = Number.isFinite(Number(previous.perna)) ? Number(previous.perna) : 0;
+       rec.rabo = Number.isFinite(Number(previous.rabo)) ? Number(previous.rabo) : 0;
+       if (i >= 0) s.body[i] = { ...previous, ...rec };
+       else s.body.push(rec);
+     });
+     setForm(false);
+     setDate(todayKey);
+     setD(empty);
+   } catch (e) {
+     console.error("Erro ao guardar medição:", e);
+   }
+ };
+ const delBody = date => update(s => {
+ const i = s.body.findIndex(x => x.date === date);
+ if (i >= 0) s.body.splice(i, 1);
+ });
+ const editLatest = () => {
+   if (!last) return;
+   setDate(last.date);
+   setD({
+     weight: last.weight ? fmtNum(last.weight) : "",
+     bmi: last.bmi ? fmtNum(last.bmi) : "",
+     bodyFat: last.bodyFat ? fmtNum(last.bodyFat) : "",
+     muscle: last.muscle ? fmtNum(last.muscle) : "",
+     skeletal: last.skeletal ? fmtNum(last.skeletal) : "",
+     visceral: last.visceral ? fmtNum(last.visceral) : "",
+     cintura: last.cintura ? fmtNum(last.cintura) : ""
+   });
+   setForm(true);
+ };
+ const MetricCard = ({
+ m
+ }) => {
+ const cur = last[m.k],
+ pr = periodList.length > 1 ? periodList[0][m.k] : cur;
+ const diff = +(cur - pr).toFixed(1);
+ const good = m.better === "down" ? diff < 0 : diff > 0;
+ const ti = diff === 0 ? "minus" : diff < 0 ? "trendDown" : "trendUp";
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card metric"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "metric-l"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "metric-label"
+ }, m.label), /*#__PURE__*/React.createElement("div", {
+ className: "metric-val"
+ }, cur, /*#__PURE__*/React.createElement("i", null, m.unit)), m.k === "weight" && weightAvg7 != null && /*#__PURE__*/React.createElement("div", {
+ className: "metric-avg"
+ }, "méd. 7 dias: ", weightAvg7, m.unit), /*#__PURE__*/React.createElement("div", {
+ className: "metric-diff " + (diff === 0 ? "flat" : good ? "good" : "bad")
+ }, /*#__PURE__*/React.createElement(I, {
+ name: ti,
+ size: 13
+ }), " ", diff > 0 ? "+" : "", diff, m.unit, " vs início")), /*#__PURE__*/React.createElement("div", {
+ className: "metric-r"
+ }, /*#__PURE__*/React.createElement(Spark, {
+ data: (periodList.length > 1 ? periodList : list).map(x => x[m.k]),
+ color: m.color,
+ height: 48,
+ w: 130
+ })));
+ };
+ return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
+ title: "Progresso corporal",
+ sub: "Dados inseridos manualmente",
+ right: /*#__PURE__*/React.createElement("button", {
+ className: "theme-toggle",
+ onClick: () => setForm(f => {
+ if (!f) setDate(todayKey);
+ return !f;
+ })
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "plus",
+ size: 18
+ }))
+ }), /*#__PURE__*/React.createElement("div", {
+ className: "period-tabs"
+ }, PERIODS.map(p => /*#__PURE__*/React.createElement("button", {
+ key: p.k,
+ className: "period-btn" + (period === p.k ? " active" : ""),
+ onClick: () => setPeriod(p.k)
+ }, p.label))), /*#__PURE__*/React.createElement("div", {
+ className: "card",
+ style: {
+ display: "flex",
+ alignItems: "center",
+ justifyContent: "space-between"
+ }
+ }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "12px",
+ fontWeight: 650,
+ color: "var(--muted)",
+ textTransform: "uppercase",
+ letterSpacing: ".05em",
+ marginBottom: "6px"
+ }
+ }, "Ponto de partida · gordura corporal"), editStart ? /*#__PURE__*/React.createElement("div", {
+ style: {
+ display: "flex",
+ alignItems: "center",
+ gap: "6px"
+ }
+ }, /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ autoFocus: true,
+ style: {
+ width: "76px",
+ fontSize: "20px",
+ fontWeight: 780,
+ padding: "8px 10px"
+ },
+ value: startVal,
+ onChange: e => setStartVal(e.target.value),
+ onKeyDown: e => {
+ if (e.key === "Enter") saveStart();
+ }
+ }), /*#__PURE__*/React.createElement("span", {
+ style: {
+ color: "var(--muted)",
+ fontSize: "14px"
+ }
+ }, "%")) : /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "24px",
+ fontWeight: 780,
+ color: "var(--text)",
+ letterSpacing: "-.03em"
+ }
+ }, state.profile.bfStart, /*#__PURE__*/React.createElement("i", {
+ style: {
+ fontSize: "13px",
+ fontWeight: 600,
+ opacity: .6,
+ fontStyle: "normal"
+ }
+ }, "%"))), /*#__PURE__*/React.createElement("button", {
+ className: "theme-toggle",
+ "aria-label": editStart ? "Guardar ponto de partida" : "Editar ponto de partida",
+ onClick: () => editStart ? saveStart() : setEditStart(true)
+ }, /*#__PURE__*/React.createElement(I, {
+ name: editStart ? "check" : "edit",
+ size: 17
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "card",
+ style: {
+ display: "flex",
+ alignItems: "center",
+ justifyContent: "space-between"
+ }
+ }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "12px",
+ fontWeight: 650,
+ color: "var(--muted)",
+ textTransform: "uppercase",
+ letterSpacing: ".05em",
+ marginBottom: "6px"
+ }
+ }, "Objetivo · gordura corporal"), editGoal ? /*#__PURE__*/React.createElement("div", {
+ style: {
+ display: "flex",
+ alignItems: "center",
+ gap: "6px"
+ }
+ }, /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ autoFocus: true,
+ style: {
+ width: "76px",
+ fontSize: "20px",
+ fontWeight: 780,
+ padding: "8px 10px"
+ },
+ value: goalVal,
+ onChange: e => setGoalVal(e.target.value),
+ onKeyDown: e => {
+ if (e.key === "Enter") saveGoal();
+ }
+ }), /*#__PURE__*/React.createElement("span", {
+ style: {
+ color: "var(--muted)",
+ fontSize: "14px"
+ }
+ }, "%")) : /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "24px",
+ fontWeight: 780,
+ color: "var(--text)",
+ letterSpacing: "-.03em"
+ }
+ }, state.profile.bfTarget, /*#__PURE__*/React.createElement("i", {
+ style: {
+ fontSize: "13px",
+ fontWeight: 600,
+ opacity: .6,
+ fontStyle: "normal"
+ }
+ }, "%"))), /*#__PURE__*/React.createElement("button", {
+ className: "theme-toggle",
+ "aria-label": editGoal ? "Guardar objetivo" : "Editar objetivo",
+ onClick: () => editGoal ? saveGoal() : setEditGoal(true)
+ }, /*#__PURE__*/React.createElement(I, {
+ name: editGoal ? "check" : "edit",
+ size: 17
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "card",
+ style: {
+ display: "flex",
+ alignItems: "center",
+ justifyContent: "space-between"
+ }
+ }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "12px",
+ fontWeight: 650,
+ color: "var(--muted)",
+ textTransform: "uppercase",
+ letterSpacing: ".05em",
+ marginBottom: "6px"
+ }
+ }, "Data objetivo"), editDate ? /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ type: "date",
+ autoFocus: true,
+ style: {
+ fontSize: "17px",
+ fontWeight: 700,
+ padding: "8px 10px"
+ },
+ value: dateVal,
+ onChange: e => setDateVal(e.target.value),
+ onKeyDown: e => {
+ if (e.key === "Enter") saveDate();
+ }
+ }) : /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "20px",
+ fontWeight: 780,
+ color: "var(--text)",
+ letterSpacing: "-.03em"
+ }
+ }, longDate(new Date(state.profile.targetDate)))), /*#__PURE__*/React.createElement("button", {
+ className: "theme-toggle",
+ "aria-label": editDate ? "Guardar data" : "Editar data",
+ onClick: () => editDate ? saveDate() : setEditDate(true)
+ }, /*#__PURE__*/React.createElement(I, {
+ name: editDate ? "check" : "edit",
+ size: 17
+ }))), form && /*#__PURE__*/React.createElement("div", {
+ className: "card form"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "form-title"
+ }, (state.body || []).some(x => x.date === date) ? "Editar medição" : "Nova medição"), /*#__PURE__*/React.createElement("div", {
+ className: "in-row"
+ }, /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "Dia", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ type: "date",
+ max: todayKey,
+ value: date,
+ onChange: e => setDate(e.target.value)
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "in-row"
+ }, /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "Peso (kg)", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ value: d.weight,
+ onChange: e => setD({
+ ...d,
+ weight: normDecInput(e.target.value)
+ })
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "in-row"
+ }, /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "IMC (manual)", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ placeholder: "ex.: 28,9",
+ value: d.bmi,
+ onChange: e => setD({
+ ...d,
+ bmi: normDecInput(e.target.value)
+ })
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "in-row"
+ }, /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "Gordura (%)", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ value: d.bodyFat,
+ onChange: e => setD({
+ ...d,
+ bodyFat: normDecInput(e.target.value)
+ })
+ })), /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "Músculo (kg)", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ value: d.muscle,
+ onChange: e => setD({
+ ...d,
+ muscle: normDecInput(e.target.value)
+ })
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "in-row"
+ }, /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "M. esquelética (kg)", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ value: d.skeletal,
+ onChange: e => setD({
+ ...d,
+ skeletal: normDecInput(e.target.value)
+ })
+ })), /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "Gordura visceral", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ value: d.visceral,
+ onChange: e => setD({
+ ...d,
+ visceral: normDecInput(e.target.value)
+ })
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "circ-label"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "ruler",
+ size: 13
+ }), " Medições (cm)"), /*#__PURE__*/React.createElement("div", {
+ className: "in-row"
+ }, /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "Cintura", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ inputMode: "decimal",
+ value: d.cintura,
+ onChange: e => setD({
+ ...d,
+ cintura: normDecInput(e.target.value)
+ })
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "form-actions"
+ }, /*#__PURE__*/React.createElement("button", {
+ className: "btn-ghost",
+ onClick: () => setForm(false)
+ }, "Cancelar"), /*#__PURE__*/React.createElement("button", {
+ className: "btn-solid coral",
+ onClick: save
+ }, "Guardar medição"))), !has && /*#__PURE__*/React.createElement("div", {
+ className: "card",
+ style: {
+ textAlign: "center",
+ color: "var(--muted)",
+ padding: "30px 18px",
+ fontSize: "14px",
+ lineHeight: 1.5
+ }
+ }, "Ainda sem medições corporais. Toca no + lá em cima para adicionares a primeira."), has && /*#__PURE__*/React.createElement("div", {
+ className: "card body-summary"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bsum-grid"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bsum"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bsum-v" + (gramsLost > 0 ? " pos" : "")
+ }, gramsLost > 0 ? "−" : gramsLost < 0 ? "+" : "", Math.abs(gramsLost), "g"), /*#__PURE__*/React.createElement("div", {
+ className: "bsum-l"
+ }, "peso · " + activePeriod.label.toLowerCase())), weightAvg7 != null && /*#__PURE__*/React.createElement("div", {
+ className: "bsum"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bsum-v"
+ }, weightAvg7, "kg"), /*#__PURE__*/React.createElement("div", {
+ className: "bsum-l"
+ }, "peso ajustado (méd. 7d)")), /*#__PURE__*/React.createElement("div", {
+ className: "bsum"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bsum-v"
+ }, last.bodyFat, "%"), /*#__PURE__*/React.createElement("div", {
+ className: "bsum-l"
+ }, "gordura ", bfDiff <= 0 ? "↓" : "↑", Math.abs(bfDiff))), /*#__PURE__*/React.createElement("div", {
+ className: "bsum"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "bsum-v"
+ }, last.bmi), /*#__PURE__*/React.createElement("div", {
+ className: "bsum-l"
+ }, "IMC ", bmiDiff <= 0 ? "↓" : "↑", Math.abs(bmiDiff)))), /*#__PURE__*/React.createElement("div", {
+ className: "bsum-status"
+ }, status), /*#__PURE__*/React.createElement("button", {
+ className: "btn-ghost",
+ style: { marginTop: "10px", width: "100%" },
+ onClick: editLatest
+ }, "Editar última pesagem")), has && /*#__PURE__*/React.createElement(WeekCompareCard, {
+ list: list,
+ days: activePeriod.days,
+ title: "Média · " + activePeriod.label + " vs bloco anterior",
+ emptyLabel: "Ainda não há registos n" + (activePeriod.k === "ano" ? "o último ano." : activePeriod.k === "mes" ? "o último mês." : "os últimos 7 dias.")
+ }), has && BODY_METRICS.map(m => /*#__PURE__*/React.createElement(MetricCard, {
+ key: m.k,
+ m: m
+ })), has && /*#__PURE__*/React.createElement("div", {
+ className: "cat-head"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "ruler",
+ size: 15
+ }), " Medições corporais"), has && CIRC_METRICS.map(m => /*#__PURE__*/React.createElement(MetricCard, {
+ key: m.k,
+ m: m
+ })), has && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+ className: "list-head"
+ }, "Histórico"), periodList.length === 0 && /*#__PURE__*/React.createElement("div", {
+ className: "card",
+ style: {
+ textAlign: "center",
+ color: "var(--muted)",
+ padding: "24px 18px",
+ fontSize: "13px"
+ }
+ }, "Sem registos neste período."), periodList.slice().reverse().map(x => /*#__PURE__*/React.createElement("div", {
+ className: "card slp",
+ key: x.date
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "slp-top"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "slp-date",
+ style: {
+ cursor: "pointer"
+ },
+ onClick: () => {
+ setDate(x.date);
+ setForm(true);
+ },
+ title: "Editar este dia"
+ }, WD[new Date(x.date + "T12:00:00").getDay()], " ", new Date(x.date + "T12:00:00").getDate(), "/", new Date(x.date + "T12:00:00").getMonth() + 1, "/", String(new Date(x.date + "T12:00:00").getFullYear()).slice(2)), /*#__PURE__*/React.createElement("div", {
+ className: "slp-hours"
+ }, fmtNum(x.weight), " kg"), /*#__PURE__*/React.createElement("button", {
+ className: "hist-del",
+ onClick: () => delBody(x.date),
+ "aria-label": "Apagar medição"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "trash",
+ size: 13
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "slp-nums"
+ }, /*#__PURE__*/React.createElement("span", null, "Gordura ", x.bodyFat, "%"), /*#__PURE__*/React.createElement("span", null, "IMC ", x.bmi), x.muscle ? /*#__PURE__*/React.createElement("span", null, "Músculo ", x.muscle, " kg") : null, x.skeletal ? /*#__PURE__*/React.createElement("span", null, "Esquelética ", x.skeletal, " kg") : null, x.cintura ? /*#__PURE__*/React.createElement("span", null, "Cintura ", x.cintura, " cm") : null)))), /*#__PURE__*/React.createElement("div", {
+ className: "pad"
+ }));
+}
+
+
+/* ============================= COACH 2027 ============================== */
+function aiFullHistory(st) {
+  try {
+    const compact = tasks => {
+      const out = {};
+      Object.keys(tasks || {}).forEach(k => {
+        const t = tasks[k];
+        if (t && (t.value != null || t.done)) out[k] = t.value != null ? t.value : 1;
+      });
+      return out;
+    };
+    const dayKeys = Object.keys(st.days || {}).sort().slice(-120);
+    return {
+      perfil: st.profile || {},
+      pesagens: (st.body || []).map(b => ({data:b.date, peso:b.weight, gordura:b.bodyFat, musculo:b.muscle, esqueletico:b.skeletal, visceral:b.visceral, cintura:b.cintura, perna:b.perna, rabo:b.rabo})),
+      diario: dayKeys.map(k => ({data:k, agua:(st.days[k] && st.days[k].water) || 0, registos:compact(st.days[k] && st.days[k].tasks)})),
+      sessoes: (st.sessions || []).slice(-60).map(se => ({data:se.date, dia:se.dayIdx, exercicios:(se.ex || []).map(e => ({nome:e.name, series:e.sets, reps:e.reps, carga:e.weight, rir:e.rir, repsLadoMenor:e.repsS, repsLadoMaior:e.repsB}))})),
+      plano: (st.plano || []).map(d => ({dia:d.day, nome:d.name, exercicios:(d.ex || []).map(x => ({nome:x.name, series:x.sets, reps:x.reps, repsMax:x.repsMax, carga:x.weight, rir:x.rir}))}))
+    };
+  } catch (e) { return null; }
+}
+function Coach2027({ state, update, onNavigate }) {
+ const prof = state.profile || {};
+ const today = state.days[todayKey] || { tasks:{}, water:0 };
+ const taskVal = id => today.tasks && today.tasks[id] ? Number(today.tasks[id].value || 0) : 0;
+ const setTaskVal = (id, value) => update(s => {
+ if (!s.days[todayKey]) s.days[todayKey] = {tasks:{},water:0};
+ if (!s.days[todayKey].tasks) s.days[todayKey].tasks = {};
+ const n = Math.max(0, Number(String(value).replace(",", ".")) || 0);
+ s.days[todayKey].tasks[id] = {done:n>0,value:n};
+ });
+ const body = [...(state.body || [])].sort((a,b)=>a.date.localeCompare(b.date));
+ const latest = body.length ? body[body.length-1] : null;
+ const firstBody = body.length ? body[0] : null;
+
+ // Ponto de partida do Coach:
+ // - nasce automaticamente da primeira pesagem;
+ // - pode ser corrigido manualmente;
+ // - se surgir uma primeira pesagem diferente (por exemplo, dados antigos
+ //   foram corrigidos), a referência é atualizada automaticamente.
+ const coachBaseline = state.profile?.coachBaseline || null;
+ const [baselineEdit, setBaselineEdit] = useState(false);
+ const [baselineForm, setBaselineForm] = useState({weight:"",bodyFat:"",cintura:""});
+ useEffect(() => {
+   if (!firstBody) return;
+   const current = state.profile?.coachBaseline;
+   if (!current || current.sourceDate !== firstBody.date) {
+     update(s => {
+       s.profile = s.profile || {};
+       s.profile.coachBaseline = {
+         weight: firstBody.weight ?? "",
+         bodyFat: firstBody.bodyFat ?? "",
+         cintura: firstBody.cintura ?? "",
+         sourceDate: firstBody.date,
+         source: "first-weigh-in"
+       };
+     });
+   }
+ }, [firstBody?.date, firstBody?.weight, firstBody?.bodyFat, firstBody?.cintura]);
+
+ const openBaselineEditor = () => {
+   const b = state.profile?.coachBaseline || firstBody || {};
+   setBaselineForm({
+     weight: b.weight ?? "",
+     bodyFat: b.bodyFat ?? "",
+     cintura: b.cintura ?? ""
+   });
+   setBaselineEdit(true);
+ };
+ const saveBaseline = () => {
+   update(s => {
+     s.profile = s.profile || {};
+     s.profile.coachBaseline = {
+       weight: String(baselineForm.weight ?? "").replace(",", "."),
+       bodyFat: String(baselineForm.bodyFat ?? "").replace(",", "."),
+       cintura: String(baselineForm.cintura ?? "").replace(",", "."),
+       sourceDate: firstBody?.date || s.profile.coachBaseline?.sourceDate || "",
+       source: "manual"
+     };
+   });
+   setBaselineEdit(false);
+ };
+
+ const daysToGoal = Math.max(0, Math.ceil((new Date((prof.summerTargetDate || "2027-06-01")+"T12:00:00") - TODAY) / 86400000));
+
+ const lastDays = n => {
+ const out=[];
+ for(let i=n-1;i>=0;i--){
+ const k=iso(addDays(TODAY,-i));
+ out.push({k, d: state.days[k] || {tasks:{},water:0}});
+ }
+ return out;
+ };
+ const d14 = lastDays(14), d7=lastDays(7), d28=lastDays(28);
+ const avgTask = (arr,id) => {
+ const vals=arr.map(x=>x.d.tasks && x.d.tasks[id] ? Number(x.d.tasks[id].value||0) : 0).filter(v=>v>0);
+ return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+ };
+ const avgWater = arr => {
+ const vals=arr.map(x=>Number(x.d.water||0)/1000).filter(v=>v>0);
+ return vals.length ? vals.reduce((a,b)=>a+b,0)/vals.length : 0;
+ };
+ const currentWeek = weekFromMonday(state.days);
+ const currentWeekKeys = new Set(currentWeek.map(x=>x.key));
+ const wkSessions = (state.sessions||[]).filter(s=>currentWeekKeys.has(s.date)).length;
+ const avgProtein=avgTask(d7,"proteina");
+ const avgSleep=avgTask(d7,"sono");
+ const avgSteps=avgTask(d7,"passos");
+ const avgKcal=avgTask(d7,"calorias_in");
+ const avgW=avgWater(d7);
+ const cardio7=d7.reduce((a,x)=>a+(x.d.tasks&&x.d.tasks.cardio?Number(x.d.tasks.cardio.value||0):0),0);
+
+ const recentBody=body.filter(x => (TODAY-new Date(x.date+"T12:00:00"))/86400000 <= 35);
+ let weightTrend=null, waistTrend=null;
+ if(recentBody.length>=2){
+ const a=recentBody[0], b=recentBody[recentBody.length-1];
+ weightTrend=+(b.weight-a.weight).toFixed(1);
+ if(a.cintura && b.cintura) waistTrend=+(b.cintura-a.cintura).toFixed(1);
+ }
+ const enoughData = recentBody.length>=2;
+ let status=" A recolher dados";
+ let decision="Mantém o plano atual enquanto reunimos pelo menos 2 registos corporais comparáveis.";
+ if(enoughData){
+ const losing = weightTrend < -0.2 || (waistTrend!=null && waistTrend < -0.5);
+ const tooFast = weightTrend < -3.0;
+ const proteinLow = avgProtein > 0 && avgProtein < (prof.proteinTarget||170) * 0.9;
+ const trainingLow = wkSessions < 4;
+ if(tooFast || (avgSleep>0 && avgSleep<6.5)){
+ status=" Recuperação / ritmo a vigiar";
+ decision="Não aumentes o défice. Prioriza sono, rendimento e recuperação durante a próxima semana.";
+ } else if(proteinLow || trainingLow){
+ status=" Primeiro consolidar adesão";
+ decision="Antes de alterar calorias ou atividade, aproxima a proteína do alvo e completa a rotina de treino. Reavalia depois de 7–14 dias.";
+ } else if(losing){
+ status=" No caminho certo";
+ decision="Não alteres calorias nem treino. Mantém consistência e volta a avaliar em 7–14 dias.";
+ } else if(recentBody.length>=3 && weightTrend>=-0.2 && (waistTrend==null || waistTrend>=-0.3)){
+ status=" Possível estagnação";
+ decision="Se esta tendência persistir 2–3 semanas com boa adesão, ajusta ligeiramente calorias ou atividade — não ambas de uma vez.";
+ }
+}
+
+ let recovery=0, recoveryParts=0;
+ if(avgSleep){ recovery += Math.min(100, avgSleep/8*100); recoveryParts++; }
+ if(avgProtein){ recovery += Math.min(100, avgProtein/(prof.proteinTarget||170)*100); recoveryParts++; }
+ if(avgW){ recovery += Math.min(100, avgW/(prof.waterTarget||3)*100); recoveryParts++; }
+ recovery = recoveryParts ? Math.round(recovery/recoveryParts) : null;
+ const recLabel = recovery==null ? "Sem dados" : recovery>=80 ? "Boa" : recovery>=65 ? "Moderada" : "Baixa";
+
+ const alerts=[];
+ if(avgProtein && avgProtein < (prof.proteinTarget||170)*0.9) alerts.push({text:"Proteína média abaixo de 90% do alvo.", level:"negative", tab:"check"});
+ if(avgSleep && avgSleep < 7) alerts.push({text:"Sono médio abaixo de 7 h.", level:"negative", tab:"check"});
+ if(avgSteps && avgSteps < (prof.stepsTarget||9000)*0.8) alerts.push({text:"Passos médios abaixo de 80% do alvo.", level:"negative", tab:"check"});
+ if(cardio7 < (prof.cardioTarget||90)*0.7) alerts.push({text:"Cardio semanal abaixo de 70% do alvo.", level:"negative", tab:"workout"});
+ if(wkSessions >= 5) alerts.push({text:"Meta semanal de 5 treinos atingida.", level:"positive", tab:"workout"});
+ if(enoughData && waistTrend!=null && waistTrend<0) alerts.push({text:"Cintura em tendência descendente.", level:"positive", tab:"body"});
+
+ const asymSessions=(state.sessions||[]).filter(s => Array.isArray(s.ex) && s.ex.some(e=>/single-arm db chest/i.test(e.name))).slice(-6);
+ const asymRows=asymSessions.map(s=>{
+ const e=s.ex.find(e=>/single-arm db chest/i.test(e.name));
+ return {date:s.date, weight:e&&e.weight, small:e&&e.repsS, big:e&&e.repsB, rir:e&&e.rir};
+ }).filter(x=>x.weight||x.small||x.big);
+
+ const fourWeeksAgo = new Date(TODAY); fourWeeksAgo.setDate(fourWeeksAgo.getDate()-28);
+ const old28 = [...body].reverse().find(x=>new Date(x.date+"T12:00:00")<=fourWeeksAgo) || (body.length?body[0]:null);
+ const reviewW = latest && old28 ? +(latest.weight-old28.weight).toFixed(1) : null;
+ const reviewWaist = latest && old28 && latest.cintura && old28.cintura ? +(latest.cintura-old28.cintura).toFixed(1) : null;
+ const adherence28 = Math.round(d28.reduce((a,x)=>a+dayPct(x.d,x.k),0)/28);
+
+
+ const [aiQuestion,setAiQuestion] = useState("");
+ const [aiAnswer,setAiAnswer] = useState("");
+ const [aiBusy,setAiBusy] = useState(false);
+ const [aiStatus,setAiStatus] = useState(() => window.EvolveFitLocalAI?.getStatus?.() || {status:"not_loaded",progress:0,error:""});
+ useEffect(() => {
+   const handler = e => setAiStatus(e.detail || {status:"not_loaded",progress:0,error:""});
+   window.addEventListener("evolvefit-ai-status", handler);
+   if(window.EvolveFitLocalAI?.getStatus) setAiStatus(window.EvolveFitLocalAI.getStatus());
+   return () => window.removeEventListener("evolvefit-ai-status", handler);
+ }, []);
+ const loadLocalAI = async () => {
+   try {
+     if(!window.EvolveFitLocalAI) throw new Error("O motor de AI local ainda não foi carregado.");
+     await window.EvolveFitLocalAI.load();
+   } catch(e) {
+     console.error("AI local:", e);
+   }
+ };
+
+ const aiRecentSessions = (state.sessions||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,8).map(se=>({
+   date:se.date,
+   dayIdx:se.dayIdx,
+   exercises:(se.ex||[]).slice(0,12).map(e=>({
+     name:e.name, sets:e.sets, reps:e.reps, weight:e.weight,
+     rir:e.rir, repsS:e.repsS, repsB:e.repsB
+   }))
+ }));
+ const aiRecentDays = (d7||[]).map(x=>({
+   date:x.key,
+   calories:x.d?.tasks?.calorias_in?.value ?? x.d?.tasks?.calorias?.value ?? null,
+   protein:x.d?.tasks?.proteina?.value ?? null,
+   steps:x.d?.tasks?.passos?.value ?? null,
+   sleep:x.d?.tasks?.sono?.value ?? null,
+   cardio:x.d?.tasks?.cardio?.value ?? null
+ }));
+ const aiContext = {
+   objective: prof.goal || "ganhar músculo e perder gordura",
+   targetDate: prof.summerTargetDate || "2027-06-01",
+   firstWeighIn: firstBody || null,
+   latestWeighIn: latest || null,
+   recentWeightChange: weightTrend,
+   recentWaistChange: waistTrend,
+   recovery,
+   recoveryLabel: recLabel,
+   avgKcal: avgKcal ? Math.round(avgKcal) : null,
+   avgProtein: avgProtein ? Math.round(avgProtein) : null,
+   avgSteps: avgSteps ? Math.round(avgSteps) : null,
+   cardio7,
+   weeklySessions: wkSessions,
+   alerts: alerts.map(a=>({text:a.text,level:a.level})),
+   adherence28,
+   recentSessions: aiRecentSessions,
+   recentDays: aiRecentDays,
+ fullHistory: aiFullHistory(state),
+ instructions: "Usa TODO o fullHistory (pesagens, diário por dia, sessões, plano e perfil) e correlaciona sempre sono, calorias, proteína, passos, cardio, treino/cargas, peso, gordura e cintura antes de responder. Cita datas e valores concretos."
+ };
+
+ const localAI = question => {
+   const q=(question||"").toLowerCase();
+   const lines=[];
+   lines.push("ANÁLISE DO COACH");
+   if(!enoughData){
+     lines.push("Ainda faltam pelo menos 2 pesagens comparáveis para avaliar uma tendência corporal com confiança.");
+   } else if(weightTrend < -3){
+     lines.push("A perda de peso recente parece muito rápida. Não aumentaria o défice sem rever recuperação, rendimento e retenção de líquidos.");
+   } else if((weightTrend < -0.2) || (waistTrend!=null && waistTrend < -0.5)){
+     lines.push("Há sinais de progresso: a tendência de peso e/ou cintura está a descer. Mantém a estratégia antes de fazer alterações.");
+   } else if(recentBody.length>=3){
+     lines.push("A tendência corporal está relativamente estável. Se a adesão estiver boa durante 2–3 semanas, pode fazer sentido rever calorias ou atividade — uma variável de cada vez.");
+   } else {
+     lines.push("Ainda há poucos dados para tomar uma decisão forte. Prioriza consistência e novas medições.");
+   }
+   if(avgProtein && avgProtein < (prof.proteinTarget||170)*.9) lines.push("Proteína: abaixo de 90% do alvo médio. É uma prioridade antes de cortar mais calorias.");
+   if(avgSleep && avgSleep < 7) lines.push("Sono: abaixo de 7 h em média. Recuperação deve ser protegida.");
+   if(wkSessions < 4) lines.push("Treino: a frequência desta semana está abaixo de 4 sessões.");
+   if(avgSteps && avgSteps < (prof.stepsTarget||9000)*.8) lines.push("Passos: abaixo de 80% do objetivo médio.");
+   if(q.includes("peso") || q.includes("gordura") || q.includes("cintura")) {
+     lines.push("Para composição corporal, usa peso médio semanal + cintura + desempenho no treino, e não uma única pesagem.");
+   }
+   if(q.includes("treino") || q.includes("força")) {
+     lines.push("Para treino, a prioridade é progressão sustentável: reps/carga com técnica consistente e recuperação adequada.");
+   }
+   lines.push("PRÓXIMA AÇÃO");
+   lines.push(decision);
+   return lines.join("\n");
+ };
+
+ const askAI = async () => {
+   setAiBusy(true);
+   const question = aiQuestion.trim() || "Faz uma análise geral da minha situação e diz qual deve ser a minha próxima ação.";
+   try{
+     /*
+      * Prioridade: Cloud Function Gemini.
+      * A GEMINI_API_KEY fica exclusivamente no Secret Manager/Firebase,
+      * nunca no HTML nem no browser.
+      */
+     const endpoint = EVOLVEFIT_AI_ENDPOINT;
+     const controller = new AbortController();
+     const timeout = setTimeout(() => controller.abort(), 30000);
+     try{
+       const idToken = await evolveFitFirebaseIdToken();
+       if(!idToken) throw new Error("Utilizador Firebase não autenticado.");
+       const r = await fetch(endpoint,{
+         method:"POST",
+         mode:"cors",
+         headers:{
+           "Content-Type":"application/json",
+           "Authorization":"Bearer "+idToken
+         },
+         body:JSON.stringify({question,context:aiContext}),
+         signal:controller.signal
+       });
+       clearTimeout(timeout);
+       if(!r.ok){
+         const detail = await r.text().catch(()=> "");
+         throw new Error("AI endpoint "+r.status+(detail ? ": "+detail.slice(0,180) : ""));
+       }
+       const data = await r.json();
+       const answer = data && (data.answer || data.text || data.response || data.message);
+       if(!answer) throw new Error("A Cloud Function não devolveu uma resposta de texto.");
+       setAiAnswer(String(answer).trim());
+       return;
+     }catch(cloudError){
+       clearTimeout(timeout);
+       console.error("Gemini Cloud Function:",cloudError);
+       /*
+        * Fallback: se a função estiver temporariamente indisponível,
+        * mantém-se o Coach local de regras. O modelo Qwen local continua
+        * disponível como fallback adicional quando o WebGPU estiver pronto.
+        */
+       setAiAnswer(localAI(question)+"\n\nNota: o Gemini Cloud está temporariamente indisponível; foi usada a análise local de regras.");
+     }
+   }catch(e){
+     console.error("AI Coach:",e);
+     setAiAnswer(localAI(question));
+   }finally{setAiBusy(false);}
+ };
+
+ const [photos,setPhotos] = useState(()=>{
+ try{return JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")}catch(e){return[]}
+ });
+ const PH_KEY = "evolvefit_progress_photos_v1";
+ // Fotos ficam só neste dispositivo (por escolha); o resto dos dados vai para a nuvem.
+ const savePhotos = arr => {
+ setPhotos(arr);
+ try{localStorage.setItem(PH_KEY,JSON.stringify(arr))}catch(e){alert("Sem espaço local para mais fotografias. Remove algumas antigas.");}
+ };
+ const addPhoto = e => {
+ const f=e.target.files && e.target.files[0]; if(!f) return;
+ const rd=new FileReader();
+ rd.onload=ev=>{
+ const img=new Image();
+ img.onload=()=>{
+ const max=640, scale=Math.min(1,max/Math.max(img.width,img.height));
+ const c=document.createElement("canvas"); c.width=Math.round(img.width*scale); c.height=Math.round(img.height*scale);
+ c.getContext("2d").drawImage(img,0,0,c.width,c.height);
+ const data=c.toDataURL("image/jpeg",.62);
+ const arr=[...photos,{id:Date.now(),date:todayKey,data}].slice(-12);
+ savePhotos(arr);
+ };
+ img.src=ev.target.result;
+ };
+ rd.readAsDataURL(f); e.target.value="";
+ };
+
+ const mini=(v,l)=> /*#__PURE__*/React.createElement("div",{className:"coach27-mini"},
+ /*#__PURE__*/React.createElement("div",{className:"coach27-mini-v"},v),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-mini-l"},l)
+ );
+ const numInput=(label,val,onChange,unit)=> /*#__PURE__*/React.createElement("div",null,
+ /*#__PURE__*/React.createElement("label",{className:"coach27-lbl"},label),
+ /*#__PURE__*/React.createElement("div",{style:{display:"flex",alignItems:"center",gap:"5px"}},
+ /*#__PURE__*/React.createElement("input",{className:"coach27-in",inputMode:"decimal",value:val||"",onChange:e=>onChange(e.target.value)}),
+ /*#__PURE__*/React.createElement("span",{style:{fontSize:"12px",color:"var(--muted)"}},unit)
+ )
+ );
+
+ return /*#__PURE__*/React.createElement("div",null,
+ /*#__PURE__*/React.createElement(TabHead,{title:"Coach 2027",sub:"Decisões com base nos teus dados"}),
+ /*#__PURE__*/React.createElement(WeeklyCoachInsights,{state:state}),
+ /*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
+ /*#__PURE__*/React.createElement("div",{className:"coach27-badge"}," Verão 2027"),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"26px",fontWeight:800,marginTop:"10px"}},status),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",opacity:.9,marginTop:"7px",lineHeight:1.45}},decision),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",opacity:.8,marginTop:"10px"}},daysToGoal," dias até ",prof.summerTargetDate||"2027-06-01")
+ ),
+ /*#__PURE__*/React.createElement("div",{className:"card coach27-connect"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Ações rápidas"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-connect-grid"},
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("check")},"Hoje"),
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("workout")},"Treinos"),
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("body")},"Corpo"),
+   /*#__PURE__*/React.createElement("button",{className:"coach27-link",onClick:()=>onNavigate&&onNavigate("report")},"Relatório")
+ )
+ ),
+ /*#__PURE__*/React.createElement("div",{className:"card evf-ai-card"},
+   /*#__PURE__*/React.createElement("div",{className:"evf-ai-top"},
+     /*#__PURE__*/React.createElement("div",{className:"evf-ai-head"},
+       /*#__PURE__*/React.createElement("div",null,
+         /*#__PURE__*/React.createElement("div",{className:"evf-ai-kicker"},"EVOLVEFIT INTELLIGENCE"),
+         /*#__PURE__*/React.createElement("div",{className:"evf-ai-title"},"AI Coach"),
+         /*#__PURE__*/React.createElement("div",{className:"evf-ai-sub"},"Cruza corpo, treino, nutrição e recuperação para transformar dados em decisões.")
+       ),
+       /*#__PURE__*/React.createElement("span",{className:"evf-ai-badge"},"Gemini Cloud")
+     ),
+     /*#__PURE__*/React.createElement("div",{className:"evf-ai-insight"},
+       "Foco atual: ", decision || "consistência e progressão sustentável.",
+       " · ", wkSessions, "/5 treinos esta semana"
+     )
+   ),
+   /*#__PURE__*/React.createElement("div",{className:"evf-ai-body"},
+     /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",fontWeight:750,color:"var(--muted)",marginBottom:"7px"}},"Análises rápidas"),
+     /*#__PURE__*/React.createElement("div",{className:"evf-ai-prompts"},
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Analisa a minha semana e diz qual é a decisão mais importante que devo tomar agora.")},"Analisar esta semana"),
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Analisa a minha progressão no treino. Onde estou a progredir e onde devo ajustar?")},"Analisar treino"),
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Analisa a minha nutrição dos últimos dias. O que está a limitar o progresso e qual é a prioridade?")},"Analisar nutrição"),
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Analisa a minha recuperação, sono e atividade. Estou a recuperar o suficiente para continuar a progredir?")},"Analisar recuperação")
+     ),
+     /*#__PURE__*/React.createElement("textarea",{className:"evf-ai-question",value:aiQuestion,onChange:e=>setAiQuestion(e.target.value),placeholder:"Ou escreve a tua pergunta… Ex.: Devo baixar as calorias esta semana?"}),
+     /*#__PURE__*/React.createElement("div",{className:"evf-ai-actions"},
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-btn",onClick:askAI,disabled:aiBusy},aiBusy?"A analisar…":"Perguntar ao Coach"),
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-btn secondary",onClick:()=>{setAiQuestion("");setAiAnswer("");}},"Limpar")
+     ),
+     aiAnswer && /*#__PURE__*/React.createElement("div",{className:"evf-ai-result"},
+       /*#__PURE__*/React.createElement("div",{className:"evf-ai-result-head"},
+         /*#__PURE__*/React.createElement("span",null,"Decisão do Coach"),
+         /*#__PURE__*/React.createElement("span",null,"Gemini")
+       ),
+       aiAnswer
+     ),
+     /*#__PURE__*/React.createElement("div",{className:"evf-ai-uses"},
+       /*#__PURE__*/React.createElement("div",{className:"evf-ai-use"}, /*#__PURE__*/React.createElement("strong",null,"Corpo"),"peso, cintura e gordura"),
+       /*#__PURE__*/React.createElement("div",{className:"evf-ai-use"}, /*#__PURE__*/React.createElement("strong",null,"Treino"),"progressão, RIR e volume"),
+       /*#__PURE__*/React.createElement("div",{className:"evf-ai-use"}, /*#__PURE__*/React.createElement("strong",null,"Nutrição"),"calorias, proteína e passos"),
+       /*#__PURE__*/React.createElement("div",{className:"evf-ai-use"}, /*#__PURE__*/React.createElement("strong",null,"Recuperação"),"sono, cardio e carga")
+     )
+   )
+ ), /*#__PURE__*/React.createElement("div",{className:"card coach27-baseline"},
+   /*#__PURE__*/React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",gap:"10px"}},
+     /*#__PURE__*/React.createElement("div",null,
+       /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Ponto de partida"),
+       /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"6px"}},
+         firstBody ? "Referência da primeira pesagem: "+firstBody.date : "Ainda não existe uma pesagem de referência.")
+     ),
+     /*#__PURE__*/React.createElement("button",{
+       className:"theme-toggle",
+       onClick:openBaselineEditor,
+       "aria-label":"Editar ponto de partida"
+     }, /*#__PURE__*/React.createElement(I,{name:"edit",size:17}))
+   ),
+   baselineEdit ?
+     /*#__PURE__*/React.createElement("div",{style:{marginTop:"12px"}},
+       /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginBottom:"10px"}},
+         numInput("Peso inicial",baselineForm.weight,v=>setBaselineForm(f=>({...f,weight:v})),"kg"),
+         numInput("Gordura inicial",baselineForm.bodyFat,v=>setBaselineForm(f=>({...f,bodyFat:v})),"%"),
+         numInput("Cintura inicial",baselineForm.cintura,v=>setBaselineForm(f=>({...f,cintura:v})),"cm")
+       ),
+       /*#__PURE__*/React.createElement("div",{style:{display:"flex",gap:"8px",justifyContent:"flex-end"}},
+         /*#__PURE__*/React.createElement("button",{className:"evf-ai-btn secondary",onClick:()=>setBaselineEdit(false)},"Cancelar"),
+         /*#__PURE__*/React.createElement("button",{className:"evf-ai-btn",onClick:saveBaseline},"Guardar")
+       )
+     )
+   :
+     /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"10px",marginBottom:0}},
+       mini((coachBaseline?.weight ?? firstBody?.weight) ? (coachBaseline?.weight ?? firstBody.weight)+" kg":"—","Peso inicial"),
+       mini((coachBaseline?.bodyFat ?? firstBody?.bodyFat) ? (coachBaseline?.bodyFat ?? firstBody.bodyFat)+"%":"—","Gordura inicial"),
+       mini((coachBaseline?.cintura ?? firstBody?.cintura) ? (coachBaseline?.cintura ?? firstBody.cintura)+" cm":"—","Cintura inicial"),
+       mini(latest && (coachBaseline?.weight ?? firstBody?.weight) && latest.weight ?
+         ((latest.weight-(Number(coachBaseline?.weight ?? firstBody.weight)))>0?"+":"")+
+         (latest.weight-Number(coachBaseline?.weight ?? firstBody.weight)).toFixed(1)+" kg":"—","Variação")
+     )
+ ),
+ /*#__PURE__*/React.createElement("div",{className:"card coach27-sync"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Dados e sincronização"),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",marginTop:"7px"}},
+   fbDb ? "✓ Sincronização disponível quando estás ligado à tua conta." : "✓ Dados guardados localmente neste dispositivo."
+ )
+ ),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-grid"},
+ mini(latest&&latest.weight?latest.weight+" kg":"—","Peso atual"),
+ mini(latest&&latest.cintura?latest.cintura+" cm":"—","Cintura"),
+ mini(latest&&latest.bodyFat?latest.bodyFat+"%":"—","Gordura corporal"),
+ mini(recovery==null?"—":recovery+"%","Recuperação · "+recLabel)
+ ),
+
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title",style:{marginBottom:"12px"}}," Hoje — nutrição"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-actions"},
+ numInput("Calorias",taskVal("calorias_in"),v=>setTaskVal("calorias_in",v),"kcal"),
+ numInput("Proteína",taskVal("proteina"),v=>setTaskVal("proteina",v),"g"),
+ numInput("Gordura",taskVal("gordura_in"),v=>setTaskVal("gordura_in",v),"g"),
+ numInput("Passos",taskVal("passos"),v=>setTaskVal("passos",v),"")
+ ),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"10px",lineHeight:1.45}},
+ "Alvos: ",prof.kcalTarget||2350," kcal · ",prof.proteinTarget||170," g proteína · ",prof.fatTarget||70," g gordura · ",prof.stepsTarget||9000," passos."
+ )
+ ),
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Últimos 7 dias"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},
+ mini(avgKcal?Math.round(avgKcal):"—","kcal/dia"),
+ mini(avgProtein?Math.round(avgProtein)+" g":"—","proteína/dia"),
+ mini(avgSteps?Math.round(avgSteps).toLocaleString("pt-PT"):"—","passos/dia"),
+ mini(cardio7+" min","cardio/semana")
+ )
+ ),
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Decisão automática"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-status",style:{marginTop:"10px"}},status),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",color:"var(--muted)",lineHeight:1.5,marginTop:"6px"}},decision),
+ enoughData && /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"9px"}},
+ "Tendência recente: peso ",weightTrend>0?"+":"",weightTrend," kg",
+ waistTrend!=null?" · cintura "+(waistTrend>0?"+":"")+waistTrend+" cm":""
+ )
+ ),
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Alertas inteligentes"),
+ alerts.length ? alerts.map((a,i)=>/*#__PURE__*/React.createElement("button",{className:"coach27-alert coach27-alert-"+a.level,key:i,onClick:()=>onNavigate && onNavigate(a.tab)},
+   /*#__PURE__*/React.createElement("span",{className:"coach-alert-symbol "+(a.level==="positive"?"coach-alert-positive":"coach-alert-negative")},a.level==="positive"?"✓":"!"),
+   /*#__PURE__*/React.createElement("span",{style:{flex:1,textAlign:"left"}},a.text),
+   /*#__PURE__*/React.createElement("span",{style:{fontSize:"15px",opacity:.65}},"›")
+ ))
+ : /*#__PURE__*/React.createElement("div",{className:"pc-empty",style:{marginTop:"10px"}},"Sem alertas relevantes com os dados atuais.")
+ ),
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Revisão de 4 semanas"),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},
+ mini(reviewW==null?"—":(reviewW>0?"+":"")+reviewW+" kg","Peso"),
+ mini(reviewWaist==null?"—":(reviewWaist>0?"+":"")+reviewWaist+" cm","Cintura"),
+ mini(adherence28+"%","Consistência"),
+ mini((state.sessions||[]).filter(s=>(TODAY-new Date(s.date+"T12:00:00"))/86400000<28).length,"Treinos")
+ )
+ ),
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Assimetria do peito"),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",lineHeight:1.5,marginTop:"7px"}},
+ "Single-Arm DB Chest Press: lado menor primeiro · mesma carga e reps no lado maior · 1–2 RIR · +1 série apenas no lado menor se recuperares bem."
+ ),
+ asymRows.length ? asymRows.map((r,i)=>/*#__PURE__*/React.createElement("div",{className:"prog-row",key:i},
+ /*#__PURE__*/React.createElement("div",null,
+ /*#__PURE__*/React.createElement("div",{className:"prog-name"},r.date),
+ /*#__PURE__*/React.createElement("div",{className:"prog-vals"},(r.weight||"—")+" kg · menor "+(r.small||"—")+" · maior "+(r.big||"—")+" · RIR "+(r.rir==null?"—":r.rir))
+ )
+ )) : /*#__PURE__*/React.createElement("div",{className:"pc-empty",style:{marginTop:"10px"}},"Os próximos registos do exercício unilateral vão aparecer aqui.")
+ ),
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Fotos de progresso"),
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",lineHeight:1.45,margin:"7px 0 10px"}},
+ "Ideal: frente, costas e lados, mesma luz e distância, de 2 em 2 semanas. As fotos ficam apenas neste dispositivo."
+ ),
+ /*#__PURE__*/React.createElement("label",{className:"big-btn coral",style:{marginBottom:"10px",cursor:"pointer"}},
+ "Adicionar fotografia",
+ /*#__PURE__*/React.createElement("input",{type:"file",accept:"image/*",capture:"environment",onChange:addPhoto,style:{display:"none"}})
+ ),
+ photos.length ? /*#__PURE__*/React.createElement("div",{className:"coach27-photo-grid"},
+ photos.slice().reverse().map(ph=>/*#__PURE__*/React.createElement("div",{className:"coach27-photo",key:ph.id},
+ /*#__PURE__*/React.createElement("img",{src:ph.data,alt:"Progresso "+ph.date}),
+ /*#__PURE__*/React.createElement("div",{className:"coach27-photo-meta"},
+ /*#__PURE__*/React.createElement("span",null,ph.date),
+ /*#__PURE__*/React.createElement("button",{className:"coach27-photo-del",onClick:()=>savePhotos(photos.filter(x=>x.id!==ph.id))},"Remover")
+ )
+ ))
+ ) : /*#__PURE__*/React.createElement("div",{className:"pc-empty"},"Ainda não tens fotografias guardadas.")
+ ),
+
+ /*#__PURE__*/React.createElement("div",{className:"card"},
+ /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Objetivos semanais"),
+ GOALS.filter(g=>g.cat==="Corpo").map(g=>{
+ const z=computeGoal(g,state), done=z.pct>=100;
+ return /*#__PURE__*/React.createElement("div",{key:g.id,style:{marginTop:"12px"}},
+ /*#__PURE__*/React.createElement("div",{className:"goal-top"},
+ /*#__PURE__*/React.createElement("span",{className:"goal-label"},g.label),
+ /*#__PURE__*/React.createElement("span",{className:"goal-val"+(done?" done":"")},goalLabel(g,z.value))
+ ),
+ /*#__PURE__*/React.createElement(Bar,{pct:z.pct,color:done?"linear-gradient(90deg,#1E9E6A,#0E8F9E)":"linear-gradient(90deg,#2B5FD9,#3F73EA)"})
+ );
+ })
+ ),
+ /*#__PURE__*/React.createElement("div",{className:"pad"})
+ );
+}
+
+/* =============================== OBJETIVOS ============================== */
+function Goals({
+ state
+}) {
+ const cats = ["Corpo"];
+ return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
+ title: "Objetivos semanais",
+ sub: "Atualizados automaticamente pela tua checklist"
+ }), /*#__PURE__*/React.createElement("div", {
+ className: "card auto-note"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "zap",
+ size: 14
+ }), " A Daily Checklist alimenta estes objetivos. Não precisas de inserir nada duas vezes."), cats.map(cat => /*#__PURE__*/React.createElement("div", {
+ key: cat
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "cat-head"
+ }, cat), GOALS.filter(g => g.cat === cat).map(g => {
+ const {
+ value,
+ pct
+ } = computeGoal(g, state);
+ const done = pct >= 100;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card goal",
+ key: g.id
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "goal-top"
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "goal-label"
+ }, g.label), /*#__PURE__*/React.createElement("span", {
+ className: "goal-val" + (done ? " done" : "")
+ }, goalLabel(g, value), " ", done ? "" : pct >= 60 ? "" : "!")), /*#__PURE__*/React.createElement(Bar, {
+ pct: pct,
+ color: done ? "linear-gradient(90deg,#1E9E6A,#0E8F9E)" : "linear-gradient(90deg,#2B5FD9,#3F73EA)"
+ }));
+ }))), /*#__PURE__*/React.createElement("div", {
+ className: "pad"
+ }));
+}
+
+/* =============================== RELATÓRIOS ============================ */
+
+/* ===================== EVOLVEFIT PRO / PWA FEATURES ===================== */
+function efPearson(xs, ys){
+  const n=Math.min(xs.length,ys.length); if(n<3) return null;
+  const ax=xs.slice(0,n).reduce((a,b)=>a+b,0)/n, ay=ys.slice(0,n).reduce((a,b)=>a+b,0)/n;
+  let num=0,dx=0,dy=0;
+  for(let i=0;i<n;i++){const a=xs[i]-ax,b=ys[i]-ay;num+=a*b;dx+=a*a;dy+=b*b;}
+  return dx&&dy ? num/Math.sqrt(dx*dy) : null;
+}
+function WeeklyCoachInsights({state}){
+  const days=lastNDays(state.days,7);
+  const paired=(id,fn)=>days.map(w=>{
+    const d=w.day||{tasks:{},water:0};
+    const v=id==="water" ? Number(d.water||0)/1000 : Number(d.tasks&&d.tasks[id]&&d.tasks[id].value||0);
+    return {v,score:dayPct(d,w.key)};
+  }).filter(x=>x.v>0);
+  const metrics=[
+    ["Sono","sono","h"],
+    ["Passos","passos",""],
+    ["Proteína","proteina","g"],
+    ["Água","water","L"]
+  ];
+  const corrs=metrics.map(([name,id,unit])=>{
+    const p=paired(id); return {name,id,unit,n:p.length,r:efPearson(p.map(x=>x.v),p.map(x=>x.score))};
+  }).filter(x=>x.r!=null).sort((a,b)=>Math.abs(b.r)-Math.abs(a.r));
+  const wk=weekFromMonday(state.days);
+  const sessions=(state.sessions||[]).filter(s=>wk.some(w=>w.key===s.date)).length;
+  const consistency=Math.round(days.reduce((a,w)=>a+dayPct(w.day,w.key),0)/7);
+  const body=[...(state.body||[])].sort((a,b)=>a.date.localeCompare(b.date));
+  const last=body.at(-1), prev=body.at(-2);
+  const suggestion = consistency<65 ? "Prioridade: melhorar consistência antes de alterar o plano."
+    : sessions<4 ? "Prioridade: recuperar a frequência de treino esta semana."
+    : last&&prev&&last.weight<prev.weight ? "Tendência favorável: mantém a estratégia e volta a avaliar com mais dados."
+    : "Mantém o plano atual e usa tendência semanal, não um único dia, para decidir ajustes.";
+  const weekKey=iso(addDays(TODAY,-((TODAY.getDay()+6)%7)));
+  useEffect(()=>{try{
+    const k="evolvefit_weekly_reports_v1";
+    const arr=JSON.parse(localStorage.getItem(k)||"[]");
+    if(!arr.some(x=>x.week===weekKey)){arr.push({week:weekKey,generatedAt:Date.now(),consistency,sessions,suggestion});localStorage.setItem(k,JSON.stringify(arr.slice(-26)));}
+  }catch(e){}},[weekKey,consistency,sessions,suggestion]);
+  return /*#__PURE__*/React.createElement("div",{className:"card"},
+    /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Relatório semanal automático"),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},consistency+"%"), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"consistência · últimos 7 dias")),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-tile"}, /*#__PURE__*/React.createElement("div",{className:"ef-pro-title"},sessions+" treino"+(sessions===1?"":"s")), /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"esta semana"))
+    ),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px",fontWeight:650,color:"var(--text)"}},suggestion),
+    corrs.length ? /*#__PURE__*/React.createElement("details",{className:"ef-pro-details"},
+      /*#__PURE__*/React.createElement("summary",null,"Correlações dos teus dados"),
+      corrs.map((c,i)=>/*#__PURE__*/React.createElement("div",{className:"ef-corr",key:c.id},
+        c.name,": ",c.r>0?"associação positiva ":"associação inversa ","(",Math.abs(c.r).toFixed(2),", ",c.n," dias)."
+      )),
+      /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Correlação não prova causalidade; usa estes padrões como pistas para testar ao longo de várias semanas.")
+    ) : /*#__PURE__*/React.createElement("div",{className:"ef-pro-note",style:{marginTop:"10px"}},"Regista pelo menos 3 dias comparáveis de sono, passos, proteína ou água para calcular correlações.")
+  );
+}
+function EvolveFitSystemCard({state,user,update}){
+  const [online,setOnline]=useState(navigator.onLine);
+  const [cloud,setCloud]=useState(window.EvolveFitCloudStatus||{status:"idle",at:0});
+  const [notif,setNotif]=useState(typeof Notification!=="undefined"?Notification.permission:"unsupported");
+  const fileRef=React.useRef(null);
+  useEffect(()=>{
+    const o=()=>setOnline(navigator.onLine), c=e=>setCloud(e.detail||window.EvolveFitCloudStatus);
+    window.addEventListener("evolvefit-online-state",o);window.addEventListener("evolvefit-cloud-status",c);
+    return()=>{window.removeEventListener("evolvefit-online-state",o);window.removeEventListener("evolvefit-cloud-status",c)}
+  },[]);
+  useEffect(()=>{try{
+    const d=state.days&&state.days[todayKey], list=dayList(todayKey), done=list.filter(t=>isDone(d&&d.tasks&&d.tasks[t.id],t)).length;
+    const pending=Math.max(0,list.length-done);
+    if("setAppBadge" in navigator){pending?navigator.setAppBadge(pending):navigator.clearAppBadge();}
+  }catch(e){}},[state._updatedAt]);
+  const exportData=async()=>{
+    const payload={app:"EvolveFit",version:2,exportedAt:new Date().toISOString(),state,photos:JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")};
+    const file=new File([JSON.stringify(payload,null,2)],"evolvefit-backup-"+todayKey+".json",{type:"application/json"});
+    try{if(navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file],title:"Backup EvolveFit"});return;}}catch(e){}
+    const a=document.createElement("a");a.href=URL.createObjectURL(file);a.download=file.name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),1500);
+  };
+  const importData=async e=>{
+    const f=e.target.files&&e.target.files[0]; if(!f)return;
+    try{
+      const data=JSON.parse(await f.text()); const imported=normalize(data.state||data);
+      if(!imported) throw new Error("Backup inválido");
+      if(!confirm("Importar este backup e substituir os dados atuais?")) return;
+      const k=keyFor(user&&user.uid);localStorage.setItem(k,JSON.stringify(imported));
+      if(Array.isArray(data.photos)) localStorage.setItem("evolvefit_progress_photos_v1",JSON.stringify(data.photos));
+      location.reload();
+    }catch(err){alert("Não foi possível importar: "+err.message);}
+    finally{e.target.value="";}
+  };
+  const enableNotif=async()=>{try{const ok=await window.evfEnableNotifications();setNotif(ok?"granted":Notification.permission);if(!ok)alert("Permissão de notificações não concedida.");}catch(e){alert(e.message)}};
+  const cloudText=!user?"Só local":cloud.status==="saving"?"A guardar…":(cloud.status==="saved"||cloud.status==="remote")?"Guardado na nuvem":cloud.status==="error"?"Erro de sincronização":online?"Nuvem ligada":"Offline";
+  return /*#__PURE__*/React.createElement("div",{className:"card"},
+    /*#__PURE__*/React.createElement("div",{className:"pc-head"},
+      /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Dados, offline e notificações"),
+      /*#__PURE__*/React.createElement("span",{className:"ef-pro-status "+(online?"good":"bad")},online?"Online":"Offline")
+    ),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Sincronização"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},cloudText)),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-row"}, /*#__PURE__*/React.createElement("span",{className:"ef-pro-k"},"Modo offline"), /*#__PURE__*/React.createElement("span",{className:"ef-pro-v"},"Ativo após a primeira abertura")),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-grid"},
+      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:exportData},"Exportar backup"),
+      /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn",onClick:()=>fileRef.current&&fileRef.current.click()},"Importar backup")
+    ),
+    /*#__PURE__*/React.createElement("input",{ref:fileRef,type:"file",accept:"application/json,.json",style:{display:"none"},onChange:importData}),
+    /*#__PURE__*/React.createElement("button",{className:"ef-pro-btn "+(notif==="granted"?"good":"primary"),onClick:enableNotif,disabled:notif==="granted"},notif==="granted"?"Notificações ativadas":"Ativar notificações e badge"),
+    /*#__PURE__*/React.createElement("div",{className:"ef-pro-note"},"Em iPhone, instala o EvolveFit no ecrã principal para obter a experiência PWA completa. A sincronização de dados pendentes acontece quando a app volta a abrir ou recupera ligação.")
+  );
+}
+
+function Report({
+ state,
+ update,
+ user
+}) {
+ const [report, setReport] = useState(null);
+ const [gen, setGen] = useState(false);
+ const dark = state.theme === "dark";
+ const week = lastNDays(state.days, 7);
+ const consistency = Math.round(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7);
+ const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
+ const coach = buildCoach(state, waterAvg);
+ const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
+ const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= 2500);
+ const workoutStreak = streak(state.days, (d, k) => trainedOn(state, k));
+ const generate = () => {
+ setGen(true);
+ setReport(buildReport(state));
+ setGen(false);
+ };
+ return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
+ title: "Relatórios",
+ sub: "A tua semana, analisada",
+ right: /*#__PURE__*/React.createElement("button", {
+ className: "theme-toggle",
+ onClick: () => update(s => {
+ s.theme = dark ? "light" : "dark";
+ })
+ }, /*#__PURE__*/React.createElement("svg", {
+ width: 18,
+ height: 18,
+ viewBox: "0 0 24 24",
+ fill: "none",
+ stroke: "currentColor",
+ strokeWidth: 2,
+ strokeLinecap: "round",
+ strokeLinejoin: "round"
+ }, dark ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("circle", {
+ cx: 12,
+ cy: 12,
+ r: 4
+ }), /*#__PURE__*/React.createElement("path", {
+ d: "M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"
+ })) : /*#__PURE__*/React.createElement("path", {
+ d: "M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"
+ })))
+ }), /*#__PURE__*/React.createElement("div", {
+ className: "card coach"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "coach-tag"
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "zap",
+ size: 14
+ }), " Resumo do Dia"), /*#__PURE__*/React.createElement("p", null, coach)), /*#__PURE__*/React.createElement("div", {
+ className: "streaks"
+ }, /*#__PURE__*/React.createElement(StreakPill, {
+ v: checkStreak,
+ l: "Checklist",
+ c: "#2B5FD9"
+ }), /*#__PURE__*/React.createElement(StreakPill, {
+ v: workoutStreak,
+ l: "Treino",
+ c: "#C98A1B"
+ }), /*#__PURE__*/React.createElement(StreakPill, {
+ v: waterStreak,
+ l: "Água",
+ c: "#2A8FD6"
+ })), /*#__PURE__*/React.createElement(GitCal, {
+ days: state.days
+ }), /*#__PURE__*/React.createElement(EvolveFitSystemCard, {
+ state: state,
+ user: user,
+ update: update
+ }), !report && /*#__PURE__*/React.createElement("button", {
+ className: "big-btn report",
+ onClick: generate,
+ disabled: gen
+ }, gen ? "A analisar os teus dados..." : /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(I, {
+ name: "barChart",
+ size: 18
+ }), " Gerar relatório da semana")), report && /*#__PURE__*/React.createElement("div", {
+ className: "report-body"
+ }, /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Resumo geral"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "big-stat"
+ }, /*#__PURE__*/React.createElement("span", {
+ className: "bs-v"
+ }, report.consistency, "%"), /*#__PURE__*/React.createElement("span", {
+ className: "bs-l"
+ }, "consistência semanal")), /*#__PURE__*/React.createElement("p", {
+ style: {
+ marginTop: 12
+ }
+ }, report.summary), /*#__PURE__*/React.createElement("p", {
+ style: {
+ marginTop: 8,
+ fontWeight: 600
+ }
+ }, report.todaySummary)), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Água"
+ }, /*#__PURE__*/React.createElement("p", null, "Média de ", /*#__PURE__*/React.createElement("b", null, report.waterAvg, "L"), "/dia. Objetivo atingido em ", /*#__PURE__*/React.createElement("b", null, report.waterDays, "/7"), " dias.")), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Treino",
+ tint: "teal"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "Treinos"), /*#__PURE__*/React.createElement("span", null, report.workout.count, "/5")), /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "Volume total"), /*#__PURE__*/React.createElement("span", null, (report.workout.volume / 1000).toFixed(1), "k kg")), /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "Cardio"), /*#__PURE__*/React.createElement("span", null, report.workout.cardio, " min")), /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "Calorias treino"), /*#__PURE__*/React.createElement("span", null, report.workout.kcal, " kcal")), report.workout.rir != null && /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "RIR médio"), /*#__PURE__*/React.createElement("span", null, report.workout.rir)), /*#__PURE__*/React.createElement("p", {
+ style: {
+ marginTop: 8
+ }
+ }, report.workout.note)), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Corpo"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "Peso (7 dias)"), /*#__PURE__*/React.createElement("span", {
+ className: report.body.grams > 0 ? "good" : ""
+ }, report.body.grams > 0 ? "−" : report.body.grams < 0 ? "+" : "", Math.abs(report.body.grams), " g")), /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "Gordura corporal"), /*#__PURE__*/React.createElement("span", null, report.body.bf, "% (", report.body.bfDiff <= 0 ? "↓" : "↑", Math.abs(report.body.bfDiff), ")")), /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "IMC"), /*#__PURE__*/React.createElement("span", null, report.body.bmi)), /*#__PURE__*/React.createElement("div", {
+ className: "rg-row"
+ }, /*#__PURE__*/React.createElement("span", null, "Massa muscular"), /*#__PURE__*/React.createElement("span", null, report.body.muscle, " kg (", report.body.muscleDiff >= 0 ? "↑" : "↓", Math.abs(report.body.muscleDiff), ")")), /*#__PURE__*/React.createElement("p", {
+ style: {
+ marginTop: 8
+ }
+ }, report.body.note)), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Objetivos semanais"
+ }, report.goalResults.map(({
+ g,
+ value,
+ pct
+ }) => {
+ const done = pct >= 100;
+ return /*#__PURE__*/React.createElement("div", {
+ className: "rg-row",
+ key: g.id
+ }, /*#__PURE__*/React.createElement("span", null, g.label), /*#__PURE__*/React.createElement("span", {
+ className: done ? "good" : pct >= 60 ? "" : "warn"
+ }, goalLabel(g, value), " ", done ? "" : pct >= 60 ? "" : "!"));
+ })), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Padrões & ciência",
+ tint: "violet"
+ }, report.patterns.map((s, i) => /*#__PURE__*/React.createElement("p", {
+ key: i
+ }, s))), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Pontos fortes",
+ tint: "green"
+ }, /*#__PURE__*/React.createElement("ul", null, report.strong.map((s, i) => /*#__PURE__*/React.createElement("li", {
+ key: i
+ }, s)))), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Oportunidades de melhoria",
+ tint: "amber"
+ }, /*#__PURE__*/React.createElement("ul", null, report.opps.map((s, i) => /*#__PURE__*/React.createElement("li", {
+ key: i
+ }, s)))), /*#__PURE__*/React.createElement(ReportBlock, {
+ title: "Recomendações",
+ tint: "violet"
+ }, /*#__PURE__*/React.createElement("ul", null, report.recs.map((s, i) => /*#__PURE__*/React.createElement("li", {
+ key: i
+ }, s)))), /*#__PURE__*/React.createElement("div", {
+ className: "disclaimer"
+ }, "Análises informativas geradas a partir dos teus registos — não substituem aconselhamento médico profissional.")), /*#__PURE__*/React.createElement("button", {
+ className: "reset-btn",
+ style: user ? {
+ marginBottom: "6px"
+ } : {
+ display: "none"
+ },
+ onClick: () => {
+ if (fbAuth) fbAuth.signOut();
+ }
+ }, user ? "Terminar sessão (" + (user.email || "conta") + ")" : ""), /*#__PURE__*/React.createElement("button", {
+ className: "reset-btn",
+ style: {
+ color: "var(--coral)"
+ },
+ onClick: () => {
+ if (confirm("Eliminar todos os registos? Isto apaga o histórico de tarefas, corpo e treinos e fica tudo a zeros. Não pode ser desfeito.")) {
+ update(s => {
+ s.days = {};
+ s.body = [];
+ s.sessions = [];
+ });
+ }
+ }
+ }, "Eliminar todos os registos"), /*#__PURE__*/React.createElement("div", {
+ className: "pad"
+ }));
+}
+function buildReport(state) {
+ const week = weekFromMonday(state.days);
+ const consistency = +(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7).toFixed(1);
+ const sumQty = (id, days) => days.reduce((a, w) => a + (w.day && w.day.tasks[id] ? w.day.tasks[id].value || 0 : 0), 0);
+ const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
+ const waterDays = week.filter(w => ((w.day ? w.day.water : 0) || 0) >= 2500).length;
+ const treinos = week.filter(w => trainedOn(state, w.key)).length;
+ const pages = sumQty("ler", week);
+ // chores
+ let choreDone = 0,
+ choreTotal = 0;
+ week.forEach(w => {
+ const ch = CHORES[weekdayOf(w.key)];
+ if (ch) {
+ choreTotal++;
+ if (ch.items.every(([id]) => w.day && w.day.tasks[id] && w.day.tasks[id].done)) choreDone++;
+ }
+ });
+ const house = ["Arrumaste a casa em " + choreDone + "/" + choreTotal + " dia(s) útil(eis) desta semana.", choreDone >= choreTotal - 1 ? "Rotina de casa muito consistente." : "Há dias de casa por fechar — tenta apanhá-los para a próxima."];
+ // workout
+ const vol = state.sessions.filter(s => week.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
+ const cardio = sumQty("cardio", week);
+ const wkcal = sumQty("calorias", week);
+ const rirVals = state.sessions.filter(se => week.some(w => w.key === se.date)).flatMap(se => se.ex.filter(e => e.rir != null).map(e => e.rir));
+ const rirAvg = rirVals.length ? +(rirVals.reduce((a, b) => a + b, 0) / rirVals.length).toFixed(1) : null;
+ const rirNote = rirAvg == null ? "" : rirAvg < 1.5 ? " RIR médio de " + rirAvg + ": treinos muito perto da falha — vigia a recuperação. " : rirAvg > 3 ? " RIR médio de " + rirAvg + ": há margem para subir cargas. " : " RIR médio de " + rirAvg + ": intensidade na zona certa. ";
+ // progression across all plan days (recent vs previous session per exercise)
+ let up = 0,
+ tot = 0;
+ state.plano.forEach((pd, di) => {
+ const ds = state.sessions.filter(s => s.dayIdx === di).sort((a, b) => a.date.localeCompare(b.date));
+ if (ds.length >= 2) {
+ const a = ds[ds.length - 2],
+ b = ds[ds.length - 1];
+ b.ex.forEach((e, i) => {
+ if (a.ex[i]) {
+ tot++;
+ if (e.weight > a.ex[i].weight) up++;
+ }
+ });
+ }
+ });
+ const wNote = treinos >= 5 ? "Excelente frequência. " : treinos > 0 ? "Frequência abaixo do alvo de 5. " : "";
+ const progNote = tot > 0 ? up >= tot * 0.5 ? "Estás a subir a carga na maioria dos exercícios — progressão sólida." : "A carga está estável — considera subir peso ou reps onde já dominas a técnica." : "Regista os treinos para acompanhar a progressão de carga.";
+ // body
+ const body = [...state.body].sort((a, b) => a.date.localeCompare(b.date));
+ const last = body[body.length - 1];
+ const weekAgo = body.filter(b => b.date <= iso(addDays(TODAY, -6))).pop() || body[0];
+ const grams = Math.round((weekAgo.weight - last.weight) * 1000);
+ const prevBody = body.length > 1 ? body[body.length - 2] : last;
+ const bfDiff = +(last.bodyFat - prevBody.bodyFat).toFixed(1);
+ const muscleDiff = +(last.muscle - prevBody.muscle).toFixed(1);
+ const bodyNote = grams > 0 && last.bodyFat <= prevBody.bodyFat ? "Perda de gordura no bom ritmo, mantendo (ou ganhando) músculo — exatamente o que queres para os " + state.profile.bfTarget + "%." : "Ritmo mais lento esta semana. O peso oscila com água/ciclo; olha a tendência de várias semanas, não um dia.";
+ // patterns / science
+ const patterns = ["Em geral, estudos associam treino regular e boa hidratação a melhor humor, energia e produtividade — os teus dados são o teste real para ti."];
+ // strong / opps / recs
+ const strong = [],
+ opps = [],
+ recs = [];
+ if (consistency >= 75) strong.push("Excelente consistência geral na checklist.");
+ if (treinos >= 5) strong.push("Treinos em dia e a subir a carga.");
+ if (waterDays >= 4) strong.push("Boa hidratação na maioria dos dias.");
+ if (!strong.length) strong.push("Apareceste todos os dias — a base está lá.");
+ if (+waterAvg < 2.5) opps.push("Água abaixo do objetivo (média " + waterAvg + "L).");
+ if (treinos < 5) opps.push("Faltou treino: " + treinos + "/5.");
+ if (!opps.length) opps.push("Poucas fraquezas — foca em manter o ritmo.");
+ if (+waterAvg < 2.5) recs.push("Subir a hidratação para 2.5L/dia.");
+ recs.push("Manter os 5 treinos e subir carga onde a técnica já é sólida.");
+ const summary = "Esta semana cumpriste " + consistency + "% do que planeaste. Fizeste " + treinos + " treino(s) e bebeste em média " + waterAvg + "L de água. " + (consistency >= 75 ? "Estás a construir uma rotina forte rumo aos " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + "." : "Uma semana para consolidar hábitos — pequenos ajustes fazem grande diferença até lá.");
+ // hoje: corpo e treino
+ const trainedToday = trainedOn(state, todayKey);
+ const todaySummary = "Hoje " + (trainedToday ? "já treinaste" : "ainda não treinaste") + ". O teu peso atual é " + last.weight + "kg, com " + last.bodyFat + "% de gordura e IMC " + last.bmi + ".";
+ const goalResults = GOALS.map(g => ({
+ g,
+ ...computeGoal(g, state)
+ }));
+ return {
+ consistency,
+ summary,
+ todaySummary,
+ house,
+ waterAvg,
+ waterDays,
+ workout: {
+ count: treinos,
+ volume: vol,
+ cardio,
+ kcal: wkcal,
+ rir: rirAvg,
+ note: wNote + progNote + rirNote.trimEnd()
+ },
+ body: {
+ grams,
+ bf: last.bodyFat,
+ bfDiff,
+ bmi: last.bmi,
+ muscle: last.muscle,
+ muscleDiff,
+ note: bodyNote
+ },
+ patterns,
+ goalResults,
+ strong,
+ opps,
+ recs
+ };
+}
+
+function buildCoach(state, waterAvg) {
+ const today = state.days[todayKey];
+ const waterToday = ((today ? today.water : 0) || 0) / 1000;
+ const trained = trainedOn(state, todayKey);
+ const steps = today && today.tasks.passos ? today.tasks.passos.value : 0;
+ const p = [];
+ if (trained) p.push("Já treinaste hoje");
+ let msg = p.length ? p.join(" ") + ". " : "";
+ if (waterToday < 2.5) msg += "Ainda só bebeste " + waterToday.toFixed(1) + "L — faltam " + (2.5 - waterToday).toFixed(1) + "L. ";
+ if (steps < 10000) msg += "Faltam " + (10000 - steps).toLocaleString("pt-PT") + " passos para os 10k. ";
+ msg += "Mantém a consistência e estás no caminho certo para os " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + ".";
+ return msg;
+}
+function ReportBlock({
+ title,
+ children,
+ tint
+}) {
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card rblock" + (tint ? " tint-" + tint : "")
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "rblock-title"
+ }, title), children);
+}
+function StreakPill({
+ v,
+ l,
+ c
+}) {
+ return /*#__PURE__*/React.createElement("div", {
+ className: "streak-pill"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "streak-flame",
+ style: {
+ color: c
+ }
+ }, /*#__PURE__*/React.createElement(I, {
+ name: "flame",
+ size: 15
+ }), /*#__PURE__*/React.createElement("span", null, v)), /*#__PURE__*/React.createElement("div", {
+ className: "streak-l"
+ }, l));
+}
+function GitCal({
+ days
+}) {
+ const weeks = 15,
+ cells = [];
+ const start = addDays(TODAY, -(weeks * 7 - 1 - (6 - TODAY.getDay())));
+ for (let i = 0; i < weeks * 7; i++) {
+ const d = addDays(start, i);
+ if (d > TODAY) {
+ cells.push(null);
+ continue;
+ }
+ const p = dayPct(days[iso(d)], iso(d));
+ cells.push({
+ lvl: p === 0 ? 0 : p < 30 ? 1 : p < 55 ? 2 : p < 80 ? 3 : 4
+ });
+ }
+ const cols = [];
+ for (let c = 0; c < weeks; c++) cols.push(cells.slice(c * 7, c * 7 + 7));
+ return /*#__PURE__*/React.createElement("div", {
+ className: "card gitcal"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "gitcal-title"
+ }, "Consistência"), /*#__PURE__*/React.createElement("div", {
+ className: "gitcal-grid"
+ }, cols.map((col, ci) => /*#__PURE__*/React.createElement("div", {
+ className: "gitcal-col",
+ key: ci
+ }, col.map((cell, ri) => /*#__PURE__*/React.createElement("div", {
+ key: ri,
+ className: "gcell " + (cell ? "lvl-" + cell.lvl : "empty")
+ }))))), /*#__PURE__*/React.createElement("div", {
+ className: "gitcal-legend"
+ }, /*#__PURE__*/React.createElement("span", null, "menos"), [0, 1, 2, 3, 4].map(l => /*#__PURE__*/React.createElement("div", {
+ key: l,
+ className: "gcell lvl-" + l
+ })), /*#__PURE__*/React.createElement("span", null, "mais")));
+}
+/* ============================ LOGIN / SESSÃO =========================== */
+function Login() {
+ const [mode, setMode] = useState("in"); // "in" = entrar, "up" = criar conta
+ const [email, setEmail] = useState("");
+ const [pw, setPw] = useState("");
+ const [err, setErr] = useState("");
+ const [busy, setBusy] = useState(false);
+ const go = () => {
+ setErr("");
+ if (!email || !pw) {
+ setErr("Preenche o email e a palavra-passe.");
+ return;
+ }
+ setBusy(true);
+ const cu = fbAuth.currentUser;
+ const p = mode === "up" ? (cu && cu.isAnonymous ? cu.linkWithCredential(firebase.auth.EmailAuthProvider.credential(email.trim(), pw)).then(() => { location.reload(); }) : fbAuth.createUserWithEmailAndPassword(email.trim(), pw)) : fbAuth.signInWithEmailAndPassword(email.trim(), pw);
+ p.catch(e => {
+ const m = {
+ "auth/invalid-email": "Email inválido.",
+ "auth/missing-password": "Falta a palavra-passe.",
+ "auth/weak-password": "Palavra-passe fraca (mínimo 6 caracteres).",
+ "auth/email-already-in-use": "Já existe conta com este email — usa Entrar.",
+ "auth/invalid-credential": "Email ou palavra-passe errados.",
+ "auth/wrong-password": "Palavra-passe errada.",
+ "auth/user-not-found": "Não existe conta com este email — cria uma."
+ };
+ setErr(m[e.code] || e.message);
+ }).finally(() => setBusy(false));
+ };
+ return /*#__PURE__*/React.createElement("div", {
+ className: "app-wrap"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "phone"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "scroll",
+ style: {
+ display: "flex",
+ flexDirection: "column",
+ justifyContent: "center"
+ }
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "card",
+ style: {
+ padding: "24px 20px"
+ }
+ }, /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "24px",
+ fontWeight: 780,
+ letterSpacing: "-.03em",
+ marginBottom: "4px"
+ }
+ }, "EvolveFit"), /*#__PURE__*/React.createElement("div", {
+ style: {
+ fontSize: "14px",
+ color: "var(--muted)",
+ marginBottom: "20px"
+ }
+ }, mode === "up" ? "Cria a tua conta para sincronizar entre dispositivos." : "Entra com a mesma conta no PC e no telemóvel."), /*#__PURE__*/React.createElement("label", {
+ className: "lbl"
+ }, "Email", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ type: "email",
+ autoComplete: "email",
+ value: email,
+ onChange: e => setEmail(e.target.value)
+ })), /*#__PURE__*/React.createElement("label", {
+ className: "lbl",
+ style: {
+ marginTop: "10px",
+ display: "block"
+ }
+ }, "Palavra-passe", /*#__PURE__*/React.createElement("input", {
+ className: "in",
+ type: "password",
+ autoComplete: mode === "up" ? "new-password" : "current-password",
+ value: pw,
+ onChange: e => setPw(e.target.value),
+ onKeyDown: e => {
+ if (e.key === "Enter") go();
+ }
+ })), err && /*#__PURE__*/React.createElement("div", {
+ style: {
+ color: "var(--coral)",
+ fontSize: "13px",
+ marginTop: "12px"
+ }
+ }, err), /*#__PURE__*/React.createElement("button", {
+ className: "big-btn sleep",
+ style: {
+ marginTop: "18px"
+ },
+ disabled: busy,
+ onClick: go
+ }, busy ? "A processar…" : mode === "up" ? "Criar conta" : "Entrar"), /*#__PURE__*/React.createElement("button", {
+ className: "reset-btn",
+ onClick: () => {
+ setErr("");
+ setMode(mode === "up" ? "in" : "up");
+ }
+ }, mode === "up" ? "Já tenho conta — Entrar" : "Não tenho conta — Criar")))));
+}
+
+function storageAvailable() {
+  try {
+    const k = "__evolvefit_storage_test__";
+    localStorage.setItem(k, "1");
+    const ok = localStorage.getItem(k) === "1";
+    localStorage.removeItem(k);
+    return ok;
+  } catch (e) {
+    return false;
+  }
+}
+
+function App() {
+ const [user, setUser] = useState(undefined); // undefined = ainda a verificar
+ useEffect(() => {
+   if (!CLOUD_ENABLED || !fbAuth) {
+     setUser(null);
+     return;
+   }
+   let unsub = () => {};
+   try {
+     unsub = fbAuth.onAuthStateChanged(async u => {
+       if (u && !u.isAnonymous) {
+ setUser(u);
+ return;
+ }
+       setUser(null); // sem sessão: mostra o ecrã de login (email + palavra-passe)
+     });
+   } catch (e) {
+     console.error("Firebase Auth inicialização falhou:", e);
+     setUser(null);
+   }
+   return () => unsub();
+ }, []);
+ // Sem nuvem configurada: funciona localmente, como antes.
+ if (!CLOUD_ENABLED) return /*#__PURE__*/React.createElement(Dashboard, {
+ user: null
+ });
+ if (user === undefined) return /*#__PURE__*/React.createElement("div", {
+ className: "app-wrap"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "phone"
+ }, /*#__PURE__*/React.createElement("div", {
+ className: "scroll",
+ style: {
+ display: "flex",
+ alignItems: "center",
+ justifyContent: "center",
+ color: "var(--muted)"
+ }
+ }, "A carregar…")));
+ if (!user) return React.createElement(Login);
+ return /*#__PURE__*/React.createElement(Dashboard, {
+ user: user
+ });
+}
+class EvolveFitErrorBoundary extends React.Component {
+ constructor(props) {
+   super(props);
+   this.state = { hasError: false, message: "" };
+ }
+ static getDerivedStateFromError(error) {
+   return { hasError: true, message: error && error.message ? error.message : "Erro inesperado" };
+ }
+ componentDidCatch(error, info) {
+   console.error("EvolveFit render error:", error, info);
+ }
+ render() {
+   if (!this.state.hasError) return this.props.children;
+   const content = React.createElement("div", { className: "card" },
+     React.createElement("h2", null, "Erro ao mostrar os dados"),
+     React.createElement("p", null, "A aplicação protegeu os dados introduzidos. Podes recarregar sem perder os dados."),
+     React.createElement("button", {
+       className: "btn-primary",
+       style: { marginTop: "14px", width: "100%" },
+       onClick: () => location.reload()
+     }, "Recarregar aplicação"),
+     React.createElement("small", {
+       style: { display: "block", marginTop: "12px" }
+     }, this.state.message)
+   );
+   return React.createElement("div", { className: "app-wrap" },
+     React.createElement("div", { className: "phone" },
+       React.createElement("div", { className: "scroll", style: { padding: "24px" } }, content)
+     )
+   );
+ }
+}
+ReactDOM.createRoot(document.getElementById("root")).render(
+ React.createElement(EvolveFitErrorBoundary, null, React.createElement(App))
+);
+</script>
+
+<script id="evolvefit-auto-persist-global">
+(function(){
+  function persist(){
+    try {
+      if (typeof window.evolveFitPersistNow === "function") {
+        window.evolveFitPersistNow();
+      }
+    } catch(e) {}
+  }
+  document.addEventListener("change", function(e){
+    const el = e.target;
+    if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+      setTimeout(persist, 0);
+    }
+  }, true);
+  document.addEventListener("blur", function(e){
+    const el = e.target;
+    if (el && /^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName)) {
+      setTimeout(persist, 0);
+    }
+  }, true);
+})();
+</script>
+
+<style id="evolvefit-typography-final">
+/* ===== EvolveFit — escala tipográfica final (mobile-first) =====
+   Escala: 12 (legendas) · 13 (secundário) · 15 (corpo) · 16 (títulos de cartão)
+           · 20–24 (números) · 26–28 (títulos de página). Tab bar: 11.
+   Só os campos de texto ficam a 16px (evita zoom automático no iPhone). */
+:root{--t-xs:12px;--t-sm:13px;--t-base:15px;--t-md:16px;--t-xl:22px;--t-2xl:28px;}
+html{-webkit-text-size-adjust:100%;text-size-adjust:100%;}
+body{line-height:1.4;-webkit-font-smoothing:antialiased;}
+button,input,select,textarea{font-family:inherit;}
+@media (max-width:900px){
+  #root button{font-size:14px!important;}
+  #root input,#root select,#root textarea{font-size:16px!important;}
+}
+
+/* Títulos de página */
+#root .tabhead h1{font-size:28px!important;line-height:1.1!important;letter-spacing:-.03em!important;}
+#root .tabhead p{font-size:14px!important;line-height:1.4!important;}
+#root .greet{font-size:26px!important;line-height:1.15!important;letter-spacing:-.03em!important;}
+#root .subdate{font-size:14px!important;}
+
+/* Títulos de cartão / secção */
+#root .section-title,#root .water-title,#root .logger-title,#root .pc-title,#root .form-title,
+#root .ef-pro-title,#root .chart-title,#root .checkin-head,#root .cardio-week-title{font-size:16px!important;font-weight:700!important;letter-spacing:-.01em!important;line-height:1.25!important;}
+#root .cat-head{font-size:15px!important;}
+#root .list-head,#root .gitcal-title{font-size:13px!important;}
+
+/* Texto corrente */
+#root .task-label,#root .goal-label,#root .menu-m,#root .log-name,#root .prog-name,
+#root .qty-task>span:first-child,#root .qty-task>label,#root .ci-row,#root .ci-q,#root .cardio-day-label{font-size:15px!important;line-height:1.3!important;}
+#root .log-name{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;font-weight:650!important;}
+#root .subgroup{font-size:12px!important;}
+
+/* Secundário */
+#root .menu-c,#root .menu-sub,#root .kcal-note,#root .water-goal,#root .metric-label,#root .pc-empty,
+#root .slp-date,#root .ef-pro-k,#root .ef-pro-v,#root .ef-corr,#root .evf-ai-sub,#root .evf-ai-insight,
+#root .bsum-status,#root .hist-name,#root .hist-ex,#root .hist-note,#root .goal-val,#root .coach27-status,
+#root .coach27-alert,#root .rir-help,#root .rir-hint,#root .disclaimer,#root .coach27-photo-meta{font-size:13px!important;line-height:1.45!important;}
+#root .home-streak{font-size:13px!important;}
+
+/* Legendas (mínimo 12px) */
+#root .bsum-l,#root .coach27-mini-l,#root .coach27-lbl,#root .coach27-badge,#root .evf-ai-kicker,
+#root .evf-ai-badge,#root .evf-ai-use,#root .log-progress-l,#root .logged-badge,#root .pc-badge,
+#root .metric-avg,#root .streak-l,#root .ef-pro-status,#root .section-count,#root .log-sr,
+#root .log-summary,#root .logger-sub,#root .water-pct,#root .qty-unit,#root .prog-vals,#root .rir-lbl,
+#root .coach-tag,#root .stat-l,#root .today-label,#root .workout-meta span,#root .ef-pro-note,#root .lbl,#root .circ-label{font-size:12px!important;line-height:1.35!important;}
+#root .evf-ai-kicker,#root .evf-ai-badge,#root .bsum-l{letter-spacing:.04em!important;}
+#root .ring-pct i{font-size:11px!important;}
+
+/* Botões */
+#root .chip,#root .dp,#root .seg-b,#root .period-btn,#root .menu-tab,#root .menu-btn,#root .btn-ghost,
+#root .btn-solid,#root .coach27-link,#root .ef-pro-btn,#root .evf-ai-btn,#root .evf-ai-prompt,
+#root .collapse-btn,#root .add-ex{font-size:14px!important;font-weight:650!important;line-height:1.25!important;}
+#root .big-btn{font-size:15px!important;font-weight:650!important;}
+#root .reset-btn{font-size:13px!important;}
+#root .log-fillall{font-size:12px!important;white-space:normal!important;max-width:100%;text-align:center;}
+#root .log-progress{flex-wrap:wrap;}
+#root .evf-ai-prompt{text-align:left;}
+
+/* Números em destaque */
+#root .ring-pct{font-size:16px!important;}
+#root .water-val{font-size:22px!important;}
+#root .stat-v{font-size:24px!important;}
+#root .metric-val{font-size:28px!important;}
+#root .bsum-v,#root .coach27-mini-v{font-size:20px!important;letter-spacing:-.02em!important;}
+#root .slp-hours{font-size:15px!important;}
+#root .evf-ai-title{font-size:20px!important;}
+#root .ring-pct,#root .water-val,#root .stat-v,#root .metric-val,#root .bsum-v,#root .coach27-mini-v,
+#root .qty-input input,#root .log-w,#root .rt-time{font-variant-numeric:tabular-nums;}
+
+/* Resumo corporal: 2×2 em vez de 4 colunas (não corta no telemóvel) */
+#root .bsum-grid{display:grid!important;grid-template-columns:1fr 1fr!important;gap:14px 10px!important;}
+#root .body-summary .bsum:not(:last-child)::after{display:none!important;}
+#root .bsum{min-width:0;text-align:left!important;}
+#root .bsum-l{text-transform:none!important;}
+
+/* Barra de separadores */
+#root .tab span{font-size:11px!important;font-weight:600!important;letter-spacing:0!important;}
+#root .slp-nums,#root .slp-nums span,#root .gitcal-legend,#root .gitcal-legend span,#root .ef-lib-sub,#root .evf-ai-result-head{font-size:12px!important;}
+#root .subdate,#root .cardio-day-label,#root .logger-sub,#root .hist-date{text-transform:none!important;}
+#root .water-top{gap:4px 12px;flex-wrap:wrap;}
+#root .logger-head{gap:12px;}
+#root .log-progress-bar{flex:1 1 90px;min-width:90px;}
+#root .log-fillall{flex:1 1 100%!important;}
+#root .evf-ai-card{padding:0!important;}
+#root .evf-ai-sub{max-width:none!important;}
+</style>
+</body></html>
