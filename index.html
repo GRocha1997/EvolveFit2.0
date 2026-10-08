@@ -2325,9 +2325,6 @@ function Dashboard({
    window.addEventListener("evfNavigate", handler);
    return () => window.removeEventListener("evfNavigate", handler);
  }, []);
- if (!cloudReady) return React.createElement("div", {className: "app-wrap"},
-   React.createElement("div", {className: "phone"},
-     React.createElement("div", {className: "scroll", style: {display: "flex", alignItems: "center", justifyContent: "center", color: "var(--muted)"}}, "A sincronizar com a nuvem…")));
  const tabs = [{
  id: "check",
  label: "Hoje",
