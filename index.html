@@ -184,7 +184,7 @@ window.evfSetCloudStatus=function(status){
   window.dispatchEvent(new CustomEvent("evolvefit-cloud-status",{detail:window.EvolveFitCloudStatus}));
 };
 (function(){
-  var css=".evf-sync{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 78px);transform:translateX(-50%);z-index:60;max-width:92vw;padding:7px 13px;border-radius:999px;font:600 12px/1.2 -apple-system,BlinkMacSystemFont,system-ui,sans-serif;color:#fff;background:#3E5569;box-shadow:0 6px 20px rgba(20,30,40,.22);opacity:0;pointer-events:none;transition:opacity .25s;white-space:nowrap}.evf-sync.on{opacity:1}.evf-sync.tap{pointer-events:auto;cursor:pointer}.evf-sync.ok{background:#19864D}.evf-sync.warn{background:#B7791F}.evf-sync.err{background:#C33F32}";
+  var css="";
   var st=document.createElement("style");st.textContent=css;document.head.appendChild(st);
   var el,timer;
   function ensure(){if(!el){el=document.createElement("div");el.className="evf-sync";el.addEventListener("click",function(){
@@ -196,7 +196,7 @@ window.evfSetCloudStatus=function(status){
     if(!document.body)return;
     var mode=window.__evfSyncMode;if(!mode)return;
     var s=(window.EvolveFitCloudStatus||{}).status;
-    if(mode==="local")return show("Só neste dispositivo · sem nuvem","local",0,true);
+    if(mode==="local")return show("","local",0,true);
     if(!navigator.onLine)return show("Sem ligação · guardado no telemóvel","warn",0,false);
     if(s==="error")return show("Não guardou na nuvem · toca para ver","err",0,true);
     if(s==="saving"){clearTimeout(timer);if(el)el.className="evf-sync";return;}
@@ -2360,10 +2360,6 @@ function Dashboard({
  id: "goals",
  label: "Coach",
  icon: "target"
- }, {
- id: "report",
- label: "Relatório",
- icon: "barChart"
  }];
  return /*#__PURE__*/React.createElement("div", {
  className: "app-wrap"
@@ -2374,7 +2370,7 @@ function Dashboard({
  ref: scrollRef
  }, tab === "check" && /*#__PURE__*/React.createElement(Checklist, {
  state: state,
- update: update,
+ update: update, onNavigate: onNavigate,
  onOpenWorkout: di => {
  setWDay(di);
  setTab("workout");
@@ -2413,420 +2409,48 @@ function Dashboard({
 }
 
 /* ============================ DAILY CHECKLIST =========================== */
-function Checklist({
- state,
- update,
- onOpenWorkout
-}) {
- const [viewDate, setViewDate] = useState(TODAY);
- const viewKey = iso(viewDate);
- const isToday = viewKey === todayKey;
- const day = state.days[viewKey] || {
- tasks: {},
- water: 0
- };
- const list = dayList(viewKey);
- const doneCount = list.filter(t => isDone(day.tasks[t.id], t)).length;
- const remainingCount = Math.max(0, list.length - doneCount);
- const pct = list.length ? Math.round(doneCount / list.length * 100) : 0;
- const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
+function Checklist({ state, update, onNavigate }) {
  const hour = TODAY.getHours();
  const greet = hour < 12 ? "Bom dia" : hour < 19 ? "Boa tarde" : "Boa noite";
- const goDay = n => setViewDate(d => addDays(d, n));
- const goToday = () => setViewDate(TODAY);
- const toggle = id => update(s => {
- s.days[viewKey] = s.days[viewKey] || {
- tasks: {},
- water: 0
- };
- const t = s.days[viewKey].tasks;
- if (t[id] && t[id].done) delete t[id];else t[id] = {
- done: true
- };
- });
- const setQty = (id, num) => update(s => {
- s.days[viewKey] = s.days[viewKey] || {
- tasks: {},
- water: 0
- };
- const t = s.days[viewKey].tasks;
- if (!num || num <= 0) delete t[id];else t[id] = {
- done: true,
- value: num
- };
- });
- return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("header", {
- className: "head"
- }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
- className: "greet"
- }, greet, ", ", state.profile.name, " "), /*#__PURE__*/React.createElement("div", {
- className: "date-nav"
- }, /*#__PURE__*/React.createElement("button", {
- className: "date-nav-btn",
- onClick: () => goDay(-1),
- "aria-label": "Dia anterior"
- }, /*#__PURE__*/React.createElement(I, {
- name: "arrowRight",
- size: 14,
- style: {
- transform: "rotate(180deg)"
- }
- })), /*#__PURE__*/React.createElement("span", {
- className: "subdate" + (isToday ? "" : " tappable"),
- onClick: isToday ? undefined : goToday,
- title: isToday ? undefined : "Voltar a hoje"
- }, longDate(viewDate), !isToday && /*#__PURE__*/React.createElement("span", {
- className: "today-pill"
- }, "Hoje")), /*#__PURE__*/React.createElement("button", {
- className: "date-nav-btn",
- onClick: () => goDay(1),
- "aria-label": "Dia seguinte"
- }, /*#__PURE__*/React.createElement(I, {
- name: "arrowRight",
- size: 14
- }))), checkStreak > 0 ? /*#__PURE__*/React.createElement("div", {
- className: "home-streak"
- }, /*#__PURE__*/React.createElement(I, {
- name: "flame",
- size: 13
- }), /*#__PURE__*/React.createElement("span", null, checkStreak, " dia", checkStreak === 1 ? "" : "s", " seguidos — não quebres a sequência")) : /*#__PURE__*/React.createElement("div", {
- className: "home-streak muted"
- }, "Começa hoje a tua sequência")), /*#__PURE__*/React.createElement(Ring, {
- pct: pct,
- size: 58,
- stroke: 6
- }, /*#__PURE__*/React.createElement("span", {
- className: "ring-pct"
- }, pct, /*#__PURE__*/React.createElement("i", null, "%")))), /*#__PURE__*/React.createElement("div", {
- className: "progress-line"
- }, /*#__PURE__*/React.createElement("span", null, remainingCount === 0 ? "✓ Todas as tarefas concluídas" : "✓ " + remainingCount + (remainingCount === 1 ? " tarefa por concluir" : " tarefas por concluir")), /*#__PURE__*/React.createElement("span", {
- className: "dot"
- }, "•"), /*#__PURE__*/React.createElement("span", null, doneCount, "/", list.length, " concluídas · ", pct, "%")), /*#__PURE__*/React.createElement(TodayWorkoutCard, {
- state: state,
- dayKey: viewKey,
- onOpen: onOpenWorkout
- }), /*#__PURE__*/React.createElement(WaterCard, {
- state: state,
- update: update,
- dayKey: viewKey
- }), /*#__PURE__*/React.createElement(MenuCard, {
- state: state,
- update: update
- }), SECTIONS.map(sec => /*#__PURE__*/React.createElement(Section, {
- key: sec.id,
- sec: sec,
- day: day,
- toggle: toggle,
- setQty: setQty,
- dayKey: viewKey
- })), /*#__PURE__*/React.createElement("div", {
- className: "pad"
- }));
-}
-// Média móvel dos últimos `windowDays` dias (por defeito 7) até `endDate`,
-// para suavizar flutuações diárias do peso (água, sal, ciclo, etc.).
-const rollingAvgAt = (arr, endDate, key, windowDays = 7) => {
- const start = iso(addDays(new Date(endDate + "T00:00:00"), -(windowDays - 1)));
- const win = arr.filter(x => x.date >= start && x.date <= endDate && x[key]);
- if (!win.length) return null;
- return +(win.reduce((a, b) => a + (+b[key] || 0), 0) / win.length).toFixed(1);
-};
-const paceProjection = (body, bfTarget) => {
- if (body.length < 2) return null;
- const first = body[0],
- last = body[body.length - 1];
- const span = daysBetween(new Date(first.date + "T00:00:00"), new Date(last.date + "T00:00:00"));
- if (span <= 0) return null;
- const rate = (first.bodyFat - last.bodyFat) / span;
- if (rate <= 0) return {
- reached: false,
- stalled: true
- };
- const toGo = +(last.bodyFat - bfTarget).toFixed(2);
- if (toGo <= 0) return {
- reached: true
- };
- const daysNeeded = Math.ceil(toGo / rate);
- return {
- reached: false,
- stalled: false,
- date: addDays(TODAY, daysNeeded),
- days: daysNeeded
- };
-};
-function WaterCard({
- state,
- update,
- dayKey
-}) {
- const key = dayKey || todayKey;
- const GOAL = 2500;
- const ml = state.days[key] && state.days[key].water || 0;
- const pct = Math.min(100, Math.round(ml / GOAL * 100));
- const [celebrate, setCelebrate] = useState(false);
- const [custom, setCustom] = useState("");
- const prev = useRef(ml);
- useEffect(() => {
- let t;
- if (prev.current < GOAL && ml >= GOAL) {
- setCelebrate(true);
- t = setTimeout(() => setCelebrate(false), 2200);
- }
- prev.current = ml;
- return () => t && clearTimeout(t);
- }, [ml]);
- const add = a => update(s => {
- s.days[key] = s.days[key] || {
- tasks: {},
- water: 0
- };
- s.days[key].water = Math.max(0, (s.days[key].water || 0) + a);
- });
- return /*#__PURE__*/React.createElement("div", {
- className: "card water"
- }, celebrate && /*#__PURE__*/React.createElement("div", {
- className: "celebrate"
- }, Array.from({
- length: 14
- }).map((_, i) => /*#__PURE__*/React.createElement("span", {
- key: i,
- className: "confetti",
- style: {
- left: i / 14 * 100 + "%",
- animationDelay: i % 5 * 0.08 + "s",
- background: ["#2A8FD6", "#2B5FD9", "#1E9E6A", "#6D5BD0", "#C98A1B"][i % 5]
- }
- })), /*#__PURE__*/React.createElement("div", {
- className: "celebrate-txt"
- }, /*#__PURE__*/React.createElement(I, {
- name: "droplet",
- size: 16
- }), " Objetivo atingido!")), /*#__PURE__*/React.createElement("div", {
- className: "water-top"
- }, /*#__PURE__*/React.createElement("div", {
- className: "water-title"
- }, /*#__PURE__*/React.createElement(I, {
- name: "droplet",
- size: 17
- }), " Água"), /*#__PURE__*/React.createElement("div", {
- className: "water-val"
- }, (ml / 1000).toFixed(2), /*#__PURE__*/React.createElement("i", null, "L"), " ", /*#__PURE__*/React.createElement("span", {
- className: "water-goal"
- }, "/ 2.5L"))), /*#__PURE__*/React.createElement("div", {
- className: "bar water-bar"
- }, /*#__PURE__*/React.createElement("div", {
- className: "bar-fill",
- style: {
- width: pct + "%",
- background: "linear-gradient(90deg,#2A8FD6,#2B6FCF)"
- }
- })), /*#__PURE__*/React.createElement("div", {
- className: "water-pct"
- }, pct, "%"), /*#__PURE__*/React.createElement("div", {
- className: "water-btns"
- }, [250, 500, 750, 1000].map(a => /*#__PURE__*/React.createElement("button", {
- key: a,
- className: "chip",
- onClick: () => add(a)
- }, "+", a >= 1000 ? "1L" : a + "ml"))), /*#__PURE__*/React.createElement("div", {
- className: "water-custom"
- }, /*#__PURE__*/React.createElement("input", {
- value: custom,
- onChange: e => setCustom(e.target.value.replace(/\D/g, "")),
- placeholder: "ml personalizado",
- inputMode: "numeric"
- }), /*#__PURE__*/React.createElement("button", {
- onClick: () => {
- if (custom) {
- add(+custom);
- setCustom("");
- }
- }
- }, /*#__PURE__*/React.createElement(I, {
- name: "plus",
- size: 16
- }))));
-}
-function Section({
- sec,
- day,
- toggle,
- setQty,
- dayKey
-}) {
- const [open, setOpen] = useState(() => {
- const ts = sec.chores ? choresForKey(dayKey || todayKey) : sec.tasks || [];
- return !(ts.length && ts.every(t => isDone(day.tasks[t.id], t)));
- });
- if (sec.chores) {
- const key = dayKey || todayKey;
- const chores = choresForKey(key);
- const room = CHORES[weekdayOf(key)] ? CHORES[weekdayOf(key)].room : null;
- const done = chores.filter(t => day.tasks[t.id] && day.tasks[t.id].done).length;
- return /*#__PURE__*/React.createElement("div", {
- className: "card section tint-teal"
- }, /*#__PURE__*/React.createElement("button", {
- className: "section-head",
- onClick: () => setOpen(o => !o)
- }, /*#__PURE__*/React.createElement("div", {
- className: "section-icon"
- }, /*#__PURE__*/React.createElement(I, {
- name: "home",
- size: 17
- })), /*#__PURE__*/React.createElement("div", {
- className: "section-title"
- }, "Durante o dia"), /*#__PURE__*/React.createElement("div", {
- className: "section-count"
- }, chores.length ? done + "/" + chores.length : ""), /*#__PURE__*/React.createElement(I, {
- name: "chevron",
- size: 17,
- className: "chev" + (open ? " open" : "")
- })), open && /*#__PURE__*/React.createElement("div", {
- className: "tasks"
- }, chores.length ? /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
- className: "chore-header"
- }, "", WD_LONG[weekdayOf(key)], " · ", room), chores.map(t => /*#__PURE__*/React.createElement("button", {
- key: t.id,
- className: "task" + (day.tasks[t.id] && day.tasks[t.id].done ? " done" : ""),
- onClick: () => toggle(t.id)
- }, /*#__PURE__*/React.createElement("span", {
- className: "checkbox" + (day.tasks[t.id] && day.tasks[t.id].done ? " on" : "")
- }, day.tasks[t.id] && day.tasks[t.id].done && /*#__PURE__*/React.createElement(I, {
- name: "check",
- size: 13
- })), /*#__PURE__*/React.createElement("span", {
- className: "task-label"
- }, t.label)))) : /*#__PURE__*/React.createElement("div", {
- className: "chore-header"
- }, "Fim de semana — sem tarefas de casa")));
- }
- const groups = sec.groups || [{
- label: null,
- tasks: sec.tasks
- }];
- const all = groups.flatMap(g => g.tasks);
- const done = all.filter(t => isDone(day.tasks[t.id], t)).length;
- return /*#__PURE__*/React.createElement("div", {
- className: "card section tint-" + sec.tint
- }, /*#__PURE__*/React.createElement("button", {
- className: "section-head",
- onClick: () => setOpen(o => !o)
- }, /*#__PURE__*/React.createElement("div", {
- className: "section-icon"
- }, /*#__PURE__*/React.createElement(I, {
- name: sec.icon,
- size: 17
- })), /*#__PURE__*/React.createElement("div", {
- className: "section-title"
- }, sec.label), /*#__PURE__*/React.createElement("div", {
- className: "section-count"
- }, done, "/", all.length), /*#__PURE__*/React.createElement(I, {
- name: "chevron",
- size: 17,
- className: "chev" + (open ? " open" : "")
- })), open && /*#__PURE__*/React.createElement("div", {
- className: "tasks"
- }, groups.map((g, gi) => /*#__PURE__*/React.createElement("div", {
- key: gi
- }, g.label && /*#__PURE__*/React.createElement("div", {
- className: "subgroup"
- }, g.label), g.tasks.map(t => t.qty ? /*#__PURE__*/React.createElement("div", {
- className: "qty-task",
- key: t.id + "_" + dayKey
- }, /*#__PURE__*/React.createElement("span", {
- className: "task-label"
- }, t.label, t.goal && /*#__PURE__*/React.createElement("span", {
- className: "task-tag"
- }, /*#__PURE__*/React.createElement(I, {
- name: "target",
- size: 10
- }))), /*#__PURE__*/React.createElement(QtyInput, {
- value: day.tasks[t.id] ? day.tasks[t.id].value : 0,
- unit: t.unit,
- decimal: t.unit === "h",
- onCommit: n => setQty(t.id, n)
- })) : /*#__PURE__*/React.createElement("button", {
- key: t.id,
- className: "task" + (day.tasks[t.id] && day.tasks[t.id].done ? " done" : ""),
- onClick: () => toggle(t.id)
- }, /*#__PURE__*/React.createElement("span", {
- className: "checkbox" + (day.tasks[t.id] && day.tasks[t.id].done ? " on" : "")
- }, day.tasks[t.id] && day.tasks[t.id].done && /*#__PURE__*/React.createElement(I, {
- name: "check",
- size: 13
- })), /*#__PURE__*/React.createElement("span", {
- className: "task-label"
- }, t.label), t.goal && /*#__PURE__*/React.createElement("span", {
- className: "task-tag"
- }, /*#__PURE__*/React.createElement(I, {
- name: "target",
- size: 10
- }))))))));
-}
-/* Caixa de cardio semanal: check + minutos por dia, ligada aos mesmos dados
- da tarefa "Cardio" do checklist diário. */
-function CardioWeekCard({
- state,
- update
-}) {
- const weekDays = lastNDays(state.days, 7);
- const total = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
- const toggle = key => update(s => {
- s.days[key] = s.days[key] || {
- tasks: {},
- water: 0
- };
- const t = s.days[key].tasks;
- if (t.cardio && t.cardio.value > 0) delete t.cardio;else t.cardio = {
- done: true,
- value: 30
- };
- });
- const setMin = (key, num) => update(s => {
- s.days[key] = s.days[key] || {
- tasks: {},
- water: 0
- };
- const t = s.days[key].tasks;
- if (!num || num <= 0) delete t.cardio;else t.cardio = {
- done: true,
- value: num
- };
- });
- return /*#__PURE__*/React.createElement("div", {
- className: "card cardio-week"
- }, /*#__PURE__*/React.createElement("div", {
- className: "cardio-week-head"
- }, /*#__PURE__*/React.createElement("div", {
- className: "cardio-week-title"
- }, /*#__PURE__*/React.createElement(I, {
- name: "activity",
- size: 15
- }), " Cardio da semana"), /*#__PURE__*/React.createElement("div", {
- className: "cardio-week-total"
- }, total, " min")), weekDays.map(w => {
- const rec = w.day && w.day.tasks.cardio;
- const val = rec ? rec.value : 0;
- const checked = val > 0;
- const isToday = w.key === todayKey;
- return /*#__PURE__*/React.createElement("div", {
- className: "cardio-day-row",
- key: w.key
- }, /*#__PURE__*/React.createElement("button", {
- className: "checkbox" + (checked ? " on" : ""),
- onClick: () => toggle(w.key),
- "aria-label": "Marcar cardio de " + WD[weekdayOf(w.key)]
- }, checked && /*#__PURE__*/React.createElement(I, {
- name: "check",
- size: 13
- })), /*#__PURE__*/React.createElement("span", {
- className: "cardio-day-label" + (isToday ? " today" : "")
- }, WD[weekdayOf(w.key)], /*#__PURE__*/React.createElement("i", null, new Date(w.key + "T12:00:00").getDate(), isToday ? " · hoje" : "")), /*#__PURE__*/React.createElement(QtyInput, {
- value: val,
- unit: "min",
- onCommit: n => setMin(w.key, n)
- }));
- }));
+ const name = state && state.profile && state.profile.name ? state.profile.name : "";
+ const firstName = name ? name.split(/\\s+/)[0] : "";
+ const go = id => onNavigate && onNavigate(id);
+ return /*#__PURE__*/React.createElement("div", {className:"evf-home-premium"},
+   /*#__PURE__*/React.createElement("div", {className:"evf-home-hero"},
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-kicker"}, "EVOLVEFIT"),
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-brand"}, "EvolveFit"),
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-greeting"}, greet + (firstName ? ", " + firstName : "")),
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-date"}, longDate(TODAY)),
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-tagline"}, "Train. Track. Evolve."),
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-copy"}, "A tua evolução, organizada num só lugar. Treino, corpo e decisões — simples, premium e focado no progresso.")
+   ),
+   /*#__PURE__*/React.createElement("div", {className:"evf-home-section-title"}, "O teu espaço"),
+   /*#__PURE__*/React.createElement("div", {className:"evf-home-grid"},
+     /*#__PURE__*/React.createElement("button", {className:"evf-home-tile evf-home-tile-dark", onClick:()=>go("workout")},
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-icon"}, /*#__PURE__*/React.createElement(I,{name:"dumbbell",size:24})),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-title"},"Treinos"),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-sub"},"Plano, execução e progressão"),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-arrow"},"→")
+     ),
+     /*#__PURE__*/React.createElement("button", {className:"evf-home-tile", onClick:()=>go("body")},
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-icon"}, /*#__PURE__*/React.createElement(I,{name:"activity",size:24})),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-title"},"Corpo"),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-sub"},"Peso, medidas e evolução"),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-arrow"},"→")
+     ),
+     /*#__PURE__*/React.createElement("button", {className:"evf-home-tile", onClick:()=>go("goals")},
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-icon"}, /*#__PURE__*/React.createElement(I,{name:"target",size:24})),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-title"},"Coach"),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-tile-sub"},"Análise e decisões"),
+       /*#__PURE__*/React.createElement("div", {className:"evf-home-arrow"},"→")
+     )
+   ),
+   /*#__PURE__*/React.createElement("div", {className:"evf-home-quote"},
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-quote-mark"},"“"),
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-quote-text"},"Consistência cria resultados. Dados criam direção."),
+     /*#__PURE__*/React.createElement("div", {className:"evf-home-quote-line"})
+   )
+ );
 }
 /* =============================== TREINOS ================================ */
 function Workouts({
@@ -5805,4 +5429,6 @@ button,input,select,textarea{font-family:inherit;}
 #root .evf-ai-card{padding:0!important;}
 #root .evf-ai-sub{max-width:none!important;}
 </style>
-</body></html>
+<style id="evolvefit-home-premium">
+.evf-home-premium{padding:4px 0 28px}.evf-home-hero{position:relative;overflow:hidden;border-radius:28px;padding:34px 26px 32px;background:linear-gradient(145deg,#172b3d 0%,#29465c 58%,#3f6f8b 100%);color:#fff;min-height:390px;display:flex;flex-direction:column;justify-content:flex-end;box-shadow:0 18px 45px rgba(24,48,67,.18)}.evf-home-hero:before,.evf-home-hero:after{content:"";position:absolute;border-radius:999px;border:1px solid rgba(255,255,255,.12)}.evf-home-hero:before{width:240px;height:240px;right:-90px;top:-75px}.evf-home-hero:after{width:150px;height:150px;right:-25px;top:-30px}.evf-home-kicker{position:absolute;top:26px;left:26px;font-size:11px;font-weight:800;letter-spacing:3px;opacity:.65}.evf-home-brand{position:absolute;top:52px;left:26px;font-size:17px;font-weight:800}.evf-home-greeting{font-size:30px;font-weight:800;letter-spacing:-.8px;position:relative;z-index:1}.evf-home-date{font-size:13px;opacity:.68;margin-top:7px;position:relative;z-index:1}.evf-home-tagline{font-size:17px;font-weight:750;margin-top:34px;position:relative;z-index:1}.evf-home-copy{font-size:14px;line-height:1.55;max-width:430px;margin-top:9px;color:rgba(255,255,255,.76);position:relative;z-index:1}.evf-home-section-title{font-size:14px;font-weight:800;margin:24px 4px 12px}.evf-home-grid{display:grid;grid-template-columns:1fr;gap:11px}.evf-home-tile{position:relative;text-align:left;border:1px solid var(--border);background:var(--surface);border-radius:20px;padding:18px 50px 18px 18px;min-height:105px;box-shadow:0 7px 22px rgba(20,40,55,.055);color:inherit;cursor:pointer}.evf-home-tile-dark{background:#f0f5f8;border-color:#dce6ec}.evf-home-tile-icon{width:43px;height:43px;border-radius:13px;background:#e9eff3;display:flex;align-items:center;justify-content:center;color:#35566d;margin-bottom:12px}.evf-home-tile-title{font-size:17px;font-weight:800}.evf-home-tile-sub{font-size:12px;color:var(--muted);margin-top:4px}.evf-home-arrow{position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:23px;color:#7d8b96}.evf-home-quote{margin:25px 4px 0;padding:20px 2px 4px}.evf-home-quote-mark{font-family:Georgia,serif;font-size:42px;line-height:.7;color:#527d96}.evf-home-quote-text{font-size:14px;font-weight:700;line-height:1.5;color:#50616d;max-width:390px}.evf-home-quote-line{height:2px;width:34px;background:#527d96;margin-top:12px;border-radius:2px}
+</style></body></html>
