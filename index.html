@@ -3398,11 +3398,7 @@ function WorkoutLogger({
  onChange: e => setField(i, "weight", normDecInput(e.target.value))
  }), /*#__PURE__*/React.createElement("span", {
  className: "log-panel-kg"
- }, "kg"), !!prev && /*#__PURE__*/React.createElement("button", {
- type: "button",
- className: "log-quickfill",
- onClick: () => fillOneFromLast(i, x, prev)
- }, "Igual à última vez"), /*#__PURE__*/React.createElement("button", {
+ }, "kg"), /*#__PURE__*/React.createElement("button", {
  type: "button",
  className: "log-note-toggle" + (r.notes ? " has" : ""),
  "aria-label": "Nota do exercício",
