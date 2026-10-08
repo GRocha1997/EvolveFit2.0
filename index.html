@@ -2759,6 +2759,7 @@ function Workouts({
  const [view, setView] = useState("treino");
  const [planDay, setPlanDay] = useState(initialDay != null ? initialDay : todayIdx);
  const [showRir, setShowRir] = useState(false);
+ const [analysisTab, setAnalysisTab] = useState("prog");
  const weekDays = weekFromMonday(state.days);
  const treinos = weekDays.filter(w => trainedOn(state, w.key)).length;
  const volWeek = state.sessions.filter(s => weekDays.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
@@ -2993,9 +2994,10 @@ function TrainingAnalysis({
  state,
  daySessions,
  progression,
- upCount
+ upCount,
+ tab = "prog",
+ setTab = () => {}
 }) {
- const [tab, setTab] = useState("prog");
  const rows = [];
  state.sessions.filter(se => daysBetween(new Date(se.date), TODAY) < 14).forEach(se => se.ex.forEach(e => {
  if (e.name && e.rir != null) rows.push(e);
