@@ -2893,7 +2893,7 @@ function Workouts({
    if (s.trainingCompleted[selectedDayKey]) delete s.trainingCompleted[selectedDayKey];
    else s.trainingCompleted[selectedDayKey] = true;
  })
- }, trainedSelected ? "Desmarcar treino" : "Treinei"), /*#__PURE__*/React.createElement("button", { showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
+ }, trainedSelected ? "Desmarcar treino" : "Treinei"), /*#__PURE__*/React.createElement("button", { className: "reset-btn", onClick: () => setShowRir(v => !v) }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
  className: "rir-help"
  }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
  key: sel,
