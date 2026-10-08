@@ -666,6 +666,7 @@ const save = (s, uid) => {
 function normalize(s) {
  if (!s || typeof s !== "object") return null;
  s.days = s.days && typeof s.days === "object" ? s.days : {};
+ Object.keys(s.days).forEach(k => { const t = s.days[k] && s.days[k].tasks; if (t) { delete t.ler; delete t.back2; delete t.nytalks; } });
  s.body = Array.isArray(s.body) ? s.body : [];
  s.body = s.body.filter(x => x && typeof x === "object" && /^\d{4}-\d{2}-\d{2}$/.test(String(x.date || ""))).map(x => ({
    date: String(x.date),
@@ -682,14 +683,20 @@ function normalize(s) {
  s.sessions = Array.isArray(s.sessions) ? s.sessions : [];
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
  if (s.profile.name == null) s.profile.name = "Gonçalo";
- if (s.profile.bfStart == null) s.profile.bfStart = 27.5;
+ const oldBaseline = s.profile.baseline || s.profile.coachBaseline;
+ s.profile.baseline = oldBaseline && typeof oldBaseline === "object" ? oldBaseline : {bodyFat:s.profile.bfStart == null ? 27.5 : s.profile.bfStart};
+ if (s.profile.baseline.bodyFat == null && s.profile.bfStart != null) s.profile.baseline.bodyFat = s.profile.bfStart;
+ delete s.profile.bfStart; delete s.profile.coachBaseline;
  if (s.profile.bfTarget == null) s.profile.bfTarget = 15;
- if (s.profile.targetDate == null) s.profile.targetDate = "2026-11-19";
+ if (s.profile.targetDate == null) s.profile.targetDate = s.profile.summerTargetDate || "2026-11-19";
  if (s.profile.height == null) s.profile.height = 180;
- if (s.profile.summerTargetDate == null) s.profile.summerTargetDate = "2027-06-01";
+ delete s.profile.summerTargetDate;
  if (s.profile.kcalTarget == null) s.profile.kcalTarget = 2350;
  if (s.profile.proteinTarget == null) s.profile.proteinTarget = 170;
  if (s.profile.fatTarget == null) s.profile.fatTarget = 70;
+ if (s.profile.workoutsTarget == null) s.profile.workoutsTarget = 5;
+ if (s.profile.sleepTarget == null) s.profile.sleepTarget = 8;
+ if (s.profile.burnedKcalTarget == null) s.profile.burnedKcalTarget = 4000;
  if (s.profile.stepsTarget == null) s.profile.stepsTarget = 9000;
  if (s.profile.waterTarget == null) s.profile.waterTarget = 3;
  if (s.profile.cardioTarget == null) s.profile.cardioTarget = 90;
@@ -909,7 +916,18 @@ async function evolveFitCloudWriteNow(){
   if(!pend || !fbDb) return false;
   window.__evfPending = null;
   try{
-    await fbDb.collection("users").doc(pend.uid).set(pend.payload);
+    const activeUid=fbAuth && fbAuth.currentUser && fbAuth.currentUser.uid;
+    if(!activeUid || activeUid!==pend.uid) return false;
+    if(!window.__evfRemoteSeen) { window.__evfPending = pend; return false; }
+    const ref=fbDb.collection("users").doc(pend.uid);
+    let stale=false;
+    await fbDb.runTransaction(async tx=>{
+      const snap=await tx.get(ref);
+      const remote=snap.exists?fromCloud(snap.data()):null;
+      if(remote && (Number(remote._updatedAt)||0)>(Number(pend.payload._updatedAt)||0)){stale=true;return;}
+      tx.set(ref,pend.payload);
+    });
+    if(stale){cloudQueueClear();window.evfSetCloudStatus&&window.evfSetCloudStatus("remote");return false;}
     if(!window.__evfPending){
       cloudQueueClear();
       window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
@@ -928,12 +946,13 @@ window.addEventListener("pagehide",()=>{ evolveFitCloudWriteNow(); });
 async function evolveFitFlushCloudQueue(){
   const q=cloudQueueRead();
   if(!q || !navigator.onLine || !fbDb || !q.uid || !q.payload) return;
+  const activeUid=fbAuth && fbAuth.currentUser && fbAuth.currentUser.uid;
+  if(!activeUid || activeUid!==q.uid) return;
   if(!window.__evfRemoteSeen) return;
   if((Number(q.payload._updatedAt) || 0) < (window.__evfRemoteUpdatedAt || 0)){ cloudQueueClear(); return; }
   try{
-    await fbDb.collection("users").doc(q.uid).set(q.payload);
-    cloudQueueClear();
-    window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
+    window.__evfPending={uid:q.uid,payload:q.payload};
+    await evolveFitCloudWriteNow();
   }catch(e){
     window.__evfLastCloudError = ((e && (e.code || e.name)) || "erro") + ": " + ((e && e.message) || "");
     window.evfSetCloudStatus && window.evfSetCloudStatus("error");
@@ -1309,7 +1328,7 @@ const SECTIONS = [{
  unit: "min"
  }, {
  id: "passos",
- label: "Passos (8–10k)",
+ label: "Passos",
  qty: true,
  unit: "",
  goal: "passos"
@@ -1372,6 +1391,11 @@ const SECTIONS = [{
 }];
 const FIXED_TASKS = SECTIONS.flatMap(s => s.chores ? [] : s.groups ? s.groups.flatMap(g => g.tasks) : s.tasks);
 const dayList = key => [...FIXED_TASKS, ...choresForKey(key)];
+function taskLabel(t,p) {
+ p=p||{};
+ const dynamic={passos:"Passos (meta "+Number(p.stepsTarget||9000).toLocaleString("pt-PT")+")",calorias_in:"Calorias ingeridas (meta "+(p.kcalTarget||2350)+" kcal)",proteina:"Proteína (meta "+(p.proteinTarget||170)+" g)",gordura_in:"Gordura (meta "+(p.fatTarget||70)+" g)",sono:"Sono (meta "+(p.sleepTarget||8)+" h)"};
+ return dynamic[t.id]||t.label;
+}
 const isDone = (rec, t) => t.qty ? rec && rec.value > 0 : !!(rec && rec.done);
 
 /* ------------------------------- goals ---------------------------------- */
@@ -1417,6 +1441,10 @@ const GOALS = [{
  type: "gramsavg",
  src: "proteina"
 }, {
+ id:"gorduraavg",cat:"Corpo",label:"Gordura (média)",target:70,unit:"g",type:"gramsavg",src:"gordura_in"
+}, {
+ id:"kcalavg",cat:"Corpo",label:"Calorias ingeridas (média)",target:2350,unit:"kcal",type:"caloriesavg",src:"calorias_in"
+}, {
  id: "peavg",
  cat: "Corpo",
  label: "Tempo de pé (média)",
@@ -1433,11 +1461,17 @@ const GOALS = [{
  type: "hoursavg",
  src: "sono"
 }];
+function goalsFor(state) {
+ const p=(state&&state.profile)||{};
+ const targets={treinos:p.workoutsTarget||5,passos:(p.stepsTarget||9000)*7,calgastas:p.burnedKcalTarget||4000,agua:p.waterTarget||3,cardiomin:p.cardioTarget||90,proteinaavg:p.proteinTarget||170,gorduraavg:p.fatTarget||70,kcalavg:p.kcalTarget||2350,peavg:p.standTarget||8,sonoavg:p.sleepTarget||8};
+ return GOALS.map(g=>targets[g.id]==null?g:Object.assign({},g,{target:targets[g.id]}));
+}
 function goalLabel(g, v) {
  if (g.type === "wateravg") return v + "L / " + g.target + "L";
  if (g.type === "steps") return (v / 1000).toFixed(1) + "k / " + g.target / 1000 + "k";
  if (g.type === "hours") return v + "h / " + g.target + "h";
  if (g.type === "calories") return v + " / " + g.target + " kcal";
+ if (g.type === "caloriesavg") return v + " / " + g.target + " kcal";
  if (g.type === "pages") return v + " / " + g.target + " pág";
  if (g.type === "minutesweek") return v + " / " + g.target + " min";
  if (g.type === "gramsavg") return v + "g / " + g.target + "g";
@@ -1653,147 +1687,9 @@ const lastWeekdayDate = W => {
  return TODAY;
 };
 
-/* ---------------------------- seed sample data -------------------------- */
+/* ---------------------------- initial empty state ---------------------- */
 function seed() {
- const s = seedDemo();
- s.days = {};
- s.body = [];
- s.sessions = [];
- return s;
-}
-function seedDemo() {
- const days = {},
- body = [],
- sessions = [];
- for (let i = 89; i >= 0; i--) {
- const d = addDays(TODAY, -i),
- k = iso(d);
- const rate = i > 60 ? 0.55 : i > 30 ? 0.72 : 0.85;
- const tasks = {};
- dayList(k).forEach(t => {
- if (t.qty) {
- if (Math.random() < rate) {
- let v = 1;
- if (t.id === "passos") v = Math.round((6000 + Math.random() * 7000) / 100) * 100;else if (t.id === "cardio") v = Math.round(10 + Math.random() * 30);else if (t.id === "forca") v = Math.round(35 + Math.random() * 30);else if (t.id === "lily") v = Math.round(15 + Math.random() * 20);else if (t.id === "calorias") v = Math.round(250 + Math.random() * 250);else if (t.id === "ler") v = Math.round(8 + Math.random() * 32);else if (t.id === "back2") v = Math.round(Math.random() * 2 * 10) / 10;
- if (v > 0) tasks[t.id] = {
- done: true,
- value: v
- };
- }
- } else if (Math.random() < rate * (0.7 + Math.random() * 0.5)) tasks[t.id] = {
- done: true
- };
- });
- days[k] = {
- tasks,
- water: Math.round((1600 + Math.random() * 1400) / 250) * 250
- };
- }
- days[todayKey] = {
- tasks: {
- higiene: {
- done: true
- },
- skincare_am: {
- done: true
- },
- vestir: {
- done: true
- },
- outlook: {
- done: true
- },
- intencao: {
- done: true
- },
- forca: {
- done: true,
- value: 45
- },
- cardio: {
- done: true,
- value: 20
- },
- passos: {
- done: true,
- value: 6200
- },
- calorias: {
- done: true,
- value: 340
- },
- ler: {
- done: true,
- value: 22
- },
- nytalks: {
- done: true
- },
- back2: {
- done: true,
- value: 1.5
- }
- },
- water: 1400
- };
- for (let w = 8; w >= 0; w--) {
- const s = 8 - w;
- body.push({
- date: iso(addDays(TODAY, -w * 7)),
- weight: +(74.5 - s * 0.35 + Math.random() * 0.2).toFixed(1),
- bmi: +(26.4 - s * 0.12).toFixed(1),
- bodyFat: +(36.8 - s * 0.42).toFixed(1),
- muscle: +(44.2 + s * 0.15).toFixed(1),
- skeletal: +(24.8 + s * 0.1).toFixed(1),
- visceral: +(8.5 - s * 0.08).toFixed(1),
- cintura: +(84 - s * 0.7).toFixed(1),
- perna: +(55 + s * 0.25).toFixed(1),
- rabo: +(96 + s * 0.4).toFixed(1)
- });
- }
- PLAN.forEach((pd, di) => {
- const base = lastWeekdayDate(di + 1);
- for (let wk = 5; wk >= 1; wk--) {
- const date = iso(addDays(base, -(wk - 1) * 7));
- const ex = pd.ex.map(x => ({
- name: x.name,
- sets: x.sets,
- reps: x.reps,
- weight: x.weight === 0 ? 0 : Math.max(0, Math.round(x.weight - (wk - 1) * 2)),
- rir: Math.max(0, Math.min(4, DEFAULT_RIR + Math.floor(Math.random() * 3) - 1)),
- rirAlvo: DEFAULT_RIR
- }));
- sessions.push({
- id: "s" + di + "_" + wk,
- date,
- dayIdx: di,
- name: pd.name,
- ex
- });
- }
- });
- return {
- theme: "light",
- profile: {
- name: "Gonçalo",
- bfStart: 27.5,
- bfTarget: 15,
- targetDate: "2026-11-19",
- summerTargetDate: "2027-06-01",
- kcalTarget: 2350,
- proteinTarget: 170,
- fatTarget: 70,
- stepsTarget: 9000,
- waterTarget: 3,
- cardioTarget: 90,
- height: 180
- },
- days,
- body,
- sessions,
- plano: clone(PLAN),
- planoVersion: PLAN_VERSION
- };
+ return normalize({theme:"light",profile:{name:"Gonçalo",bfStart:27.5,bfTarget:15,targetDate:"2026-11-19",kcalTarget:2350,proteinTarget:170,fatTarget:70,stepsTarget:9000,waterTarget:3,cardioTarget:90,workoutsTarget:5,sleepTarget:8,burnedKcalTarget:4000,height:180},days:{},body:[],sessions:[],plano:clone(PLAN),planoVersion:PLAN_VERSION});
 }
 
 /* ------------------------------ helpers --------------------------------- */
@@ -1829,7 +1725,7 @@ function weekFromMonday(days) {
  return out;
 }
 function trainedOn(state, key) {
- return state.sessions.some(s => s.date === key) || (state.days[key] && state.days[key].tasks.forca ? state.days[key].tasks.forca.value > 0 : false);
+ return (state.sessions || []).some(s => s && s.date === key) || !!(state.days[key] && state.days[key].tasks && state.days[key].tasks.forca && (state.days[key].tasks.forca.done === true || Number(state.days[key].tasks.forca.value) > 0));
 }
 function computeGoal(g, state) {
  const days = state.days,
@@ -1857,34 +1753,21 @@ function computeGoal(g, state) {
  pct: cp(v / g.target * 100)
  };
  }
- if (g.type === "hours") {
- const v = +sumQty("back2").toFixed(1);
+  if (g.type === "calories") {
+ const v = Math.round(sumQty("calorias"));
  return {
  value: v,
  pct: cp(v / g.target * 100)
  };
  }
- if (g.type === "calories") {
- const v = Math.round(sumQty("calorias") + sumQty("passos") * 0.04);
- return {
- value: v,
- pct: cp(v / g.target * 100)
- };
- }
- if (g.type === "pages") {
- const v = sumQty("ler");
- return {
- value: v,
- pct: cp(v / g.target * 100)
- };
- }
- if (g.type === "minutesweek") {
+  if (g.type === "minutesweek") {
  const v = sumQty(g.src);
  return {
  value: v,
  pct: cp(v / g.target * 100)
  };
  }
+ if (g.type === "caloriesavg") { const avg=sumQty(g.src)/7; return {value:Math.round(avg),pct:cp(avg/g.target*100)}; }
  if (g.type === "gramsavg") {
  const avg = sumQty(g.src) / 7;
  return {
@@ -2105,6 +1988,12 @@ function Dashboard({
  user
 }) {
  const uid = user ? user.uid : null;
+ if (window.__evfActiveUid !== uid) {
+   window.__evfActiveUid = uid;
+   window.__evfRemoteSeen = false;
+   window.__evfRemoteUpdatedAt = 0;
+   window.__evfPending = null;
+ }
  useEffect(() => { if(uid) evolveFitFlushCloudQueue(); }, [uid]);
  const [state, setState] = useState(() => {
  const saved = load(uid);
@@ -2115,11 +2004,11 @@ function Dashboard({
  const [, setDayTick] = useState(0); // força re-render quando o dia civil muda
  const first = useRef(true);
  const [listenKey, setListenKey] = useState(0);
- const [cloudReady, setCloudReady] = useState(!(uid && fbDb)); // nuvem = fonte principal
+ const [cloudReady, setCloudReady] = useState(!(uid && fbDb) || !navigator.onLine); // online: espera a leitura remota; offline: cache local
  useEffect(() => {
    if (cloudReady) return;
-   const t = setTimeout(() => setCloudReady(true), 5000); // offline: usa a cache local
-   return () => clearTimeout(t);
+   const timer=setTimeout(() => setCloudReady(true),5000); // fallback local; cloud writes stay blocked until remoteSeen
+   return () => clearTimeout(timer);
  }, [cloudReady]);
  const syncedJson = useRef(null); // último JSON já sincronizado com a nuvem
  const writeTimer = useRef(null);
@@ -2134,7 +2023,7 @@ function Dashboard({
    try {
      const safe = normalize(nextState);
      if (!safe || !uid) return;
-     safe._updatedAt = Date.now();
+     safe._updatedAt = Math.max(Date.now(), (Number(stateRef.current && stateRef.current._updatedAt) || 0) + 1);
      stateRef.current = safe;
      save(safe, uid);
      clearTimeout(autoPersistTimer.current);
@@ -2212,9 +2101,11 @@ function Dashboard({
  window.__evfRemoteUpdatedAt = 0;
  const j = JSON.stringify(stateRef.current);
  syncedJson.current = j;
- ref.set(toCloud(stateRef.current)).catch(e => console.error(e));
+ save(stateRef.current, uid);
+ evolveFitCloudSave(uid,stateRef.current);
  return;
  }
+ if (snap.metadata && snap.metadata.fromCache) { if (!navigator.onLine) setCloudReady(true); return; }
  const remote = fromCloud(snap.data());
  const j = JSON.stringify(remote);
  setCloudReady(true);
@@ -2228,9 +2119,11 @@ function Dashboard({
    evolveFitCloudSave(uid, stateRef.current);
    return;
  }
- if (remoteUpdatedAt === localUpdatedAt &&
-     j !== JSON.stringify(stateRef.current)) {
-   return;
+ if (remoteUpdatedAt === localUpdatedAt && j !== JSON.stringify(stateRef.current)) {
+   if (syncedJson.current !== null && syncedJson.current === JSON.stringify(stateRef.current)) {
+     evolveFitCloudSave(uid,stateRef.current);
+     return;
+   }
  }
  syncedJson.current = j;
  window.evfSetCloudStatus && window.evfSetCloudStatus("remote");
@@ -2318,7 +2211,7 @@ function Dashboard({
    if (!n.menus || typeof n.menus !== "object") n.menus = {};
    fn(n);
    const safe = normalize(n);
-   safe._updatedAt = Date.now();
+   safe._updatedAt = Math.max(Date.now(), (Number(stateRef.current && stateRef.current._updatedAt) || 0) + 1);
    try { save(safe, uid); } catch (e) { console.error("Erro ao guardar localmente:", e); }
    stateRef.current = safe;
    if (uid && fbDb) {
@@ -2351,13 +2244,17 @@ function Dashboard({
  label: "Treinos",
  icon: "dumbbell"
  }, {
+ id: "goals",
+ label: "Metas",
+ icon: "target"
+ }, {
+ id: "coach",
+ label: "Coach",
+ icon: "sparkles"
+ }, {
  id: "body",
  label: "Corpo",
  icon: "activity"
- }, {
- id: "goals",
- label: "Coach",
- icon: "target"
  }, {
  id: "report",
  label: "Relatório",
@@ -2382,11 +2279,11 @@ function Dashboard({
  update: update,
  initialDay: wDay,
  onNavigate: onNavigate
- }), tab === "body" && /*#__PURE__*/React.createElement(Body, {
+ }), tab === "goals" && /*#__PURE__*/React.createElement(Goals, { state:state, update:update }), tab === "body" && /*#__PURE__*/React.createElement(Body, {
  state: state,
  update: update,
  onNavigate: onNavigate
- }), tab === "goals" && /*#__PURE__*/React.createElement(Coach2027, {
+ }), tab === "coach" && /*#__PURE__*/React.createElement(Coach2027, {
  state: state,
  update: update,
  onNavigate: onNavigate
@@ -2558,7 +2455,7 @@ function WaterCard({
  dayKey
 }) {
  const key = dayKey || todayKey;
- const GOAL = 2500;
+ const GOAL = (Number(state.profile && state.profile.waterTarget) || 3) * 1000;
  const ml = state.days[key] && state.days[key].water || 0;
  const pct = Math.min(100, Math.round(ml / GOAL * 100));
  const [celebrate, setCelebrate] = useState(false);
@@ -2572,7 +2469,7 @@ function WaterCard({
  }
  prev.current = ml;
  return () => t && clearTimeout(t);
- }, [ml]);
+ }, [ml, GOAL]);
  const add = a => update(s => {
  s.days[key] = s.days[key] || {
  tasks: {},
@@ -2610,7 +2507,7 @@ function WaterCard({
  className: "water-val"
  }, (ml / 1000).toFixed(2), /*#__PURE__*/React.createElement("i", null, "L"), " ", /*#__PURE__*/React.createElement("span", {
  className: "water-goal"
- }, "/ 2.5L"))), /*#__PURE__*/React.createElement("div", {
+ }, "/ ", (GOAL / 1000).toLocaleString("pt-PT"), "L"))), /*#__PURE__*/React.createElement("div", {
  className: "bar water-bar"
  }, /*#__PURE__*/React.createElement("div", {
  className: "bar-fill",
@@ -2694,7 +2591,7 @@ function Section({
  size: 13
  })), /*#__PURE__*/React.createElement("span", {
  className: "task-label"
- }, t.label)))) : /*#__PURE__*/React.createElement("div", {
+ }, taskLabel(t,state.profile))))) : /*#__PURE__*/React.createElement("div", {
  className: "chore-header"
  }, "Fim de semana — sem tarefas de casa")));
  }
@@ -2733,7 +2630,7 @@ function Section({
  key: t.id + "_" + dayKey
  }, /*#__PURE__*/React.createElement("span", {
  className: "task-label"
- }, t.label, t.goal && /*#__PURE__*/React.createElement("span", {
+ }, taskLabel(t,state.profile), t.goal && /*#__PURE__*/React.createElement("span", {
  className: "task-tag"
  }, /*#__PURE__*/React.createElement(I, {
  name: "target",
@@ -2754,7 +2651,7 @@ function Section({
  size: 13
  })), /*#__PURE__*/React.createElement("span", {
  className: "task-label"
- }, t.label), t.goal && /*#__PURE__*/React.createElement("span", {
+ }, taskLabel(t,state.profile)), t.goal && /*#__PURE__*/React.createElement("span", {
  className: "task-tag"
  }, /*#__PURE__*/React.createElement(I, {
  name: "target",
@@ -3264,7 +3161,11 @@ function TrainingHistory({
  const shown = expanded ? sessions : sessions.slice(0, 5);
  const del = id => update(s => {
  const i = s.sessions.findIndex(x => x.id === id);
- if (i >= 0) s.sessions.splice(i, 1);
+ if (i >= 0) {
+   const deletedDate = s.sessions[i].date;
+   s.sessions.splice(i, 1);
+   if (!s.sessions.some(x => x.date === deletedDate) && s.days[deletedDate] && s.days[deletedDate].tasks) delete s.days[deletedDate].tasks.forca;
+ }
  });
  const fmt = key => {
  const d = new Date(key + "T12:00:00");
@@ -3802,14 +3703,14 @@ function Body({
 }) {
  const [form, setForm] = useState(false);
  const [editStart, setEditStart] = useState(false);
- const [startVal, setStartVal] = useState(String(state.profile.bfStart));
+ const [startVal, setStartVal] = useState(String(state.profile.baseline.bodyFat));
  useEffect(() => {
- if (!editStart) setStartVal(String(state.profile.bfStart));
- }, [state.profile.bfStart, editStart]);
+ if (!editStart) setStartVal(String(state.profile.baseline.bodyFat));
+ }, [state.profile.baseline.bodyFat, editStart]);
  const saveStart = () => {
  const v = parseFloat(String(startVal).replace(",", "."));
  if (!isNaN(v) && v > 0) update(s => {
- s.profile.bfStart = v;
+ s.profile.baseline = Object.assign({},s.profile.baseline||{}, {bodyFat:v,source:"manual"});
  });
  setEditStart(false);
  };
@@ -4039,7 +3940,7 @@ function Body({
  color: "var(--text)",
  letterSpacing: "-.03em"
  }
- }, state.profile.bfStart, /*#__PURE__*/React.createElement("i", {
+ }, state.profile.baseline.bodyFat, /*#__PURE__*/React.createElement("i", {
  style: {
  fontSize: "13px",
  fontWeight: 600,
@@ -4409,16 +4310,16 @@ function Coach2027({ state, update, onNavigate }) {
  // - pode ser corrigido manualmente;
  // - se surgir uma primeira pesagem diferente (por exemplo, dados antigos
  //   foram corrigidos), a referência é atualizada automaticamente.
- const coachBaseline = state.profile?.coachBaseline || null;
+ const coachBaseline = state.profile?.baseline || null;
  const [baselineEdit, setBaselineEdit] = useState(false);
  const [baselineForm, setBaselineForm] = useState({weight:"",bodyFat:"",cintura:""});
  useEffect(() => {
    if (!firstBody) return;
-   const current = state.profile?.coachBaseline;
+   const current = state.profile?.baseline;
    if (!current || current.sourceDate !== firstBody.date) {
      update(s => {
        s.profile = s.profile || {};
-       s.profile.coachBaseline = {
+       s.profile.baseline = {
          weight: firstBody.weight ?? "",
          bodyFat: firstBody.bodyFat ?? "",
          cintura: firstBody.cintura ?? "",
@@ -4430,7 +4331,7 @@ function Coach2027({ state, update, onNavigate }) {
  }, [firstBody?.date, firstBody?.weight, firstBody?.bodyFat, firstBody?.cintura]);
 
  const openBaselineEditor = () => {
-   const b = state.profile?.coachBaseline || firstBody || {};
+   const b = state.profile?.baseline || firstBody || {};
    setBaselineForm({
      weight: b.weight ?? "",
      bodyFat: b.bodyFat ?? "",
@@ -4441,18 +4342,18 @@ function Coach2027({ state, update, onNavigate }) {
  const saveBaseline = () => {
    update(s => {
      s.profile = s.profile || {};
-     s.profile.coachBaseline = {
+     s.profile.baseline = {
        weight: String(baselineForm.weight ?? "").replace(",", "."),
        bodyFat: String(baselineForm.bodyFat ?? "").replace(",", "."),
        cintura: String(baselineForm.cintura ?? "").replace(",", "."),
-       sourceDate: firstBody?.date || s.profile.coachBaseline?.sourceDate || "",
+       sourceDate: firstBody?.date || s.profile.baseline?.sourceDate || "",
        source: "manual"
      };
    });
    setBaselineEdit(false);
  };
 
- const daysToGoal = Math.max(0, Math.ceil((new Date((prof.summerTargetDate || "2027-06-01")+"T12:00:00") - TODAY) / 86400000));
+ const daysToGoal = Math.max(0, Math.ceil((new Date((prof.targetDate || "2026-11-19")+"T12:00:00") - TODAY) / 86400000));
 
  const lastDays = n => {
  const out=[];
@@ -4495,7 +4396,7 @@ function Coach2027({ state, update, onNavigate }) {
  const losing = weightTrend < -0.2 || (waistTrend!=null && waistTrend < -0.5);
  const tooFast = weightTrend < -3.0;
  const proteinLow = avgProtein > 0 && avgProtein < (prof.proteinTarget||170) * 0.9;
- const trainingLow = wkSessions < 4;
+ const trainingLow = wkSessions < (prof.workoutsTarget||5);
  if(tooFast || (avgSleep>0 && avgSleep<6.5)){
  status=" Recuperação / ritmo a vigiar";
  decision="Não aumentes o défice. Prioriza sono, rendimento e recuperação durante a próxima semana.";
@@ -4512,7 +4413,7 @@ function Coach2027({ state, update, onNavigate }) {
 }
 
  let recovery=0, recoveryParts=0;
- if(avgSleep){ recovery += Math.min(100, avgSleep/8*100); recoveryParts++; }
+ if(avgSleep){ recovery += Math.min(100, avgSleep/(prof.sleepTarget||8)*100); recoveryParts++; }
  if(avgProtein){ recovery += Math.min(100, avgProtein/(prof.proteinTarget||170)*100); recoveryParts++; }
  if(avgW){ recovery += Math.min(100, avgW/(prof.waterTarget||3)*100); recoveryParts++; }
  recovery = recoveryParts ? Math.round(recovery/recoveryParts) : null;
@@ -4520,10 +4421,10 @@ function Coach2027({ state, update, onNavigate }) {
 
  const alerts=[];
  if(avgProtein && avgProtein < (prof.proteinTarget||170)*0.9) alerts.push({text:"Proteína média abaixo de 90% do alvo.", level:"negative", tab:"check"});
- if(avgSleep && avgSleep < 7) alerts.push({text:"Sono médio abaixo de 7 h.", level:"negative", tab:"check"});
+ if(avgSleep && avgSleep < (prof.sleepTarget||8)*0.875) alerts.push({text:"Sono médio abaixo do alvo.", level:"negative", tab:"check"});
  if(avgSteps && avgSteps < (prof.stepsTarget||9000)*0.8) alerts.push({text:"Passos médios abaixo de 80% do alvo.", level:"negative", tab:"check"});
  if(cardio7 < (prof.cardioTarget||90)*0.7) alerts.push({text:"Cardio semanal abaixo de 70% do alvo.", level:"negative", tab:"workout"});
- if(wkSessions >= 5) alerts.push({text:"Meta semanal de 5 treinos atingida.", level:"positive", tab:"workout"});
+ if(wkSessions >= (prof.workoutsTarget||5)) alerts.push({text:"Meta semanal de "+(prof.workoutsTarget||5)+" treinos atingida.", level:"positive", tab:"workout"});
  if(enoughData && waistTrend!=null && waistTrend<0) alerts.push({text:"Cintura em tendência descendente.", level:"positive", tab:"body"});
 
  const asymSessions=(state.sessions||[]).filter(s => Array.isArray(s.ex) && s.ex.some(e=>/single-arm db chest/i.test(e.name))).slice(-6);
@@ -4576,7 +4477,7 @@ function Coach2027({ state, update, onNavigate }) {
  }));
  const aiContext = {
    objective: prof.goal || "ganhar músculo e perder gordura",
-   targetDate: prof.summerTargetDate || "2027-06-01",
+   targetDate: prof.targetDate || "2026-11-19",
    firstWeighIn: firstBody || null,
    latestWeighIn: latest || null,
    recentWeightChange: weightTrend,
@@ -4613,7 +4514,7 @@ function Coach2027({ state, update, onNavigate }) {
    }
    if(avgProtein && avgProtein < (prof.proteinTarget||170)*.9) lines.push("Proteína: abaixo de 90% do alvo médio. É uma prioridade antes de cortar mais calorias.");
    if(avgSleep && avgSleep < 7) lines.push("Sono: abaixo de 7 h em média. Recuperação deve ser protegida.");
-   if(wkSessions < 4) lines.push("Treino: a frequência desta semana está abaixo de 4 sessões.");
+   if(wkSessions < (prof.workoutsTarget||5)) lines.push("Treino: a frequência desta semana está abaixo do objetivo.");
    if(avgSteps && avgSteps < (prof.stepsTarget||9000)*.8) lines.push("Passos: abaixo de 80% do objetivo médio.");
    if(q.includes("peso") || q.includes("gordura") || q.includes("cintura")) {
      lines.push("Para composição corporal, usa peso médio semanal + cintura + desempenho no treino, e não uma única pesagem.");
@@ -4723,7 +4624,7 @@ function Coach2027({ state, update, onNavigate }) {
  /*#__PURE__*/React.createElement("div",{className:"coach27-badge"}," Verão 2027"),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"26px",fontWeight:800,marginTop:"10px"}},status),
  /*#__PURE__*/React.createElement("div",{style:{fontSize:"13px",opacity:.9,marginTop:"7px",lineHeight:1.45}},decision),
- /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",opacity:.8,marginTop:"10px"}},daysToGoal," dias até ",prof.summerTargetDate||"2027-06-01")
+ /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",opacity:.8,marginTop:"10px"}},daysToGoal," dias até ",prof.targetDate||"2026-11-19")
  ),
  /*#__PURE__*/React.createElement("div",{className:"card coach27-connect"},
  /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Ações rápidas"),
@@ -4746,7 +4647,7 @@ function Coach2027({ state, update, onNavigate }) {
      ),
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-insight"},
        "Foco atual: ", decision || "consistência e progressão sustentável.",
-       " · ", wkSessions, "/5 treinos esta semana"
+       " · ", wkSessions, "/", prof.workoutsTarget||5, " treinos esta semana"
      )
    ),
    /*#__PURE__*/React.createElement("div",{className:"evf-ai-body"},
@@ -4913,7 +4814,7 @@ function Coach2027({ state, update, onNavigate }) {
 
  /*#__PURE__*/React.createElement("div",{className:"card"},
  /*#__PURE__*/React.createElement("div",{className:"pc-title"}," Objetivos semanais"),
- GOALS.filter(g=>g.cat==="Corpo").map(g=>{
+ goalsFor(state).filter(g=>g.cat==="Corpo").map(g=>{
  const z=computeGoal(g,state), done=z.pct>=100;
  return /*#__PURE__*/React.createElement("div",{key:g.id,style:{marginTop:"12px"}},
  /*#__PURE__*/React.createElement("div",{className:"goal-top"},
@@ -4929,14 +4830,18 @@ function Coach2027({ state, update, onNavigate }) {
 }
 
 /* =============================== OBJETIVOS ============================== */
+function GoalTargetSettings({state,update}) {
+ const fields=[["waterTarget","Água (L/dia)"],["stepsTarget","Passos/dia"],["proteinTarget","Proteína (g/dia)"],["fatTarget","Gordura (g/dia)"],["sleepTarget","Sono (h/noite)"],["workoutsTarget","Treinos/semana"],["cardioTarget","Cardio (min/semana)"],["kcalTarget","Calorias ingeridas/dia"],["burnedKcalTarget","Calorias gastas/semana"]];
+ return React.createElement("div",{className:"card"},React.createElement("div",{className:"pc-title"},"Os meus alvos"),React.createElement("div",{style:{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginTop:12}},fields.map(([key,label])=>React.createElement("label",{key,style:{fontSize:11,fontWeight:650,color:"var(--muted)"}},label,React.createElement("input",{className:"in",inputMode:"decimal",defaultValue:fmtNum(state.profile[key]),key:key+"-"+state.profile[key],style:{marginTop:4,width:"100%",textAlign:"center"},onBlur:e=>{const value=parseNum(e.target.value);if(value>0&&value!==Number(state.profile[key]))update(s=>{s.profile[key]=value;});}})))));
+}
 function Goals({
- state
+ state, update
 }) {
  const cats = ["Corpo"];
  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
  title: "Objetivos semanais",
  sub: "Atualizados automaticamente pela tua checklist"
- }), /*#__PURE__*/React.createElement("div", {
+ }), /*#__PURE__*/React.createElement(GoalTargetSettings,{state,update}), /*#__PURE__*/React.createElement("div", {
  className: "card auto-note"
  }, /*#__PURE__*/React.createElement(I, {
  name: "zap",
@@ -4945,7 +4850,7 @@ function Goals({
  key: cat
  }, /*#__PURE__*/React.createElement("div", {
  className: "cat-head"
- }, cat), GOALS.filter(g => g.cat === cat).map(g => {
+ }, cat), goalsFor(state).filter(g => g.cat === cat).map(g => {
  const {
  value,
  pct
@@ -5000,8 +4905,8 @@ function WeeklyCoachInsights({state}){
   const consistency=Math.round(days.reduce((a,w)=>a+dayPct(w.day,w.key),0)/7);
   const body=[...(state.body||[])].sort((a,b)=>a.date.localeCompare(b.date));
   const last=body.at(-1), prev=body.at(-2);
-  const suggestion = consistency<65 ? "Prioridade: melhorar consistência antes de alterar o plano."
-    : sessions<4 ? "Prioridade: recuperar a frequência de treino esta semana."
+ const suggestion = consistency<65 ? "Prioridade: melhorar consistência antes de alterar o plano."
+    : sessions<(state.profile.workoutsTarget||5) ? "Prioridade: recuperar a frequência de treino esta semana."
     : last&&prev&&last.weight<prev.weight ? "Tendência favorável: mantém a estratégia e volta a avaliar com mais dados."
     : "Mantém o plano atual e usa tendência semanal, não um único dia, para decidir ajustes.";
   const weekKey=iso(addDays(TODAY,-((TODAY.getDay()+6)%7)));
@@ -5091,7 +4996,7 @@ function Report({
  const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
  const coach = buildCoach(state, waterAvg);
  const checkStreak = streak(state.days, (d, k) => dayPct(d, k) >= 60);
- const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= 2500);
+ const waterStreak = streak(state.days, d => ((d ? d.water : 0) || 0) >= (state.profile.waterTarget||3)*1000);
  const workoutStreak = streak(state.days, (d, k) => trainedOn(state, k));
  const generate = () => {
  setGen(true);
@@ -5184,7 +5089,7 @@ function Report({
  tint: "teal"
  }, /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
- }, /*#__PURE__*/React.createElement("span", null, "Treinos"), /*#__PURE__*/React.createElement("span", null, report.workout.count, "/5")), /*#__PURE__*/React.createElement("div", {
+ }, /*#__PURE__*/React.createElement("span", null, "Treinos"), /*#__PURE__*/React.createElement("span", null, report.workout.count, "/", state.profile.workoutsTarget||5)), /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
  }, /*#__PURE__*/React.createElement("span", null, "Volume total"), /*#__PURE__*/React.createElement("span", null, (report.workout.volume / 1000).toFixed(1), "k kg")), /*#__PURE__*/React.createElement("div", {
  className: "rg-row"
@@ -5281,9 +5186,9 @@ function buildReport(state) {
  const consistency = +(week.reduce((a, w) => a + dayPct(w.day, w.key), 0) / 7).toFixed(1);
  const sumQty = (id, days) => days.reduce((a, w) => a + (w.day && w.day.tasks[id] ? w.day.tasks[id].value || 0 : 0), 0);
  const waterAvg = (week.reduce((a, w) => a + ((w.day ? w.day.water : 0) || 0), 0) / 7 / 1000).toFixed(1);
- const waterDays = week.filter(w => ((w.day ? w.day.water : 0) || 0) >= 2500).length;
+ const waterGoalL = state.profile.waterTarget || 3;
+ const waterDays = week.filter(w => ((w.day ? w.day.water : 0) || 0) >= waterGoalL*1000).length;
  const treinos = week.filter(w => trainedOn(state, w.key)).length;
- const pages = sumQty("ler", week);
  // chores
  let choreDone = 0,
  choreTotal = 0;
@@ -5318,17 +5223,18 @@ function buildReport(state) {
  });
  }
  });
- const wNote = treinos >= 5 ? "Excelente frequência. " : treinos > 0 ? "Frequência abaixo do alvo de 5. " : "";
+ const treinoTarget=state.profile.workoutsTarget||5;
+ const wNote = treinos >= treinoTarget ? "Excelente frequência. " : treinos > 0 ? "Frequência abaixo do alvo de "+treinoTarget+". " : "";
  const progNote = tot > 0 ? up >= tot * 0.5 ? "Estás a subir a carga na maioria dos exercícios — progressão sólida." : "A carga está estável — considera subir peso ou reps onde já dominas a técnica." : "Regista os treinos para acompanhar a progressão de carga.";
  // body
- const body = [...state.body].sort((a, b) => a.date.localeCompare(b.date));
- const last = body[body.length - 1];
- const weekAgo = body.filter(b => b.date <= iso(addDays(TODAY, -6))).pop() || body[0];
- const grams = Math.round((weekAgo.weight - last.weight) * 1000);
+ const body = [...(state.body||[])].sort((a, b) => a.date.localeCompare(b.date));
+ const last = body[body.length - 1] || null;
+ const weekAgo = last ? (body.filter(b => b.date <= iso(addDays(TODAY, -6))).pop() || body[0]) : null;
+ const grams = last && weekAgo ? Math.round((weekAgo.weight - last.weight) * 1000) : 0;
  const prevBody = body.length > 1 ? body[body.length - 2] : last;
- const bfDiff = +(last.bodyFat - prevBody.bodyFat).toFixed(1);
- const muscleDiff = +(last.muscle - prevBody.muscle).toFixed(1);
- const bodyNote = grams > 0 && last.bodyFat <= prevBody.bodyFat ? "Perda de gordura no bom ritmo, mantendo (ou ganhando) músculo — exatamente o que queres para os " + state.profile.bfTarget + "%." : "Ritmo mais lento esta semana. O peso oscila com água/ciclo; olha a tendência de várias semanas, não um dia.";
+ const bfDiff = last && prevBody ? +(last.bodyFat - prevBody.bodyFat).toFixed(1) : 0;
+ const muscleDiff = last && prevBody ? +(last.muscle - prevBody.muscle).toFixed(1) : 0;
+ const bodyNote = !last ? "Ainda não existem medições corporais suficientes para analisar a evolução." : grams > 0 && last.bodyFat <= prevBody.bodyFat ? "Perda de gordura no bom ritmo, mantendo (ou ganhando) músculo — exatamente o que queres para os " + state.profile.bfTarget + "%." : "Ritmo mais lento esta semana. O peso oscila com água/ciclo; olha a tendência de várias semanas, não um dia.";
  // patterns / science
  const patterns = ["Em geral, estudos associam treino regular e boa hidratação a melhor humor, energia e produtividade — os teus dados são o teste real para ti."];
  // strong / opps / recs
@@ -5336,19 +5242,19 @@ function buildReport(state) {
  opps = [],
  recs = [];
  if (consistency >= 75) strong.push("Excelente consistência geral na checklist.");
- if (treinos >= 5) strong.push("Treinos em dia e a subir a carga.");
+ if (treinos >= treinoTarget) strong.push("Treinos em dia e a subir a carga.");
  if (waterDays >= 4) strong.push("Boa hidratação na maioria dos dias.");
  if (!strong.length) strong.push("Apareceste todos os dias — a base está lá.");
- if (+waterAvg < 2.5) opps.push("Água abaixo do objetivo (média " + waterAvg + "L).");
- if (treinos < 5) opps.push("Faltou treino: " + treinos + "/5.");
+ if (+waterAvg < waterGoalL) opps.push("Água abaixo do objetivo (média " + waterAvg + "L).");
+ if (treinos < treinoTarget) opps.push("Faltou treino: " + treinos + "/"+treinoTarget+".");
  if (!opps.length) opps.push("Poucas fraquezas — foca em manter o ritmo.");
- if (+waterAvg < 2.5) recs.push("Subir a hidratação para 2.5L/dia.");
- recs.push("Manter os 5 treinos e subir carga onde a técnica já é sólida.");
+ if (+waterAvg < waterGoalL) recs.push("Subir a hidratação para "+String(waterGoalL).replace(".",",")+"L/dia.");
+ recs.push("Manter "+treinoTarget+" treinos e subir carga onde a técnica já é sólida.");
  const summary = "Esta semana cumpriste " + consistency + "% do que planeaste. Fizeste " + treinos + " treino(s) e bebeste em média " + waterAvg + "L de água. " + (consistency >= 75 ? "Estás a construir uma rotina forte rumo aos " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + "." : "Uma semana para consolidar hábitos — pequenos ajustes fazem grande diferença até lá.");
  // hoje: corpo e treino
  const trainedToday = trainedOn(state, todayKey);
- const todaySummary = "Hoje " + (trainedToday ? "já treinaste" : "ainda não treinaste") + ". O teu peso atual é " + last.weight + "kg, com " + last.bodyFat + "% de gordura e IMC " + last.bmi + ".";
- const goalResults = GOALS.map(g => ({
+ const todaySummary = !last ? "Ainda não existem medições corporais. Regista uma medição no menu Corpo para acompanhar peso, gordura, IMC e massa muscular." : "Hoje " + (trainedToday ? "já treinaste" : "ainda não treinaste") + ". O teu peso atual é " + last.weight + "kg, com " + last.bodyFat + "% de gordura e IMC " + last.bmi + ".";
+ const goalResults = goalsFor(state).map(g => ({
  g,
  ...computeGoal(g, state)
  }));
@@ -5369,10 +5275,10 @@ function buildReport(state) {
  },
  body: {
  grams,
- bf: last.bodyFat,
+ bf: last ? last.bodyFat : null,
  bfDiff,
- bmi: last.bmi,
- muscle: last.muscle,
+ bmi: last ? last.bmi : null,
+ muscle: last ? last.muscle : null,
  muscleDiff,
  note: bodyNote
  },
@@ -5392,8 +5298,9 @@ function buildCoach(state, waterAvg) {
  const p = [];
  if (trained) p.push("Já treinaste hoje");
  let msg = p.length ? p.join(" ") + ". " : "";
- if (waterToday < 2.5) msg += "Ainda só bebeste " + waterToday.toFixed(1) + "L — faltam " + (2.5 - waterToday).toFixed(1) + "L. ";
- if (steps < 10000) msg += "Faltam " + (10000 - steps).toLocaleString("pt-PT") + " passos para os 10k. ";
+ const waterGoal=Number(state.profile.waterTarget)||3, stepsGoal=Number(state.profile.stepsTarget)||9000;
+ if (waterToday < waterGoal) msg += "Ainda só bebeste " + waterToday.toFixed(1) + "L — faltam " + (waterGoal - waterToday).toFixed(1) + "L. ";
+ if (steps < stepsGoal) msg += "Faltam " + (stepsGoal - steps).toLocaleString("pt-PT") + " passos para a meta diária. ";
  msg += "Mantém a consistência e estás no caminho certo para os " + state.profile.bfTarget + "% até " + longDate(new Date(state.profile.targetDate)) + ".";
  return msg;
 }
@@ -5491,7 +5398,10 @@ function Login() {
  "auth/wrong-password": "Palavra-passe errada.",
  "auth/user-not-found": "Não existe conta com este email — cria uma."
  };
- setErr(m[e.code] || e.message);
+ const rawError = `${e.code || ""} ${e.message || ""}`;
+      setErr(/requests-from-referer-null-are-blocked/i.test(rawError)
+        ? "Esta app foi aberta como ficheiro local. Abre-a pelo endereço HTTPS autorizado no Firebase para entrar."
+        : (m[e.code] || e.message));
  }).finally(() => setBusy(false));
  };
  return /*#__PURE__*/React.createElement("div", {
