@@ -1807,7 +1807,9 @@ function weekFromMonday(days) {
  return out;
 }
 function trainedOn(state, key) {
- return state.sessions.some(s => s.date === key) || (state.days[key] && state.days[key].tasks.forca ? state.days[key].tasks.forca.value > 0 : false);
+ return !!(state.trainingCompleted && state.trainingCompleted[key]) ||
+   state.sessions.some(s => s.date === key) ||
+   !!(state.days[key] && state.days[key].tasks && state.days[key].tasks.forca && state.days[key].tasks.forca.value > 0);
 }
 function computeGoal(g, state) {
  const days = state.days,
@@ -2780,7 +2782,10 @@ function Workouts({
  const volWeek = state.sessions.filter(s => weekDays.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
  const kcal = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
  const cardio = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.cardio ? w.day.tasks.cardio.value : 0), 0);
+ const selectedDayKey = weekDays[sel] ? weekDays[sel].key : todayKey;
  const loggedToday = state.sessions.some(s => s.date === todayKey && s.dayIdx === sel);
+ const trainedSelected = trainedOn(state, selectedDayKey);
+ const canMarkSelected = selectedDayKey <= todayKey;
  const loggedDayIdx = new Set(state.sessions.filter(s => weekDays.some(w => w.key === s.date)).map(s => s.dayIdx));
  const saveSession = entries => update(s => {
  entries.forEach((e, i) => {
@@ -2868,7 +2873,7 @@ function Workouts({
  key: i,
  className: "dp" + (sel === i ? " on" : ""),
  onClick: () => setSel(i)
- }, d.day.slice(0, 3), loggedDayIdx.has(i) && /*#__PURE__*/React.createElement("span", {
+ }, d.day.slice(0, 3), (loggedDayIdx.has(i) || trainedOn(state, weekDays[i] ? weekDays[i].key : todayKey)) && /*#__PURE__*/React.createElement("span", {
  className: "dp-dot"
  })))), /*#__PURE__*/React.createElement("div", {
  className: "card logger"
@@ -2878,18 +2883,21 @@ function Workouts({
  className: "logger-title"
  }, plano[sel].name), /*#__PURE__*/React.createElement("div", {
  className: "logger-sub"
- }, plano[sel].day, sel === todayIdx ? " · hoje" : "")), loggedToday && /*#__PURE__*/React.createElement("div", {
+ }, plano[sel].day, sel === todayIdx ? " · hoje" : "")), trainedSelected && /*#__PURE__*/React.createElement("div", {
  className: "logged-badge"
  }, /*#__PURE__*/React.createElement(I, {
  name: "check",
  size: 12
  }), " Registado")), /*#__PURE__*/React.createElement("button", {
- className: "menu-btn",
- style: {
- margin: "0 0 8px"
- },
- onClick: () => setShowRir(v => !v)
- }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
+ className: "menu-btn main",
+ style: { width: "100%", margin: "0 0 8px" },
+ disabled: !canMarkSelected,
+ onClick: () => update(s => {
+   s.trainingCompleted = s.trainingCompleted || {};
+   if (s.trainingCompleted[selectedDayKey]) delete s.trainingCompleted[selectedDayKey];
+   else s.trainingCompleted[selectedDayKey] = true;
+ })
+ }, trainedSelected ? "Desmarcar treino" : "Treinei"), /*#__PURE__*/React.createElement("button", { showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
  className: "rir-help"
  }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
  key: sel,
@@ -4403,7 +4411,7 @@ function Coach2027({ state, update, onNavigate }) {
  };
  const currentWeek = weekFromMonday(state.days);
  const currentWeekKeys = new Set(currentWeek.map(x=>x.key));
- const wkSessions = (state.sessions||[]).filter(s=>currentWeekKeys.has(s.date)).length;
+ const wkSessions = currentWeek.filter(x=>trainedOn(state,x.key)).length;
  const avgProtein=avgTask(d7,"proteina");
  const avgSleep=avgTask(d7,"sono");
  const avgSteps=avgTask(d7,"passos");
