@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=9">
+<link rel="stylesheet" href="evolvefit-polish.css?v=10">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -861,6 +861,72 @@ async function evolveFitFirebaseIdToken(){
     console.error("Firebase Auth token:",e);
     return null;
   }
+}
+
+async function evolveFitMergeDeviceStateIntoAccount(uid,deviceState){
+ if(!uid||!fbDb||!deviceState)throw new Error("Não foi possível preparar a sincronização desta conta.");
+ const ref=fbDb.collection("users").doc(uid),local=normalize(clone(deviceState));
+ let merged=null;
+ await fbDb.runTransaction(async tx=>{
+  const snap=await tx.get(ref);
+  if(!snap.exists){
+   merged=local;
+  }else{
+   let remote=null;
+   try{remote=normalize(fromCloud(snap.data()));}catch(e){throw new Error("Os dados existentes da conta não puderam ser lidos; não foram substituídos.");}
+   if(!remote)throw new Error("A conta não devolveu um estado válido.");
+   const localForMerge=clone(local);
+   // Na primeira associação, a cloud é a fonte principal em conflitos.
+   // Registos exclusivos deste dispositivo (sessões/dias/medições) são unidos.
+   localForMerge._updatedAt=Math.min(Number(local._updatedAt)||0,Number(remote._updatedAt)||0)-1;
+   merged=normalize(evfMerge3(null,localForMerge,remote));
+  }
+  merged._updatedAt=Date.now();
+  tx.set(ref,toCloud(merged));
+ });
+ save(merged,uid);
+ cloudQueueClear();
+ return merged;
+}
+
+async function evolveFitAccountAuth(mode,email,password){
+ if(!CLOUD_ENABLED||!fbAuth)throw new Error("Firebase Authentication não está disponível nesta publicação.");
+ const cleanEmail=String(email||"").trim().toLowerCase();
+ if(!cleanEmail)throw new Error("Indica um endereço de email válido.");
+ if(String(password||"").length<6)throw new Error("A palavra-passe deve ter pelo menos 6 caracteres.");
+ let release;
+ const barrier=new Promise(resolve=>{release=resolve;});
+ window.__evfAuthTransition=barrier;
+ const previous=fbAuth.currentUser||null;
+ const deviceState=window.__evfCurrentState?clone(window.__evfCurrentState):null;
+ try{
+  let credential;
+  if(mode==="create"){
+   const emailCredential=firebase.auth.EmailAuthProvider.credential(cleanEmail,password);
+   credential=previous&&previous.isAnonymous
+    ? await previous.linkWithCredential(emailCredential)
+    : await fbAuth.createUserWithEmailAndPassword(cleanEmail,password);
+  }else{
+   credential=await fbAuth.signInWithEmailAndPassword(cleanEmail,password);
+  }
+  const user=(credential&&credential.user)||fbAuth.currentUser;
+  if(!user)throw new Error("O Firebase não devolveu uma sessão autenticada.");
+  let mergeWarning="";
+  if(deviceState&&(!previous||previous.uid!==user.uid)){
+   try{await evolveFitMergeDeviceStateIntoAccount(user.uid,deviceState);}
+   catch(error){
+    mergeWarning=String(error?.message||error);
+    cloudQueueWrite({uid:user.uid,payload:toCloud(deviceState),queuedAt:Date.now()});
+    console.error("Migração dos dados locais para a conta:",error);
+   }
+  }
+  window.__evfAuthError=null;
+  window.dispatchEvent(new CustomEvent("evolvefit-auth-updated",{detail:user}));
+  return {user,mergeWarning};
+ }finally{
+  release();
+  setTimeout(()=>{if(window.__evfAuthTransition===barrier)window.__evfAuthTransition=null;},0);
+ }
 }
 
 // Gemini Cloud configurado: https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi
@@ -2364,6 +2430,70 @@ function AccountTools({state, update, forceOpen=false, uid=null}) {
  );
 }
 
+function AccountAuthTools({user}){
+ const h=React.createElement;
+ const [mode,setMode]=useState("create");
+ const [email,setEmail]=useState(user?.email||"");
+ const [password,setPassword]=useState("");
+ const [message,setMessage]=useState("");
+ const [busy,setBusy]=useState(false);
+ const [showForm,setShowForm]=useState(!user||user.isAnonymous);
+ useEffect(()=>{
+  setEmail(user?.email||"");
+  if(user&&!user.isAnonymous){setShowForm(false);setMode("signin");}
+  else setShowForm(true);
+ },[user?.uid,user?.isAnonymous]);
+ const explainError=error=>{
+  const code=String(error?.code||"").toLowerCase();
+  if(code.includes("operation-not-allowed"))return "Ativa Email/Password em Firebase Console → Authentication → Sign-in method.";
+  if(code.includes("unauthorized-domain"))return "Adiciona este domínio em Firebase Console → Authentication → Settings → Authorized domains.";
+  if(code.includes("email-already-in-use"))return "Este email já tem conta. Escolhe «Entrar» e usa essa palavra-passe.";
+  if(code.includes("invalid-email"))return "O endereço de email não parece válido.";
+  if(code.includes("weak-password"))return "Escolhe uma palavra-passe com pelo menos 6 caracteres.";
+  if(code.includes("wrong-password")||code.includes("user-not-found")||code.includes("invalid-credential"))return "Email ou palavra-passe incorretos.";
+  if(code.includes("network-request-failed"))return "Sem ligação à internet. Os dados atuais continuam guardados neste dispositivo.";
+  return String(error?.message||"Não foi possível autenticar esta conta.");
+ };
+ const submit=async event=>{
+  event?.preventDefault();
+  if(busy)return;
+  setBusy(true);setMessage("");
+  try{
+   const result=await evolveFitAccountAuth(mode,email,password);
+   setPassword("");
+   setMessage(result.mergeWarning
+    ? "Sessão iniciada, mas a fusão deste dispositivo ficou pendente: "+result.mergeWarning+" Mantivemos uma cópia local. Abre a app com ligação para tentar sincronizar novamente."
+    : mode==="create"?"Conta criada e ligada a este dispositivo. Usa o mesmo email e palavra-passe no telemóvel e no PC.":"Sessão iniciada. Este dispositivo vai receber e enviar alterações da mesma conta.");
+   if(result.user&&!result.user.isAnonymous)setShowForm(false);
+  }catch(error){setMessage(explainError(error));}
+  finally{setBusy(false);}
+ };
+ if(!CLOUD_ENABLED)return h("div",{className:"evf-account-card evf-auth-tools"},
+  h("div",{className:"evf-account-label"},"Sincronização entre dispositivos"),
+  h("p",{className:"evf-tools-note"},"A cloud não está configurada nesta publicação; os dados ficam neste dispositivo.")
+ );
+ if(user&&!user.isAnonymous&&!showForm)return h("div",{className:"evf-account-card evf-auth-tools"},
+  h("div",{className:"evf-account-label"},"Sincronização entre dispositivos"),
+  h("p",{className:"evf-tools-note"},"Conta ligada: "+(user.email||"email verificado")+". Inicia sessão com esta mesma conta no PC e no telemóvel para partilhar os registos em tempo real."),
+  h("button",{type:"button",className:"menu-btn evf-tool-button",onClick:()=>{setMode("signin");setShowForm(true);setMessage("");}},"Usar outra conta"),
+  message&&h("div",{className:"evf-tools-message",role:"status"},message)
+ );
+ return h("div",{className:"evf-account-card evf-auth-tools"},
+  h("div",{className:"evf-account-label"},"Sincronizar PC e telemóvel"),
+  h("p",{className:"evf-tools-note"},user&&!user.isAnonymous?"Entra com a conta que queres usar nos dois dispositivos. Ao mudar de conta, os registos deste dispositivo serão unidos à conta escolhida.":"Cria uma conta com email e palavra-passe neste dispositivo; depois entra com ela nos restantes."),
+  h("div",{className:"evf-auth-mode-tabs",role:"group","aria-label":"Ação da conta"},
+   h("button",{type:"button",className:"menu-btn evf-tool-button"+(mode==="create"?" main":""),"aria-pressed":mode==="create",onClick:()=>{setMode("create");setMessage("");}},"Criar conta"),
+   h("button",{type:"button",className:"menu-btn evf-tool-button"+(mode==="signin"?" main":""),"aria-pressed":mode==="signin",onClick:()=>{setMode("signin");setMessage("");}},"Entrar")
+  ),
+  h("form",{className:"evf-auth-form",onSubmit:submit},
+   h("label",{className:"evf-auth-field"},h("span",null,"Email"),h("input",{type:"email",autoComplete:"email",required:true,value:email,onChange:e=>setEmail(e.target.value),placeholder:"nome@exemplo.com"})),
+   h("label",{className:"evf-auth-field"},h("span",null,"Palavra-passe · mínimo 6 caracteres"),h("input",{type:"password",autoComplete:mode==="create"?"new-password":"current-password",minLength:6,required:true,value:password,onChange:e=>setPassword(e.target.value),placeholder:"••••••••"})),
+   h("button",{type:"submit",className:"menu-btn main evf-tool-button",disabled:busy},busy?"A autenticar…":mode==="create"?"Criar conta e sincronizar":"Entrar e sincronizar")
+  ),
+  message&&h("div",{className:"evf-tools-message",role:"status"},message)
+ );
+}
+
 function SyncCard() {
  const h = React.createElement;
  const [st, setSt] = useState(window.EvolveFitCloudStatus || {status: "idle", at: 0});
@@ -2498,6 +2628,8 @@ function Dashboard({
  const stateRef = useRef(state);
  const scrollRef = useRef(null);
  stateRef.current = state;
+ window.__evfCurrentState=state;
+ window.__evfCurrentUid=uid;
 
  // Persistência automática global: qualquer alteração de estado é guardada
  // imediatamente, sem depender de um botão "Guardar".
@@ -2508,6 +2640,7 @@ function Dashboard({
      if (!safe || !uid) return;
      safe._updatedAt = Date.now();
      stateRef.current = safe;
+     window.__evfCurrentState=safe;
      save(safe, uid);
      clearTimeout(autoPersistTimer.current);
      autoPersistTimer.current = setTimeout(() => {
@@ -2541,6 +2674,7 @@ function Dashboard({
 
    if (savedAt >= currentAt) {
      stateRef.current = normalized;
+     window.__evfCurrentState=normalized;
      setState(normalized);
    }
  }, [uid]);
@@ -2570,6 +2704,12 @@ function Dashboard({
  }, []);
  // Ao mudar de conta: esquece a leitura da nuvem anterior e define a base de sincronização.
  useEffect(() => {
+ // Uma escrita pendente da identidade anterior não pode correr com a nova sessão.
+ if(window.__evfPending&&window.__evfPending.uid!==uid){
+   clearTimeout(window.__evfTimer);
+   window.__evfTimer=null;
+   window.__evfPending=null;
+ }
  window.__evfRemoteSeen = false;
  window.__evfRemoteUpdatedAt = 0;
  const q = cloudQueueRead();
@@ -2590,6 +2730,7 @@ function Dashboard({
  const res = normalize(evfMerge3(evfFlatten(d.pre), cur, d.merged));
  res._updatedAt = Math.max(Number(cur._updatedAt) || 0, Number(d.merged._updatedAt) || 0);
  stateRef.current = res;
+ window.__evfCurrentState=res;
  syncedJson.current = JSON.stringify(res);
  setState(res);
  } catch (err) {
@@ -2676,6 +2817,7 @@ function Dashboard({
    window.__evfBaseAt = rAt;
    syncedJson.current = JSON.stringify(remote);
    stateRef.current = remote;
+   window.__evfCurrentState=remote;
    window.evfSetCloudStatus && window.evfSetCloudStatus("remote");
    setState(remote);
    cloudQueueClear();
@@ -2693,6 +2835,7 @@ function Dashboard({
  window.__evfBaseAt = rAt;
  syncedJson.current = JSON.stringify(merged);
  stateRef.current = merged;
+ window.__evfCurrentState=merged;
  window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
  setState(merged);
  if (!evfFlatEqual(evfFlatten(merged), R)) evolveFitCloudSave(uid, JSON.parse(JSON.stringify(merged)));
@@ -2773,6 +2916,7 @@ function Dashboard({
    safe._updatedAt = Date.now();
    try { save(safe, uid); } catch (e) { console.error("Erro ao guardar localmente:", e); }
    stateRef.current = safe;
+   window.__evfCurrentState=safe;
    if (uid && fbDb) {
      try {
        const payload = JSON.parse(JSON.stringify(safe));
@@ -2849,6 +2993,7 @@ function Dashboard({
        /*#__PURE__*/React.createElement("div",{className:"evf-account-name"},(state.profile&&state.profile.name)||"Utilizador"),
        /*#__PURE__*/React.createElement("div",{className:"evf-account-email"},(user&&user.email)||(user&&user.isAnonymous?"Acesso automático":"Conta local"))
      ),
+     React.createElement(AccountAuthTools,{user}),
      React.createElement(SyncCard,null),
      React.createElement(AccountTools,{state,update,forceOpen:openTargets,uid}),
      /*#__PURE__*/React.createElement("div",{className:"evf-menu-footer"},"EvolveFit 2.0")
@@ -5082,7 +5227,9 @@ function App() {
    try {
      unsub = fbAuth.onAuthStateChanged(async u => {
        if (u) {
-         setUser(u);
+         const transition=window.__evfAuthTransition;
+         if(transition)try{await transition;}catch(e){}
+         setUser((fbAuth&&fbAuth.currentUser)||u);
          return;
        }
        try {
@@ -5100,6 +5247,11 @@ function App() {
    }
    return () => unsub();
  }, []);
+ useEffect(()=>{
+  const onAccountAuth=e=>setUser(e.detail||(fbAuth&&fbAuth.currentUser)||null);
+  window.addEventListener("evolvefit-auth-updated",onAccountAuth);
+  return()=>window.removeEventListener("evolvefit-auth-updated",onAccountAuth);
+ },[]);
  // Sem nuvem configurada: funciona localmente, como antes.
  if (!CLOUD_ENABLED) return /*#__PURE__*/React.createElement(Dashboard, {
  user: null
