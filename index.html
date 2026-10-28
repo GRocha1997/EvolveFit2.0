@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=7">
+<link rel="stylesheet" href="evolvefit-polish.css?v=8">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -3223,7 +3223,7 @@ function Workouts({
    const weight=parseNum(entry.weight), notes=entry.notes||"";
    const planMatch=(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
    if(planMatch){planMatch.weight=weight;planMatch.notes=notes;}
-   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):null,actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):null,repsS:parseInt(entry.repsS,10)||0,repsB:parseInt(entry.repsB,10)||0,rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
+   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),repsS:parseInt(entry.repsS,10)||0,repsB:parseInt(entry.repsB,10)||0,rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
   });
   const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
   const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex};
@@ -3623,8 +3623,6 @@ function TrainingHistory({state,update}) {
     field("Exercício","name",e.name,v=>changeExercise(i,"name",v)),
     field("Séries planeadas","sets",e.sets,v=>changeExercise(i,"sets",v),"number",{min:"0",inputMode:"numeric"}),
     field("Reps planeadas","reps",e.reps,v=>changeExercise(i,"reps",v),"number",{min:"0",inputMode:"numeric"}),
-    field("Séries realizadas","actualSets",e.actualSets??"",v=>changeExercise(i,"actualSets",v),"number",{min:"1",inputMode:"numeric",placeholder:"não registadas"}),
-    field("Reps reais por série","actualReps",e.actualReps??"",v=>changeExercise(i,"actualReps",v),"number",{min:"1",inputMode:"numeric",placeholder:"não registadas"}),
     field("Carga (kg)","weight",e.weight??"",v=>changeExercise(i,"weight",v),"number",{min:"0",step:"0.1",inputMode:"decimal"}),
     field("RIR","rir",e.rir??"",v=>changeExercise(i,"rir",v),"number",{min:"0",max:"4",inputMode:"numeric",placeholder:"não registado"})
    ),
@@ -3663,8 +3661,6 @@ function WorkoutLogger({
  weight: fmtNum(t ? t.weight : x.weight),
  notes: t && t.notes != null ? t.notes : (x.notes || ""),
  rir: t && t.rir != null ? t.rir : null,
- actualSets: t && t.actualSets ? String(t.actualSets) : "",
- actualReps: t && t.actualReps ? String(t.actualReps) : "",
  repsS: t && t.repsS ? String(t.repsS) : "",
  repsB: t && t.repsB ? String(t.repsB) : ""
  };
@@ -3718,8 +3714,6 @@ function WorkoutLogger({
  d[i] = {
  ...row(x, i),
  weight: fmtNum(prev.weight),
- actualSets: prev.actualSets ? String(prev.actualSets) : "",
- actualReps: prev.actualReps ? String(prev.actualReps) : "",
  rir: prev.rir != null ? prev.rir : rirOf(x)
  };
  setDraft(d);
@@ -3734,8 +3728,6 @@ function WorkoutLogger({
  weight: fmtNum(prev.weight),
  notes: row(x, i).notes,
  rir: prev.rir != null ? prev.rir : rirOf(x),
- actualSets: prev.actualSets ? String(prev.actualSets) : "",
- actualReps: prev.actualReps ? String(prev.actualReps) : "",
  repsS: prev.repsS ? String(prev.repsS) : "",
  repsB: prev.repsB ? String(prev.repsB) : ""
  } : row(x, i);
@@ -3803,7 +3795,7 @@ function WorkoutLogger({
  className: "log-sr"
  }, x.sets, "×", repsLbl(x)), /*#__PURE__*/React.createElement("span", {
  className: "log-summary" + (done ? "" : " muted")
- }, done ? (r.weight ? fmtNum(r.weight) + "kg · " : "") + "RIR " + rirLabel(r.rir) + (r.actualReps ? " · "+r.actualReps+" reps reais" : "") + (r.actualSets ? " · "+r.actualSets+" séries" : "") : "por registar"), /*#__PURE__*/React.createElement(I, {
+ }, done ? (r.weight ? fmtNum(r.weight) + "kg · " : "") + "RIR " + rirLabel(r.rir) : "por registar"), /*#__PURE__*/React.createElement(I, {
  name: "chevron",
  size: 14,
  className: "log-chev" + (isOpen ? " open" : "")
@@ -3829,9 +3821,7 @@ function WorkoutLogger({
  }, /*#__PURE__*/React.createElement(I, {
  name: "note",
  size: 15
- }))), /*#__PURE__*/React.createElement("div",{className:"log-actual-measures"},
- /*#__PURE__*/React.createElement("label", {className:"log-actual-reps"}, /*#__PURE__*/React.createElement("span",null,"Séries realizadas"), /*#__PURE__*/React.createElement("input", {className:"in",type:"number",min:"1",max:"99",inputMode:"numeric",placeholder:"Não registadas",value:r.actualSets||"",onChange:e=>setField(i,"actualSets",e.target.value.replace(/\D/g,"").slice(0,2))}), /*#__PURE__*/React.createElement("small",null,"Séries realmente executadas.")),
- /*#__PURE__*/React.createElement("label", {className:"log-actual-reps"}, /*#__PURE__*/React.createElement("span",null,"Reps reais por série"), /*#__PURE__*/React.createElement("input", {className:"in",type:"number",min:"1",max:"999",inputMode:"numeric",placeholder:"Não registadas",value:r.actualReps||"",onChange:e=>setField(i,"actualReps",e.target.value.replace(/\D/g,"").slice(0,3))}), /*#__PURE__*/React.createElement("small",null,"Repetições executadas, não a meta planeada."))), isUni && /*#__PURE__*/React.createElement("div", {
+ }))), isUni && /*#__PURE__*/React.createElement("div", {
  className: "pl-grid",
  style: {
  gridTemplateColumns: "1fr 1fr"

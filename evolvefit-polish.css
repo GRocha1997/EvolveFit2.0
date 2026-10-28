@@ -715,22 +715,6 @@ button:disabled {
   .hist-edit-grid { grid-template-columns: 1fr; }
 }
 
-.log-actual-reps {
-  display: flex;
-  flex-direction: column;
-  gap: 5px;
-  margin: 0 0 10px;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 700;
-}
-.log-actual-reps input { min-height: 44px; }
-.log-actual-reps small {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 450;
-  line-height: 1.4;
-}
 .exercise-metric-tabs {
   display: flex;
   gap: 6px;
@@ -755,11 +739,6 @@ button:disabled {
   background: color-mix(in srgb, var(--accent, #2B5FD9) 10%, var(--surface));
   color: var(--text);
   font-weight: 750;
-}
-.log-actual-measures {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 9px;
 }
 .log-save-feedback { margin-top: 8px; }
 .exercise-chart-area { fill: var(--coral); }
