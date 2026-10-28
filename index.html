@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=8">
+<link rel="stylesheet" href="evolvefit-polish.css?v=9">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -3197,14 +3197,11 @@ function Workouts({
  const [view, setView] = useState("treino");
  const [planDay, setPlanDay] = useState(initialDay != null ? initialDay : todayIdx);
  const [showRir, setShowRir] = useState(false);
- const [analysisTab, setAnalysisTab] = useState("prog");
  const weekDays = weekFromMonday(state.days);
  const treinos = weekDays.filter(w => trainedOn(state, w.key)).length;
- const volWeek = state.sessions.filter(s => weekDays.some(w => w.key === s.date)).reduce((a, s) => a + (s.ex||[]).reduce((v,e)=>{const reps=parseInt(e.actualReps,10),sets=parseInt(e.actualSets,10),weight=parseNum(e.weight),sideReps=parseInt(e.repsS,10)>0&&parseInt(e.repsB,10)>0?parseInt(e.repsS,10)+parseInt(e.repsB,10):null;const count=sideReps||reps;return v+(count>0&&sets>0&&weight>0?sets*count*weight:0);},0),0);
  const kcal = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
  const workoutStats=[];
  if(treinos>0) workoutStats.push(React.createElement(Stat,{key:"treinos",icon:"dumbbell",tint:"coral",v:treinos,l:"treinos esta semana"}));
- if(volWeek>0) workoutStats.push(React.createElement(Stat,{key:"volume",icon:"barChart",tint:"violet",v:(volWeek/1000).toFixed(1)+"k",l:"volume (kg)"}));
  if(kcal>0) workoutStats.push(React.createElement(Stat,{key:"kcal",icon:"flame",tint:"amber",v:kcal,l:"kcal do treino"}));
  const selectedDayKey = weekDays[sel] ? weekDays[sel].key : todayKey;
  const selectedSession = state.sessions.find(s => s.date === selectedDayKey && s.dayIdx === sel) || null;
@@ -3223,7 +3220,7 @@ function Workouts({
    const weight=parseNum(entry.weight), notes=entry.notes||"";
    const planMatch=(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
    if(planMatch){planMatch.weight=weight;planMatch.notes=notes;}
-   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),repsS:parseInt(entry.repsS,10)||0,repsB:parseInt(entry.repsB,10)||0,rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
+   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),repsS:parseInt(entry.repsS,10)>0?parseInt(entry.repsS,10):(parseInt(x.repsS,10)||0),repsB:parseInt(entry.repsB,10)>0?parseInt(entry.repsB,10):(parseInt(x.repsB,10)||0),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
   });
   const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
   const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex};
@@ -3257,29 +3254,23 @@ function Workouts({
  (plano[sel]?.ex||[]).forEach(e=>{if(e.name)progressExerciseMap.set(progressGroupKey(e),{name:e.name,exerciseId:e.exerciseId||null});});
  state.sessions.filter(se=>se.dayIdx===sel).forEach(se=>(se.ex||[]).forEach(e=>{if(e.name&&!progressExerciseMap.has(progressGroupKey(e)))progressExerciseMap.set(progressGroupKey(e),{name:e.name,exerciseId:e.exerciseId||null});}));
  const progression=[...progressExerciseMap.entries()].map(([group,identity])=>{
- const {name,exerciseId}=identity,samples=[],rirSeries=[];
+ const {name,exerciseId}=identity,samples=[];
  state.sessions.forEach(se=>{
   if(se.dayIdx!==sel||String(se.date||"")>todayKey)return;
   const e=(se.ex||[]).find(item=>progressGroupKey(item)===group);
   if(!e)return;
-  const weight=parseNum(e.weight),sets=parseInt(e.actualSets,10)||0,actual=parseInt(e.actualReps,10)||0;
-  const left=parseInt(e.repsS,10)||0,right=parseInt(e.repsB,10)||0;
-  const reps=actual>0?actual:(left>0&&right>0?(left+right)/2:null);
-  const countedReps=left>0&&right>0?left+right:actual;
-  const volume=weight>0&&sets>0&&countedReps>0?weight*sets*countedReps:null;
-  if((Number.isFinite(weight)&&weight>0)||reps>0||volume>0)samples.push({date:se.date,weight:weight>0?weight:null,actualReps:reps,volume});
-  if(e.rir!=null&&Number.isFinite(Number(e.rir)))rirSeries.push({date:se.date,value:Number(e.rir)});
+  const weight=parseNum(e.weight);
+  if(Number.isFinite(weight)&&weight>0)samples.push({date:se.date,weight});
  });
  samples.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
- rirSeries.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
  const series=samples.map(x=>Number(x.weight)).filter(x=>Number.isFinite(x)&&x>0),first=series[0],last=series[series.length-1];
- const lastRir=rirSeries.length?rirSeries[rirSeries.length-1].value:null,dir=series.length<2?"flat":last>first?"up":last<first?"down":"flat";
- return {name,exerciseId,series,samples,first,last,dir,lastRir};
+ const dir=series.length<2?"flat":last>first?"up":last<first?"down":"flat";
+ return {name,exerciseId,series,samples,first,last,dir};
  });
  const upCount = progression.filter(p => p.dir === "up").length;
  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
  title: "Treinos",
- sub: "Regista o treino do dia, o RIR e acompanha a carga"
+ sub: "Regista o treino e acompanha a evolução da carga"
  }), /*#__PURE__*/React.createElement("div", {
  className: "seg"
  }, [["treino", "Treino"], ["progresso", "Progresso"], ["historico", "Histórico"], ["plano", "Plano"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
@@ -3338,9 +3329,8 @@ function Workouts({
    )
  ),
  workoutStats.length>0 && React.createElement("div",{className:"stat-grid"},workoutStats),
- state.sessions.length>0 && React.createElement(TrainingAnalysis,{state,daySessions,progression,upCount,tab:analysisTab,setTab:setAnalysisTab}),
- state.sessions.length>0 && React.createElement(AsymmetryCard,{state}),
- !state.sessions.length && React.createElement("div",{className:"card progress-empty"},"Regista uma sessão para começares a ver carga, reps reais e volume por exercício.")
+ state.sessions.length>0 && React.createElement(TrainingAnalysis,{state,progression,upCount}),
+ !state.sessions.length && React.createElement("div",{className:"card progress-empty"},"Regista as cargas usadas para veres se o peso evolui em cada exercício.")
  ), view === "historico" && /*#__PURE__*/React.createElement(TrainingHistory, {
  state: state,
  update: update
@@ -3417,88 +3407,47 @@ function RirChips({
 }
 function ExerciseProgressChart({exercise}) {
  const h=React.createElement;
- const [metric,setMetric]=useState("load");
- const choices={load:{label:"Carga",unit:"kg",color:"#2B5FD9"},reps:{label:"Reps reais",unit:"reps/série",color:"#1E9E6A"},volume:{label:"Volume",unit:"kg",color:"#B4425A"}};
- const choice=choices[metric];
- const samples=(exercise.samples||[]).map(sample=>({ ...sample, value:metric==="load"?Number(sample.weight):metric==="reps"?Number(sample.actualReps):Number(sample.volume) })).filter(x=>Number.isFinite(x.value)&&x.value>0).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+ const samples=(exercise.samples||[]).filter(x=>Number(x.weight)>0).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+ if(!samples.length)return null;
+ const weights=samples.map(x=>Number(x.weight)),min=Math.min(...weights),max=Math.max(...weights);
+ const pad=(max-min)*.18||Math.max(max*.06,.5),low=Math.max(0,min-pad),high=max+pad;
+ const width=320,height=150,left=48,right=12,top=12,bottom=29,plotW=width-left-right,plotH=height-top-bottom;
+ const x=i=>samples.length===1?left+plotW/2:left+i*plotW/(samples.length-1),y=v=>top+(high-v)/(high-low)*plotH;
+ const points=samples.map((sample,i)=>x(i).toFixed(1)+","+y(Number(sample.weight)).toFixed(1)).join(" ");
+ const ticks=[high,(high+low)/2,low],first=weights[0],last=weights[weights.length-1],delta=+(last-first).toFixed(1);
  const dateLabel=value=>new Date(value+"T12:00:00").toLocaleDateString("pt-PT",{day:"2-digit",month:"short"});
- let graph=null,summary=null;
- if(samples.length){
-  const values=samples.map(x=>x.value),min=Math.min(...values),max=Math.max(...values),pad=(max-min)*.18||Math.max(max*.06,.5),low=Math.max(0,min-pad),high=max+pad;
-  const width=320,height=150,left=48,right=12,top=12,bottom=29,plotW=width-left-right,plotH=height-top-bottom;
-  const x=i=>samples.length===1?left+plotW/2:left+i*plotW/(samples.length-1),y=v=>top+(high-v)/(high-low)*plotH;
-  const points=samples.map((sample,i)=>x(i).toFixed(1)+","+y(sample.value).toFixed(1)).join(" ");
-  const ticks=[high,(high+low)/2,low],first=values[0],last=values[values.length-1],delta=+(last-first).toFixed(1);
-  const deltaLabel=samples.length>1?(delta>0?"+":"")+fmtNum(delta)+" "+choice.unit+" no período":"Primeiro registo";
-  summary=h("div",{className:"exercise-progress-latest"},fmtNum(last)," ",choice.unit,h("span",{className:"exercise-progress-delta "+(delta>0?"up":delta<0?"down":"flat")},deltaLabel));
-  graph=h("svg",{className:"exercise-progress-svg",viewBox:"0 0 "+width+" "+height,role:"img","aria-label":exercise.name+", "+choice.label+": "+samples.length+" registos, de "+fmtNum(first)+" a "+fmtNum(last)+" "+choice.unit},
+ const deltaLabel=samples.length>1?(delta>0?"+":"")+fmtNum(delta)+" kg no período":"Primeiro registo";
+ const aria="Evolução da carga de "+exercise.name+": "+samples.length+" registos, de "+fmtNum(first)+" para "+fmtNum(last)+" quilogramas.";
+ return h("div",{className:"exercise-progress-item"},
+  h("div",{className:"exercise-progress-head"},
+   h("div",{className:"exercise-progress-title-wrap"},h("div",{className:"exercise-progress-name"},exercise.name),h("div",{className:"exercise-progress-count"},samples.length," registo",samples.length===1?"":"s")),
+   h("div",{className:"exercise-progress-latest"},fmtNum(last)," kg",h("span",{className:"exercise-progress-delta "+(delta>0?"up":delta<0?"down":"flat")},deltaLabel))
+  ),
+  h("svg",{className:"exercise-progress-svg",viewBox:"0 0 "+width+" "+height,role:"img","aria-label":aria},
    ticks.map((tick,i)=>h(React.Fragment,{key:"tick-"+i},h("line",{x1:left,y1:y(tick),x2:width-right,y2:y(tick),className:"exercise-chart-grid"}),h("text",{x:left-7,y:y(tick)+4,textAnchor:"end",className:"exercise-chart-label"},fmtNum(tick)))),
-   samples.length>1&&h("polygon",{points:x(0)+","+(height-bottom)+" "+points+" "+x(samples.length-1)+","+(height-bottom),className:"exercise-chart-area",style:{fill:choice.color}}),
-   samples.length>1&&h("polyline",{points,className:"exercise-chart-line",style:{stroke:choice.color}}),
-   samples.map((sample,i)=>h("circle",{key:String(sample.date)+"-"+i,cx:x(i),cy:y(sample.value),r:samples.length===1?5:3.7,className:"exercise-chart-point",style:{fill:choice.color}})),
+   samples.length>1&&h("polygon",{points:x(0)+","+(height-bottom)+" "+points+" "+x(samples.length-1)+","+(height-bottom),className:"exercise-chart-area"}),
+   samples.length>1&&h("polyline",{points,className:"exercise-chart-line"}),
+   samples.map((sample,i)=>h("circle",{key:String(sample.date)+"-"+i,cx:x(i),cy:y(Number(sample.weight)),r:samples.length===1?5:3.7,className:"exercise-chart-point"})),
    h("text",{x:left,y:height-5,textAnchor:"start",className:"exercise-chart-label"},dateLabel(samples[0].date)),
    samples.length>1&&h("text",{x:width-right,y:height-5,textAnchor:"end",className:"exercise-chart-label"},dateLabel(samples[samples.length-1].date))
-  );
- } else graph=h("div",{className:"exercise-progress-hint"},metric==="load"?"Sem carga registada para este exercício.":metric==="reps"?"Sem repetições reais registadas. As reps planeadas não são usadas como medições.":"Sem volume calculável: regista carga, séries e reps realmente executadas.");
- return h("div",{className:"exercise-progress-item"},
-  h("div",{className:"exercise-progress-head"},h("div",{className:"exercise-progress-title-wrap"},h("div",{className:"exercise-progress-name"},exercise.name),h("div",{className:"exercise-progress-count"},samples.length," registo",samples.length===1?"":"s · ",choice.label)),summary),
-  h("div",{className:"exercise-metric-tabs",role:"group","aria-label":"Métrica do gráfico de "+exercise.name},Object.entries(choices).map(([key,opt])=>h("button",{type:"button",key,className:"exercise-metric-btn"+(metric===key?" active":""),"aria-pressed":metric===key,onClick:()=>setMetric(key)},opt.label))),
-  graph,
-  metric==="volume"&&samples.length>0&&h("div",{className:"exercise-progress-hint"},"Volume = carga × séries realizadas × reps reais; sem medidas completas, o ponto é omitido."),
+  ),
   samples.length===1&&h("div",{className:"exercise-progress-hint"},"Mais um registo permite comparar a tendência.")
  );
 }
 
-function TrainingAnalysis({
- state,
- daySessions,
- progression,
- upCount,
- tab = "prog",
- setTab = () => {}
-}) {
+function TrainingAnalysis({state,progression,upCount}) {
  const h=React.createElement;
- if (!state.sessions.length) return null;
- const progressionRows=progression.filter(p=>p.samples?.length>0||p.lastRir!=null);
- const chartRows=progressionRows.filter(p=>p.samples?.length>0);
- const hasProgressData=chartRows.some(p=>p.samples.length>1);
- const rows=[];
- state.sessions.filter(se=>daysBetween(new Date(se.date),TODAY)<14).forEach(se=>(se.ex||[]).forEach(e=>{
-   if(e.name&&e.rir!=null)rows.push(e);
- }));
- const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
- const avg=rows.length?mean(rows.map(e=>Number(e.rir))):null;
- if(!progressionRows.length&&!rows.length)return null;
- const tgt=rows.length?mean(rows.map(e=>e.rirAlvo!=null?Number(e.rirAlvo):DEFAULT_RIR)):DEFAULT_RIR;
- const counts=RIR_OPTS.map(n=>rows.filter(e=>Math.min(4,Number(e.rir))===n).length);
- const maxCount=Math.max(1,...counts);
- const status=avg==null?"":avg<tgt-.5?"Estás a treinar mais perto da falha do que o planeado — atenção à recuperação.":avg>tgt+.5?"Sobra reserva na maioria das séries — há margem para subir cargas.":"Intensidade alinhada com o plano.";
+ if(!state.sessions.length)return null;
+ const chartRows=progression.filter(p=>p.samples?.some(sample=>Number(sample.weight)>0));
  const graphContent=chartRows.length
-   ? chartRows.map((exercise,i)=>h(ExerciseProgressChart,{key:exercise.name+"-"+i,exercise}))
-   : h("div",{className:"pc-empty"},"Ainda não há métricas registadas para este treino. Guarda cargas ou reps reais para começar os gráficos.");
- const rirContent=avg==null
-   ? h("div",{className:"pc-empty"},"Regista o RIR nos exercícios ao guardar um treino para veres aqui a tua intensidade.")
-   : h(React.Fragment,null,
-       h("div",{className:"rir-avg"},h("span",{className:"rir-avg-v"},avg.toFixed(1)),h("span",{className:"rir-avg-l"},"RIR médio · alvo ",tgt.toFixed(1)," · ",rows.length," exercício",rows.length===1?"":"s")),
-       h("div",{className:"rir-status"},status),
-       RIR_OPTS.map(n=>h("div",{className:"rir-dist-row",key:n},
-         h("span",{className:"rir-dist-k"},"RIR ",rirLabel(n),n===0?" · falha":""),
-         h("div",{className:"rir-dist-bar"},h("div",{className:"rir-dist-fill",style:{width:counts[n]/maxCount*100+"%",background:RIR_COLORS[n]}})),
-         h("span",{className:"rir-dist-n"},counts[n])
-       ))
-     );
+  ? chartRows.map((exercise,i)=>h(ExerciseProgressChart,{key:exercise.exerciseId||exercise.name+"-"+i,exercise}))
+  : h("div",{className:"pc-empty"},"Ainda não há cargas registadas para este treino. Regista o peso usado para acompanhar a evolução.");
  return h("div",{className:"card progress-card"},
-   h("div",{className:"period-tabs"},
-     h("button",{className:"period-btn"+(tab==="prog"?" active":""),onClick:()=>setTab("prog")},"Exercícios"),
-     h("button",{className:"period-btn"+(tab==="rir"?" active":""),onClick:()=>setTab("rir")},"Intensidade")
-   ),
-   h("div",{className:"pc-head"},
-     h("div",{className:"pc-title"},tab==="prog"?"Evolução de carga por exercício":"Intensidade (RIR)"),
-     tab==="prog"?h("div",{className:"pc-badge"+(hasProgressData&&upCount>0?" up":"")},chartRows.length," exercício",chartRows.length===1?"":"s"):h("div",{className:"pc-badge"},"últimos 14 dias")
-   ),
-   tab==="prog"?graphContent:rirContent
+  h("div",{className:"pc-head"},h("div",{className:"pc-title"},"Evolução de carga por exercício"),h("div",{className:"pc-badge"+(chartRows.length>1&&upCount>0?" up":"")},chartRows.length," exercício",chartRows.length===1?"":"s")),
+  graphContent
  );
 }
+
 function arrayMove(arr, from, to) {
  const a = [...arr];
  const [item] = a.splice(from, 1);
@@ -3661,8 +3610,6 @@ function WorkoutLogger({
  weight: fmtNum(t ? t.weight : x.weight),
  notes: t && t.notes != null ? t.notes : (x.notes || ""),
  rir: t && t.rir != null ? t.rir : null,
- repsS: t && t.repsS ? String(t.repsS) : "",
- repsB: t && t.repsB ? String(t.repsB) : ""
  };
  };
  const firstIncomplete = rows => {
@@ -3728,8 +3675,6 @@ function WorkoutLogger({
  weight: fmtNum(prev.weight),
  notes: row(x, i).notes,
  rir: prev.rir != null ? prev.rir : rirOf(x),
- repsS: prev.repsS ? String(prev.repsS) : "",
- repsB: prev.repsB ? String(prev.repsB) : ""
  } : row(x, i);
  });
  setDraft(d);
@@ -3760,7 +3705,6 @@ function WorkoutLogger({
  t: "Alvo RIR " + rirLabel(tgt) + (parts.length ? " · última vez " + parts.join(" · ") : "")
  };
  const done = r.rir != null;
- const isUni = /single-arm db chest/i.test(x.name);
  const sug = progressionTip(history.filter(se => se.date !== sessionDate), x.name, parseNum(r.weight), tgt, x.exerciseId);
  const isOpen = openIdx === i;
  return /*#__PURE__*/React.createElement("div", {
@@ -3821,20 +3765,7 @@ function WorkoutLogger({
  }, /*#__PURE__*/React.createElement(I, {
  name: "note",
  size: 15
- }))), isUni && /*#__PURE__*/React.createElement("div", {
- className: "pl-grid",
- style: {
- gridTemplateColumns: "1fr 1fr"
- }
- }, [["repsS", "Lado menor (reps)"], ["repsB", "Lado maior (reps)"]].map(([f, l]) => /*#__PURE__*/React.createElement("div", {
- className: "pl-f",
- key: f
- }, /*#__PURE__*/React.createElement("label", null, l), /*#__PURE__*/React.createElement("input", {
- className: "in",
- inputMode: "numeric",
- value: r[f],
- onChange: e => setField(i, f, e.target.value.replace(/\D/g, "").slice(0, 3))
- })))), !!sug && /*#__PURE__*/React.createElement("button", {
+ }))), !!sug && /*#__PURE__*/React.createElement("button", {
  type: "button",
  className: "log-quickfill",
  style: {
@@ -3972,65 +3903,6 @@ const progressionTip = (history, name, curW, tgt, exerciseId) => {
  nw: curW + inc
  };
 };
-function AsymmetryCard({
- state
-}) {
- const h = React.createElement;
- const by = {};
- [...state.sessions].sort((a, b) => a.date.localeCompare(b.date)).forEach(se => (se.ex || []).forEach(e => {
- if (e.repsS > 0 && e.repsB > 0) (by[e.name] = by[e.name] || []).push({
- date: se.date,
- s: e.repsS,
- b: e.repsB,
- w: e.weight
- });
- }));
- const names = Object.keys(by);
- if (!names.length) return null;
- const fd = d => d.slice(8, 10) + "/" + d.slice(5, 7);
- return h("div", {
- className: "card"
- }, h("div", {
- className: "water-title",
- style: {
- marginBottom: 8
- }
- }, "Assimetria (lado menor vs maior)"), names.length === 0 ? h("div", {
- className: "menu-sub"
- }, "Regista as reps de cada lado no Single-Arm DB Chest Press (Quinta) para acompanhar a diferença.") : names.map(n => {
- const L = by[n],
- diffs = L.map(r => r.b - r.s),
- avg = a => a.reduce((x, y) => x + y, 0) / a.length;
- const trend = L.length >= 4 ? avg(diffs.slice(-2)) - avg(diffs.slice(0, 2)) : null;
- return h("div", {
- key: n,
- style: {
- marginBottom: 10
- }
- }, h("div", {
- className: "menu-m"
- }, n), trend != null && h("div", {
- className: "menu-sub",
- style: {
- margin: "2px 0 4px"
- }
- }, trend < 0 ? "A diferença está a diminuir (" + trend.toFixed(1) + " reps)" : trend > 0 ? "A diferença aumentou (+" + trend.toFixed(1) + " reps)" : "Diferença estável"), L.slice(-6).reverse().map((r, i) => h("div", {
- className: "menu-row",
- key: i,
- style: {
- padding: "6px 0"
- }
- }, h("div", {
- className: "menu-h"
- }, fd(r.date)), h("div", {
- style: {
- flex: 1
- }
- }, "menor " + r.s + " · maior " + r.b + (r.w ? " · " + fmtNum(r.w) + " kg" : "")), h("div", {
- className: "menu-sub"
- }, "dif. " + (r.b - r.s)))));
- }));
-}
 /* ============================ PROGRESSO CORPO =========================== */
 const BODY_METRICS = [{
  k: "weight",
@@ -5127,7 +4999,7 @@ function Coach2027({ state, update, onNavigate }) {
      /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",fontWeight:750,color:"var(--muted)",marginBottom:"8px"}},"Perguntas rápidas"),
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-prompts"},
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha evolução corporal? Analisa peso, gordura corporal e cintura e compara os dados mais recentes com o meu ponto de partida.")},"Corpo"),
-       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha progressão no treino? Analisa cargas, reps, RIR, volume, frequência e evolução dos exercícios recentes.")},"Treino"),
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a evolução das cargas por exercício? Resume o que subiu, o que se manteve e o que ainda tem poucos registos.")},"Treino"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("A minha nutrição e atividade estão alinhadas com o objetivo? Analisa calorias, proteína, gordura, passos, água e cardio.")},"Nutrição"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha recuperação? Analisa sono, água, cardio, frequência de treino e carga e diz se estou a recuperar o suficiente.")},"Recuperação"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Analisa a minha assimetria no Single-Arm DB Chest Press. Compara lado menor e maior, reps, carga e RIR e diz-me se devo manter ou ajustar.")},"Assimetria"),

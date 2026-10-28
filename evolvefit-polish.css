@@ -715,30 +715,5 @@ button:disabled {
   .hist-edit-grid { grid-template-columns: 1fr; }
 }
 
-.exercise-metric-tabs {
-  display: flex;
-  gap: 6px;
-  overflow-x: auto;
-  margin: 8px 0 6px;
-  scrollbar-width: none;
-}
-.exercise-metric-tabs::-webkit-scrollbar { display: none; }
-.exercise-metric-btn {
-  min-height: 40px;
-  padding: 7px 11px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface);
-  color: var(--muted);
-  font: inherit;
-  font-size: 12px;
-  white-space: nowrap;
-}
-.exercise-metric-btn.active {
-  border-color: var(--accent, #2B5FD9);
-  background: color-mix(in srgb, var(--accent, #2B5FD9) 10%, var(--surface));
-  color: var(--text);
-  font-weight: 750;
-}
 .log-save-feedback { margin-top: 8px; }
 .exercise-chart-area { fill: var(--coral); }
