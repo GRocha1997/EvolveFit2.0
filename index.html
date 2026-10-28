@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=6">
+<link rel="stylesheet" href="evolvefit-polish.css?v=9">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -609,29 +609,45 @@ const load = uid => {
 };
 
 const SNAP_KEY = BASE_KEY + "_snapshots";
-let _snapDay = null;
-try { _snapDay = localStorage.getItem(SNAP_KEY + "_day"); } catch (e) {}
-/* Guarda no máximo 1 cópia por dia (últimas 3) para recuperar de qualquer engano. */
-const snapshotDaily = payload => {
+const snapOwner = uid => uid ? String(uid) : "local";
+const snapDayKey = uid => SNAP_KEY + "_day_" + encodeURIComponent(snapOwner(uid));
+/* Guarda até 3 cópias diárias por conta, neste dispositivo. */
+const snapshotDaily = (payload,uid) => {
  try {
-   const day = new Date().toISOString().slice(0, 10);
-   if (_snapDay === day) return;
-   const arr = JSON.parse(localStorage.getItem(SNAP_KEY) || "[]");
-   arr.push({day, at: Date.now(), json: payload});
-   while (arr.length > 3) arr.shift();
-   localStorage.setItem(SNAP_KEY, JSON.stringify(arr));
-   localStorage.setItem(SNAP_KEY + "_day", day);
-   _snapDay = day;
+   const owner=snapOwner(uid),day=new Date().toISOString().slice(0,10),dayKey=snapDayKey(uid);
+   if(localStorage.getItem(dayKey)===day)return;
+   const all=JSON.parse(localStorage.getItem(SNAP_KEY)||"[]"),arr=Array.isArray(all)?all:[];
+   if(arr.some(x=>(x.owner||"local")===owner&&x.day===day))return;
+   const mine=arr.filter(x=>(x.owner||"local")===owner);
+   mine.push({day,at:Date.now(),json:payload,owner});
+   while(mine.length>3)mine.shift();
+   const others=arr.filter(x=>(x.owner||"local")!==owner);
+   localStorage.setItem(SNAP_KEY,JSON.stringify([...others,...mine]));
+   localStorage.setItem(dayKey,day);
  } catch (e) {}
+};
+const readSnapshots = uid => {
+ try {
+   const owner=snapOwner(uid),arr=JSON.parse(localStorage.getItem(SNAP_KEY)||"[]");
+   return Array.isArray(arr)?arr.filter(x=>x&&typeof x.json==="string"&&(x.owner||"local")===owner).slice().reverse():[];
+ } catch(e) { return []; }
+};
+const setLocalSaveStatus = error => {
+ window.EvolveFitLocalStatus={status:error?"error":"saved",at:Date.now(),error:error?String(error.message||error).slice(0,120):null};
+ try{window.dispatchEvent(new CustomEvent("evolvefit-local-status",{detail:window.EvolveFitLocalStatus}));}catch(e){}
 };
 const save = (s, uid) => {
  try {
    const payload = JSON.stringify(s);
    localStorage.setItem(keyFor(uid), payload);
    localStorage.setItem(DEVICE_BACKUP_KEY, payload);
-   if (s && ((s.body && s.body.length) || (s.sessions && s.sessions.length))) snapshotDaily(payload);
+   if (s && ((s.body && s.body.length) || (s.sessions && s.sessions.length) || Object.keys(s.days||{}).length)) snapshotDaily(payload,uid);
+   setLocalSaveStatus(null);
+   return true;
  } catch (e) {
+   setLocalSaveStatus(e);
    console.error("Erro de persistência local:", e);
+   return false;
  }
 };
 
@@ -653,7 +669,11 @@ function normalize(s) {
    perna: Number.isFinite(Number(x.perna)) ? Number(x.perna) : 0,
    rabo: Number.isFinite(Number(x.rabo)) ? Number(x.rabo) : 0
  }));
- s.sessions = Array.isArray(s.sessions) ? s.sessions : [];
+ s.sessions = (Array.isArray(s.sessions) ? s.sessions : []).filter(se=>se&&typeof se==="object").map((se,i)=>({
+   ...se,
+   id:String(se.id||("legacy-"+String(se.date||"unknown")+"-"+String(se.dayIdx??"x")+"-"+i)),
+   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>({...e})):[]
+ }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
  if (s.profile.name == null) s.profile.name = "Gonçalo";
  if (s.profile.bfStart == null) s.profile.bfStart = 27.5;
@@ -732,6 +752,17 @@ function normalize(s) {
  R("Quinta", /single-arm db chest/i, 10, 12);
  R("Quinta", /flat machine chest/i, 10, 12, "10–12 reps");
  }
+ // IDs estáveis mantêm a série histórica unida quando o utilizador renomeia exercícios.
+ const exKey=name=>String(name||"").trim().toLocaleLowerCase("pt-PT");
+ s.plano.forEach((pd,di)=>Array.isArray(pd.ex)&&pd.ex.forEach((x,ei)=>{if(!x.exerciseId)x.exerciseId="plan-"+di+"-"+ei;}));
+ s.sessions.forEach(se=>{
+  const planDay=s.plano[Number(se.dayIdx)]?.ex||[];
+  se.ex=se.ex.map(e=>{
+   if(e.exerciseId)return e;
+   const match=planDay.find(p=>exKey(p.name)===exKey(e.name));
+   return {...e,exerciseId:match?match.exerciseId:"legacy-"+String(se.dayIdx??"x").replace(/[^0-9]/g,"")+"-"+encodeURIComponent(exKey(e.name))};
+  });
+ });
  // Garante que os pesos guardados são números (aceita decimais, ex: 15,5).
  s.plano.forEach(pd => Array.isArray(pd.ex) && pd.ex.forEach(x => {
  x.weight = parseNum(x.weight);
@@ -793,19 +824,41 @@ function evolveFitDecodeJwtPayload(token){
 
 async function evolveFitFirebaseIdToken(){
   try{
-    if(typeof firebase === "undefined" || !firebase.auth) return null;
-    const user = firebase.auth().currentUser;
-    if(!user) return null;
-    // getIdToken() só renova quando o token está perto de expirar.
-    const token = await user.getIdToken();
-    const payload = evolveFitDecodeJwtPayload(token);
-    if(!payload || payload.aud !== EVOLVEFIT_FIREBASE_PROJECT_ID){
-      console.warn("Firebase token de projeto incorreto:", payload && payload.aud, "=> esperado:", EVOLVEFIT_FIREBASE_PROJECT_ID);
+    if(typeof firebase === "undefined" || !firebase.auth){
+      window.__evfAuthError="Firebase Authentication SDK indisponível.";
       return null;
     }
+    const auth=firebase.auth();
+    let user=auth.currentUser;
+    if(!user){
+      try{
+        const credential=await auth.signInAnonymously();
+        user=(credential&&credential.user)||auth.currentUser||null;
+      }catch(authError){
+        const code=authError&&authError.code?authError.code+": ":"";
+        window.__evfAuthError=(code+((authError&&authError.message)||"não foi possível iniciar sessão anónima.")).slice(0,180);
+        console.warn("Firebase Auth: não foi possível iniciar sessão anónima:",authError);
+        return null;
+      }
+    }
+    if(!user){
+      window.__evfAuthError="Firebase não devolveu um utilizador autenticado.";
+      return null;
+    }
+    // getIdToken() renova o token apenas quando está perto de expirar.
+    const token=await user.getIdToken();
+    const payload=evolveFitDecodeJwtPayload(token);
+    if(!payload||payload.aud!==EVOLVEFIT_FIREBASE_PROJECT_ID){
+      window.__evfAuthError="Token Firebase inválido ou pertencente a outro projeto.";
+      console.warn("Firebase token de projeto incorreto:",payload&&payload.aud,"=> esperado:",EVOLVEFIT_FIREBASE_PROJECT_ID);
+      return null;
+    }
+    window.__evfAuthError=null;
     return token;
   }catch(e){
-    console.error("Firebase Auth token:", e);
+    const code=e&&e.code?e.code+": ":"";
+    window.__evfAuthError=(code+((e&&e.message)||e||"erro de autenticação")).slice(0,180);
+    console.error("Firebase Auth token:",e);
     return null;
   }
 }
@@ -2190,7 +2243,7 @@ function Stat({
 }
 
 /* =============================== SHELL ================================== */
-function AccountTools({state, update, forceOpen=false}) {
+function AccountTools({state, update, forceOpen=false, uid=null}) {
  const h=React.createElement;
  const fields=[
   {key:"kcalTarget",label:"Calorias",unit:"kcal",step:"25"},
@@ -2207,8 +2260,10 @@ function AccountTools({state, update, forceOpen=false}) {
  const [dataMessage,setDataMessage]=useState("");
  const [targetsOpen,setTargetsOpen]=useState(false);
  const [dataOpen,setDataOpen]=useState(false);
+ const [snapshots,setSnapshots]=useState(()=>readSnapshots(uid));
  const importRef=useRef(null);
  useEffect(()=>{if(forceOpen)setTargetsOpen(true);},[forceOpen]);
+ useEffect(()=>{if(dataOpen)setSnapshots(readSnapshots(uid));},[dataOpen,uid]);
  useEffect(()=>setDraft(Object.fromEntries(fields.map(f=>[f.key,String(state.profile?.[f.key]??"")]))),[state.profile]);
  const download=(name,type,content)=>{
   const blob=new Blob([content],{type});
@@ -2248,6 +2303,28 @@ function AccountTools({state, update, forceOpen=false}) {
    setDataMessage("Backup importado. A sincronização será atualizada se a cloud estiver ligada.");
   }catch(error){alert("Não foi possível importar o backup: "+(error?.message||"ficheiro inválido"));}
  };
+ const restoreSnapshot=snapshot=>{
+  try{
+   const restored=JSON.parse(snapshot.json);
+   if(!restored||typeof restored!=="object"||!restored.profile||typeof restored.days!=="object"||!Array.isArray(restored.body)||!Array.isArray(restored.sessions))throw new Error("A cópia não contém um estado EvolveFit válido.");
+   if(!window.confirm("Restaurar a cópia de "+snapshot.day+" vai substituir os dados atuais e poderá sincronizar essa versão com a cloud. Exporta primeiro uma cópia atual. Continuar?"))return;
+   update(current=>{Object.keys(current).forEach(key=>delete current[key]);Object.assign(current,clone(restored));});
+   setDataMessage("Cópia local de "+snapshot.day+" restaurada. Confirma a sincronização no cartão abaixo.");
+  }catch(error){alert("Não foi possível restaurar a cópia: "+(error?.message||"cópia inválida"));}
+ };
+ const eraseRecords=()=>{
+  const cloud=window.__evfSyncMode==="cloud";
+  const text="Apagar histórico de treinos, medições, hábitos, fotografias e cópias de restauro deste dispositivo. As metas e o plano de treino serão mantidos"+(cloud?" e a eliminação será enviada para a cloud quando houver ligação.":". Esta ação não apaga dados que tenham sido exportados ou guardados noutro dispositivo.")+" Continuar?";
+  if(!window.confirm(text))return;
+  try{localStorage.removeItem(SNAP_KEY);localStorage.removeItem(SNAP_KEY+"_day");for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key&&key.startsWith(SNAP_KEY+"_day_"))localStorage.removeItem(key);}localStorage.removeItem("evolvefit_progress_photos_v1");}catch(e){}
+  setSnapshots([]);
+  window.dispatchEvent(new CustomEvent("evolvefit-clear-photos"));
+  update(current=>{
+   current.days={};current.body=[];current.sessions=[];current.trainingCompleted={};
+   if(current.profile){delete current.profile.coachBaseline;current.profile.planAdjustments=[];}
+  });
+  setDataMessage(cloud?"Registos e fotografias apagados neste dispositivo; a cloud será atualizada quando a ligação permitir.":"Registos, fotografias e cópias locais apagados. Metas e plano mantidos.");
+ };
  const saveTargets=()=>{
   const values={};
   for(const f of fields){const n=parseNum(draft[f.key]);if(!Number.isFinite(n)||n<=0){setTargetMessage("Revê o campo «"+f.label+"»: indica um valor superior a zero.");return;}values[f.key]=f.key==="stepsTarget"||f.key==="height"?Math.round(n):n;}
@@ -2275,6 +2352,13 @@ function AccountTools({state, update, forceOpen=false}) {
     h("input",{ref:importRef,type:"file",accept:".json,application/json",onChange:importJson,hidden:true,"aria-label":"Selecionar backup EvolveFit para importar"})
    ),
    h("p",{className:"evf-tools-note"},"O backup JSON inclui perfil, metas, treinos e registos. As fotografias ficam apenas neste dispositivo e não entram no backup nem são enviadas ao Coach."),
+   h("div",{className:"evf-snapshots"},
+    h("strong",null,"Restauro local · até 3 cópias diárias"),
+    snapshots.length?snapshots.map((snapshot,i)=>h("div",{className:"evf-snapshot-row",key:snapshot.day+"-"+i},
+     h("span",null,snapshot.day+(snapshot.at?" · "+new Date(snapshot.at).toLocaleTimeString("pt-PT",{hour:"2-digit",minute:"2-digit"}):"")),
+     h("button",{type:"button",className:"menu-btn evf-tool-button",onClick:()=>restoreSnapshot(snapshot),"aria-label":"Restaurar cópia de "+snapshot.day},"Restaurar")
+    )):h("p",{className:"evf-tools-note"},"Ainda não há cópias locais para restaurar.")),
+   h("button",{type:"button",className:"menu-btn evf-danger-button",onClick:eraseRecords},"Apagar registos e fotografias"),
    dataMessage&&h("div",{className:"evf-tools-message",role:"status"},dataMessage)
   )
  );
@@ -2283,28 +2367,36 @@ function AccountTools({state, update, forceOpen=false}) {
 function SyncCard() {
  const h = React.createElement;
  const [st, setSt] = useState(window.EvolveFitCloudStatus || {status: "idle", at: 0});
+ const [localSt,setLocalSt]=useState(window.EvolveFitLocalStatus||{status:"idle",at:0});
  const [online, setOnline] = useState(navigator.onLine);
  useEffect(() => {
  const a = () => setSt({...(window.EvolveFitCloudStatus || {status: "idle", at: 0})});
  const b = () => setOnline(navigator.onLine);
+ const c = e => setLocalSt({...e.detail});
  window.addEventListener("evolvefit-cloud-status", a);
+ window.addEventListener("evolvefit-local-status", c);
  window.addEventListener("online", b);
  window.addEventListener("offline", b);
  return () => {
  window.removeEventListener("evolvefit-cloud-status", a);
+ window.removeEventListener("evolvefit-local-status", c);
  window.removeEventListener("online", b);
  window.removeEventListener("offline", b);
  };
  }, []);
  const cloud = window.__evfSyncMode === "cloud";
+ const localTime = localSt.at ? new Date(localSt.at).toLocaleTimeString("pt-PT", {hour:"2-digit",minute:"2-digit"}) : "";
  const hhmm = st.at ? new Date(st.at).toLocaleTimeString("pt-PT", {
  hour: "2-digit",
  minute: "2-digit"
  }) : "";
  let txt, color = "var(--green)";
- if (!cloud) {
- txt = "Só neste dispositivo (sem nuvem)";
- color = "var(--amber)";
+ if (localSt.status === "error") {
+ txt = "Falha ao guardar neste dispositivo" + (localSt.error ? " ("+localSt.error+")" : "");
+ color = "var(--bad)";
+ } else if (!cloud) {
+ txt = localSt.status === "saved" ? "Guardado neste dispositivo · "+localTime+" (sem cloud)" : "Só neste dispositivo (sem cloud)";
+ color = localSt.status === "saved" ? "var(--green)" : "var(--amber)";
  } else if (!online || st.status === "offline") {
  txt = "Sem ligação — fica guardado aqui e sincroniza quando houver rede";
  color = "var(--amber)";
@@ -2758,7 +2850,7 @@ function Dashboard({
        /*#__PURE__*/React.createElement("div",{className:"evf-account-email"},(user&&user.email)||(user&&user.isAnonymous?"Acesso automático":"Conta local"))
      ),
      React.createElement(SyncCard,null),
-     React.createElement(AccountTools,{state,update,forceOpen:openTargets}),
+     React.createElement(AccountTools,{state,update,forceOpen:openTargets,uid}),
      /*#__PURE__*/React.createElement("div",{className:"evf-menu-footer"},"EvolveFit 2.0")
    )
  ),
@@ -3105,51 +3197,35 @@ function Workouts({
  const [view, setView] = useState("treino");
  const [planDay, setPlanDay] = useState(initialDay != null ? initialDay : todayIdx);
  const [showRir, setShowRir] = useState(false);
- const [analysisTab, setAnalysisTab] = useState("prog");
  const weekDays = weekFromMonday(state.days);
  const treinos = weekDays.filter(w => trainedOn(state, w.key)).length;
- const volWeek = state.sessions.filter(s => weekDays.some(w => w.key === s.date)).reduce((a, s) => a + s.ex.reduce((v, e) => v + e.sets * e.reps * e.weight, 0), 0);
  const kcal = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
  const workoutStats=[];
  if(treinos>0) workoutStats.push(React.createElement(Stat,{key:"treinos",icon:"dumbbell",tint:"coral",v:treinos,l:"treinos esta semana"}));
- if(volWeek>0) workoutStats.push(React.createElement(Stat,{key:"volume",icon:"barChart",tint:"violet",v:(volWeek/1000).toFixed(1)+"k",l:"volume (kg)"}));
  if(kcal>0) workoutStats.push(React.createElement(Stat,{key:"kcal",icon:"flame",tint:"amber",v:kcal,l:"kcal do treino"}));
  const selectedDayKey = weekDays[sel] ? weekDays[sel].key : todayKey;
- const loggedToday = state.sessions.some(s => s.date === todayKey && s.dayIdx === sel);
+ const selectedSession = state.sessions.find(s => s.date === selectedDayKey && s.dayIdx === sel) || null;
+ const loggedSelected = !!selectedSession;
  const trainedSelected = trainedOn(state, selectedDayKey);
  const canMarkSelected = selectedDayKey <= todayKey;
  const canToggleSelected = canMarkSelected || trainedSelected;
+ const canSaveSelected = selectedDayKey <= todayKey;
  const selectedWeekday = new Date(selectedDayKey + "T12:00:00").toLocaleDateString("pt-PT", {weekday:"long"});
+ const selectedDateLabel = new Date(selectedDayKey + "T12:00:00").toLocaleDateString("pt-PT", {day:"numeric",month:"short"});
  const loggedDayIdx = new Set(state.sessions.filter(s => weekDays.some(w => w.key === s.date)).map(s => s.dayIdx));
+ const loggerExercises = selectedSession && Array.isArray(selectedSession.ex) && selectedSession.ex.length ? selectedSession.ex : (plano[sel]?.ex||[]);
  const saveSession = entries => update(s => {
- entries.forEach((e, i) => {
- if (s.plano[sel].ex[i]) {
- s.plano[sel].ex[i].weight = parseNum(e.weight);
- s.plano[sel].ex[i].notes = e.notes || "";
- }
- });
- const ex = s.plano[sel].ex.map((x, i) => ({
- name: x.name,
- sets: x.sets,
- reps: x.reps,
- repsMax: x.repsMax || 0,
- weight: x.weight,
- notes: x.notes || "",
- rir: entries[i] && entries[i].rir != null ? entries[i].rir : null,
- repsS: parseInt(entries[i] && entries[i].repsS, 10) || 0,
- repsB: parseInt(entries[i] && entries[i].repsB, 10) || 0,
- rirAlvo: rirOf(x)
- }));
- const i = s.sessions.findIndex(se => se.date === todayKey && se.dayIdx === sel);
- const rec = {
- id: "s" + Date.now(),
- date: todayKey,
- dayIdx: sel,
- name: s.plano[sel].name,
- ex
- };
- if (i >= 0) s.sessions[i] = rec;else s.sessions.push(rec);
- // O registo dos exercícios é independente do botão "Treinei". Só "Treinei" conta para as estatísticas.
+  const ex=loggerExercises.map((x,i)=>{
+   const entry=entries[i]||{};
+   const weight=parseNum(entry.weight), notes=entry.notes||"";
+   const planMatch=(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
+   if(planMatch){planMatch.weight=weight;planMatch.notes=notes;}
+   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),repsS:parseInt(entry.repsS,10)>0?parseInt(entry.repsS,10):(parseInt(x.repsS,10)||0),repsB:parseInt(entry.repsB,10)>0?parseInt(entry.repsB,10):(parseInt(x.repsB,10)||0),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
+  });
+  const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
+  const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex};
+  if(i>=0)s.sessions[i]=rec;else s.sessions.push(rec);
+  // O registo do treino é separado da marcação "Treinei" nas estatísticas.
  });
 
  const setPlanEx = (di, xi, f, val) => update(s => {
@@ -3171,35 +3247,30 @@ function Workouts({
  s.plano[di].ex = order.map(i => s.plano[di].ex[i]);
  });
  const daySessions = [...state.sessions].filter(s => s.dayIdx === sel).sort((a, b) => a.date.localeCompare(b.date));
- const todaySession = daySessions.find(se => se.date === todayKey) || null;
- const lastSession = daySessions.filter(se => se.date !== todayKey).pop() || null;
- const progressExerciseNames=[...new Set([
-  ...(plano[sel]?.ex||[]).map(ex=>ex.name),
-  ...state.sessions.filter(se=>se.dayIdx===sel).flatMap(se=>(se.ex||[]).map(ex=>ex.name))
- ].map(name=>String(name||"").trim()).filter(Boolean))];
- const progression = progressExerciseNames.map(name => {
- const key=name.toLocaleLowerCase("pt-PT");
- const samples=[],rirSeries=[];
+ const todaySession = selectedSession;
+ const lastSession = daySessions.filter(se => se.date < selectedDayKey).pop() || null;
+ const progressExerciseMap=new Map();
+ const progressGroupKey=e=>e.exerciseId?"id:"+e.exerciseId:"name:"+String(e.name||"").trim().toLocaleLowerCase("pt-PT");
+ (plano[sel]?.ex||[]).forEach(e=>{if(e.name)progressExerciseMap.set(progressGroupKey(e),{name:e.name,exerciseId:e.exerciseId||null});});
+ state.sessions.filter(se=>se.dayIdx===sel).forEach(se=>(se.ex||[]).forEach(e=>{if(e.name&&!progressExerciseMap.has(progressGroupKey(e)))progressExerciseMap.set(progressGroupKey(e),{name:e.name,exerciseId:e.exerciseId||null});}));
+ const progression=[...progressExerciseMap.entries()].map(([group,identity])=>{
+ const {name,exerciseId}=identity,samples=[];
  state.sessions.forEach(se=>{
-   if(se.dayIdx!==sel||String(se.date||"")>todayKey)return;
-   const e=(se.ex||[]).find(item=>String(item.name||"").trim().toLocaleLowerCase("pt-PT")===key);
-   if(!e)return;
-   const weight=parseNum(e.weight);
-   if(Number.isFinite(weight)&&weight>0)samples.push({date:se.date,weight,rir:e.rir});
-   if(e.rir!=null&&Number.isFinite(Number(e.rir)))rirSeries.push({date:se.date,value:Number(e.rir)});
+  if(se.dayIdx!==sel||String(se.date||"")>todayKey)return;
+  const e=(se.ex||[]).find(item=>progressGroupKey(item)===group);
+  if(!e)return;
+  const weight=parseNum(e.weight);
+  if(Number.isFinite(weight)&&weight>0)samples.push({date:se.date,weight});
  });
  samples.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
- rirSeries.sort((a,b)=>String(a.date).localeCompare(String(b.date)));
- const series=samples.map(x=>x.weight);
- const first=series[0],last=series[series.length-1];
- const lastRir=rirSeries.length?rirSeries[rirSeries.length-1].value:null;
+ const series=samples.map(x=>Number(x.weight)).filter(x=>Number.isFinite(x)&&x>0),first=series[0],last=series[series.length-1];
  const dir=series.length<2?"flat":last>first?"up":last<first?"down":"flat";
- return {name,series,samples,first,last,dir,lastRir};
+ return {name,exerciseId,series,samples,first,last,dir};
  });
  const upCount = progression.filter(p => p.dir === "up").length;
  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
  title: "Treinos",
- sub: "Regista o treino do dia, o RIR e acompanha a carga"
+ sub: "Regista o treino e acompanha a evolução da carga"
  }), /*#__PURE__*/React.createElement("div", {
  className: "seg"
  }, [["treino", "Treino"], ["progresso", "Progresso"], ["historico", "Histórico"], ["plano", "Plano"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
@@ -3222,7 +3293,7 @@ function Workouts({
  className: "logger-title"
  }, plano[sel].name), /*#__PURE__*/React.createElement("div", {
  className: "logger-sub"
- }, plano[sel].day, sel === todayIdx ? " · hoje" : "")), trainedSelected && /*#__PURE__*/React.createElement("div", {
+ }, plano[sel].day+" · "+selectedWeekday+" "+selectedDateLabel)), trainedSelected && /*#__PURE__*/React.createElement("div", {
  className: "logged-badge"
  }, /*#__PURE__*/React.createElement(I, {
  name: "check",
@@ -3242,10 +3313,12 @@ function Workouts({
  className: "rir-help"
  }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
  key: sel,
- exercises: plano[sel].ex,
+ exercises: loggerExercises,
  history: state.sessions,
  onSave: saveSession,
- loggedToday: loggedToday,
+ loggedSelected: loggedSelected,
+ sessionDate: selectedDayKey,
+ canSave: canSaveSelected,
  today: todaySession,
  last: lastSession
  }))), view === "progresso" && React.createElement(React.Fragment,null,
@@ -3256,9 +3329,8 @@ function Workouts({
    )
  ),
  workoutStats.length>0 && React.createElement("div",{className:"stat-grid"},workoutStats),
- state.sessions.length>0 && React.createElement(TrainingAnalysis,{state,daySessions,progression,upCount,tab:analysisTab,setTab:setAnalysisTab}),
- state.sessions.length>0 && React.createElement(AsymmetryCard,{state}),
- !state.sessions.length && React.createElement("div",{className:"card progress-empty"},"Regista um treino para começares a ver a evolução da carga por exercício.")
+ state.sessions.length>0 && React.createElement(TrainingAnalysis,{state,progression,upCount}),
+ !state.sessions.length && React.createElement("div",{className:"card progress-empty"},"Regista as cargas usadas para veres se o peso evolui em cada exercício.")
  ), view === "historico" && /*#__PURE__*/React.createElement(TrainingHistory, {
  state: state,
  update: update
@@ -3337,94 +3409,45 @@ function ExerciseProgressChart({exercise}) {
  const h=React.createElement;
  const samples=(exercise.samples||[]).filter(x=>Number(x.weight)>0).slice().sort((a,b)=>String(a.date).localeCompare(String(b.date)));
  if(!samples.length)return null;
- const weights=samples.map(x=>Number(x.weight));
- const min=Math.min(...weights),max=Math.max(...weights);
- const pad=(max-min)*0.18||Math.max(max*0.06,0.5);
- const low=Math.max(0,min-pad),high=max+pad;
- const width=320,height=150,left=43,right=12,top=12,bottom=29;
- const plotW=width-left-right,plotH=height-top-bottom;
- const x=i=>samples.length===1?left+plotW/2:left+i*plotW/(samples.length-1);
- const y=v=>top+(high-v)/(high-low)*plotH;
+ const weights=samples.map(x=>Number(x.weight)),min=Math.min(...weights),max=Math.max(...weights);
+ const pad=(max-min)*.18||Math.max(max*.06,.5),low=Math.max(0,min-pad),high=max+pad;
+ const width=320,height=150,left=48,right=12,top=12,bottom=29,plotW=width-left-right,plotH=height-top-bottom;
+ const x=i=>samples.length===1?left+plotW/2:left+i*plotW/(samples.length-1),y=v=>top+(high-v)/(high-low)*plotH;
  const points=samples.map((sample,i)=>x(i).toFixed(1)+","+y(Number(sample.weight)).toFixed(1)).join(" ");
- const ticks=[high,(high+low)/2,low];
+ const ticks=[high,(high+low)/2,low],first=weights[0],last=weights[weights.length-1],delta=+(last-first).toFixed(1);
  const dateLabel=value=>new Date(value+"T12:00:00").toLocaleDateString("pt-PT",{day:"2-digit",month:"short"});
- const first=weights[0],last=weights[weights.length-1],delta=+(last-first).toFixed(1);
  const deltaLabel=samples.length>1?(delta>0?"+":"")+fmtNum(delta)+" kg no período":"Primeiro registo";
  const aria="Evolução da carga de "+exercise.name+": "+samples.length+" registos, de "+fmtNum(first)+" para "+fmtNum(last)+" quilogramas.";
  return h("div",{className:"exercise-progress-item"},
-   h("div",{className:"exercise-progress-head"},
-     h("div",{className:"exercise-progress-title-wrap"},
-       h("div",{className:"exercise-progress-name"},exercise.name),
-       h("div",{className:"exercise-progress-count"},samples.length," registo",samples.length===1?"":"s")
-     ),
-     h("div",{className:"exercise-progress-latest"},fmtNum(last)," kg",
-       h("span",{className:"exercise-progress-delta "+(delta>0?"up":delta<0?"down":"flat")},deltaLabel)
-     )
-   ),
-   h("svg",{className:"exercise-progress-svg",viewBox:"0 0 "+width+" "+height,role:"img","aria-label":aria},
-     ticks.map((tick,i)=>h(React.Fragment,{key:"tick-"+i},
-       h("line",{x1:left,y1:y(tick),x2:width-right,y2:y(tick),className:"exercise-chart-grid"}),
-       h("text",{x:left-7,y:y(tick)+4,textAnchor:"end",className:"exercise-chart-label"},fmtNum(tick))
-     )),
-     samples.length>1&&h("polygon",{points:x(0)+","+(height-bottom)+" "+points+" "+x(samples.length-1)+","+(height-bottom),className:"exercise-chart-area"}),
-     samples.length>1&&h("polyline",{points,className:"exercise-chart-line"}),
-     samples.map((sample,i)=>h("circle",{key:String(sample.date)+"-"+i,cx:x(i),cy:y(Number(sample.weight)),r:samples.length===1?5:3.7,className:"exercise-chart-point"})),
-     h("text",{x:left,y:height-5,textAnchor:"start",className:"exercise-chart-label"},dateLabel(samples[0].date)),
-     samples.length>1&&h("text",{x:width-right,y:height-5,textAnchor:"end",className:"exercise-chart-label"},dateLabel(samples[samples.length-1].date))
-   ),
-   samples.length===1&&h("div",{className:"exercise-progress-hint"},"Mais um registo permite comparar a tendência.")
+  h("div",{className:"exercise-progress-head"},
+   h("div",{className:"exercise-progress-title-wrap"},h("div",{className:"exercise-progress-name"},exercise.name),h("div",{className:"exercise-progress-count"},samples.length," registo",samples.length===1?"":"s")),
+   h("div",{className:"exercise-progress-latest"},fmtNum(last)," kg",h("span",{className:"exercise-progress-delta "+(delta>0?"up":delta<0?"down":"flat")},deltaLabel))
+  ),
+  h("svg",{className:"exercise-progress-svg",viewBox:"0 0 "+width+" "+height,role:"img","aria-label":aria},
+   ticks.map((tick,i)=>h(React.Fragment,{key:"tick-"+i},h("line",{x1:left,y1:y(tick),x2:width-right,y2:y(tick),className:"exercise-chart-grid"}),h("text",{x:left-7,y:y(tick)+4,textAnchor:"end",className:"exercise-chart-label"},fmtNum(tick)))),
+   samples.length>1&&h("polygon",{points:x(0)+","+(height-bottom)+" "+points+" "+x(samples.length-1)+","+(height-bottom),className:"exercise-chart-area"}),
+   samples.length>1&&h("polyline",{points,className:"exercise-chart-line"}),
+   samples.map((sample,i)=>h("circle",{key:String(sample.date)+"-"+i,cx:x(i),cy:y(Number(sample.weight)),r:samples.length===1?5:3.7,className:"exercise-chart-point"})),
+   h("text",{x:left,y:height-5,textAnchor:"start",className:"exercise-chart-label"},dateLabel(samples[0].date)),
+   samples.length>1&&h("text",{x:width-right,y:height-5,textAnchor:"end",className:"exercise-chart-label"},dateLabel(samples[samples.length-1].date))
+  ),
+  samples.length===1&&h("div",{className:"exercise-progress-hint"},"Mais um registo permite comparar a tendência.")
  );
 }
-function TrainingAnalysis({
- state,
- daySessions,
- progression,
- upCount,
- tab = "prog",
- setTab = () => {}
-}) {
+
+function TrainingAnalysis({state,progression,upCount}) {
  const h=React.createElement;
- if (!state.sessions.length) return null;
- const progressionRows=progression.filter(p=>p.samples?.length>0||p.lastRir!=null);
- const chartRows=progressionRows.filter(p=>p.samples?.length>0);
- const hasProgressData=chartRows.some(p=>p.samples.length>1);
- const rows=[];
- state.sessions.filter(se=>daysBetween(new Date(se.date),TODAY)<14).forEach(se=>(se.ex||[]).forEach(e=>{
-   if(e.name&&e.rir!=null)rows.push(e);
- }));
- const mean=a=>a.reduce((x,y)=>x+y,0)/a.length;
- const avg=rows.length?mean(rows.map(e=>Number(e.rir))):null;
- if(!progressionRows.length&&!rows.length)return null;
- const tgt=rows.length?mean(rows.map(e=>e.rirAlvo!=null?Number(e.rirAlvo):DEFAULT_RIR)):DEFAULT_RIR;
- const counts=RIR_OPTS.map(n=>rows.filter(e=>Math.min(4,Number(e.rir))===n).length);
- const maxCount=Math.max(1,...counts);
- const status=avg==null?"":avg<tgt-.5?"Estás a treinar mais perto da falha do que o planeado — atenção à recuperação.":avg>tgt+.5?"Sobra reserva na maioria das séries — há margem para subir cargas.":"Intensidade alinhada com o plano.";
+ if(!state.sessions.length)return null;
+ const chartRows=progression.filter(p=>p.samples?.some(sample=>Number(sample.weight)>0));
  const graphContent=chartRows.length
-   ? chartRows.map((exercise,i)=>h(ExerciseProgressChart,{key:exercise.name+"-"+i,exercise}))
-   : h("div",{className:"pc-empty"},"Ainda não há cargas registadas para este treino. Guarda o peso usado em cada exercício para criar o gráfico.");
- const rirContent=avg==null
-   ? h("div",{className:"pc-empty"},"Regista o RIR nos exercícios ao guardar um treino para veres aqui a tua intensidade.")
-   : h(React.Fragment,null,
-       h("div",{className:"rir-avg"},h("span",{className:"rir-avg-v"},avg.toFixed(1)),h("span",{className:"rir-avg-l"},"RIR médio · alvo ",tgt.toFixed(1)," · ",rows.length," exercício",rows.length===1?"":"s")),
-       h("div",{className:"rir-status"},status),
-       RIR_OPTS.map(n=>h("div",{className:"rir-dist-row",key:n},
-         h("span",{className:"rir-dist-k"},"RIR ",rirLabel(n),n===0?" · falha":""),
-         h("div",{className:"rir-dist-bar"},h("div",{className:"rir-dist-fill",style:{width:counts[n]/maxCount*100+"%",background:RIR_COLORS[n]}})),
-         h("span",{className:"rir-dist-n"},counts[n])
-       ))
-     );
+  ? chartRows.map((exercise,i)=>h(ExerciseProgressChart,{key:exercise.exerciseId||exercise.name+"-"+i,exercise}))
+  : h("div",{className:"pc-empty"},"Ainda não há cargas registadas para este treino. Regista o peso usado para acompanhar a evolução.");
  return h("div",{className:"card progress-card"},
-   h("div",{className:"period-tabs"},
-     h("button",{className:"period-btn"+(tab==="prog"?" active":""),onClick:()=>setTab("prog")},"Exercícios"),
-     h("button",{className:"period-btn"+(tab==="rir"?" active":""),onClick:()=>setTab("rir")},"Intensidade")
-   ),
-   h("div",{className:"pc-head"},
-     h("div",{className:"pc-title"},tab==="prog"?"Evolução de carga por exercício":"Intensidade (RIR)"),
-     tab==="prog"?h("div",{className:"pc-badge"+(hasProgressData&&upCount>0?" up":"")},chartRows.length," exercício",chartRows.length===1?"":"s"):h("div",{className:"pc-badge"},"últimos 14 dias")
-   ),
-   tab==="prog"?graphContent:rirContent
+  h("div",{className:"pc-head"},h("div",{className:"pc-title"},"Evolução de carga por exercício"),h("div",{className:"pc-badge"+(chartRows.length>1&&upCount>0?" up":"")},chartRows.length," exercício",chartRows.length===1?"":"s")),
+  graphContent
  );
 }
+
 function arrayMove(arr, from, to) {
  const a = [...arr];
  const [item] = a.splice(from, 1);
@@ -3522,81 +3545,71 @@ function PlanDayCard({
  size: 14
  }), " Adicionar exercício"));
 }
-function TrainingHistory({
- state,
- update
-}) {
- const [expanded, setExpanded] = useState(false);
- const sessions = [...state.sessions].sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
- const shown = expanded ? sessions : sessions.slice(0, 5);
- const del = id => update(s => {
- const i = s.sessions.findIndex(x => x.id === id);
- if (i >= 0) s.sessions.splice(i, 1);
- });
- const fmt = key => {
- const d = new Date(key + "T12:00:00");
- return WD_LONG[d.getDay()] + ", " + d.getDate() + " " + MO[d.getMonth()].slice(0, 3);
+function TrainingHistory({state,update}) {
+ const h=React.createElement;
+ const [expanded,setExpanded]=useState(false);
+ const [editingId,setEditingId]=useState(null);
+ const [draft,setDraft]=useState(null);
+ const [message,setMessage]=useState("");
+ const sessions=[...state.sessions].sort((a,b)=>String(b.date||"").localeCompare(String(a.date||""))||String(b.id||"").localeCompare(String(a.id||"")));
+ const shown=expanded?sessions:sessions.slice(0,5);
+ const fmt=key=>{const d=new Date(key+"T12:00:00");return Number.isNaN(d.getTime())?key:WD_LONG[d.getDay()]+", "+d.getDate()+" "+MO[d.getMonth()].slice(0,3);};
+ const beginEdit=session=>{setEditingId(session.id);setDraft(clone(session));setMessage("");};
+ const changeExercise=(i,key,value)=>setDraft(d=>({...d,ex:d.ex.map((exercise,j)=>j===i?{...exercise,[key]:value}:exercise)}));
+ const saveEdit=()=>{
+  if(!draft||!draft.date||draft.date>todayKey){setMessage("A data da sessão tem de ser hoje ou uma data passada.");return;}
+  if(!String(draft.name||"").trim()){setMessage("Indica um nome para a sessão.");return;}
+  const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
+  update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0){const old=s.sessions[i];s.sessions[i]=clean;if(old.date!==clean.date&&s.trainingCompleted?.[old.date]){delete s.trainingCompleted[old.date];s.trainingCompleted[clean.date]=true;}}});
+  setEditingId(null);setDraft(null);setMessage("Sessão atualizada.");
  };
- return /*#__PURE__*/React.createElement("div", {
- className: "card progress-card"
- }, /*#__PURE__*/React.createElement("div", {
- className: "pc-head"
- }, /*#__PURE__*/React.createElement("div", {
- className: "pc-title"
- }, "Histórico de treinos"), /*#__PURE__*/React.createElement("div", {
- className: "pc-badge"
- }, sessions.length + (sessions.length === 1 ? " treino" : " treinos"))), sessions.length === 0 ? /*#__PURE__*/React.createElement("div", {
- className: "pc-empty"
- }, "Ainda não registaste nenhum treino. Guarda um treino acima para começares o histórico.") : /*#__PURE__*/React.createElement(React.Fragment, null, shown.map(s => /*#__PURE__*/React.createElement("div", {
- className: "hist-row",
- key: s.id
- }, /*#__PURE__*/React.createElement("div", {
- className: "hist-top"
- }, /*#__PURE__*/React.createElement("span", {
- className: "hist-date"
- }, fmt(s.date)), /*#__PURE__*/React.createElement("span", {
- className: "hist-name"
- }, s.name), /*#__PURE__*/React.createElement("button", {
- className: "hist-del",
- onClick: () => del(s.id),
- "aria-label": "Apagar treino"
- }, /*#__PURE__*/React.createElement(I, {
- name: "trash",
- size: 13
- }))), /*#__PURE__*/React.createElement("div", {
- className: "hist-ex"
- }, s.ex.filter(e => e.name).map(e => e.name + " " + e.sets + "×" + repsLbl(e) + (e.weight ? " · " + fmtNum(e.weight) + "kg" : "") + (e.rir != null ? " · RIR " + rirLabel(e.rir) : "")).join(" · ")), s.ex.filter(e => e.name && e.notes).map((e, ni) => /*#__PURE__*/React.createElement("div", {
- className: "hist-note",
- key: ni
- }, /*#__PURE__*/React.createElement("strong", null, e.name, ": "), e.notes)))), sessions.length > 5 && /*#__PURE__*/React.createElement("button", {
- className: "collapse-btn",
- style: {
- marginTop: 8,
- marginBottom: 0
- },
- onClick: () => setExpanded(v => !v)
- }, expanded ? "Mostrar menos" : "Ver histórico completo (" + sessions.length + ")", /*#__PURE__*/React.createElement(I, {
- name: "chevron",
- size: 15,
- className: "chev" + (expanded ? " open" : "")
- }))));
+ const del=id=>{if(!window.confirm("Apagar esta sessão do histórico?"))return;update(s=>{const i=s.sessions.findIndex(x=>x.id===id);if(i>=0)s.sessions.splice(i,1);});};
+ const field=(label,key,value,onChange,type="text",opts={})=>h("label",{className:"hist-edit-field"},h("span",null,label),h("input",{type,value:value??"",onChange:e=>onChange(e.target.value),...opts}));
+ const editing=draft&&editingId===draft.id?h("div",{className:"hist-edit card",key:"edit"},
+  h("div",{className:"hist-edit-grid"},field("Data da sessão","date",draft.date,v=>setDraft(d=>({...d,date:v})),"date",{max:todayKey}),field("Nome da sessão","name",draft.name,v=>setDraft(d=>({...d,name:v})))),
+  (draft.ex||[]).map((e,i)=>h("div",{className:"hist-edit-ex",key:"ex-"+i},
+   h("div",{className:"hist-edit-grid"},
+    field("Exercício","name",e.name,v=>changeExercise(i,"name",v)),
+    field("Séries planeadas","sets",e.sets,v=>changeExercise(i,"sets",v),"number",{min:"0",inputMode:"numeric"}),
+    field("Reps planeadas","reps",e.reps,v=>changeExercise(i,"reps",v),"number",{min:"0",inputMode:"numeric"}),
+    field("Carga (kg)","weight",e.weight??"",v=>changeExercise(i,"weight",v),"number",{min:"0",step:"0.1",inputMode:"decimal"}),
+    field("RIR","rir",e.rir??"",v=>changeExercise(i,"rir",v),"number",{min:"0",max:"4",inputMode:"numeric",placeholder:"não registado"})
+   ),
+   field("Nota","notes",e.notes||"",v=>changeExercise(i,"notes",v)),
+   h("button",{type:"button",className:"menu-btn evf-tool-button",onClick:()=>setDraft(d=>({...d,ex:d.ex.filter((_,j)=>j!==i)}))},"Remover exercício")
+  )),
+  h("div",{className:"menu-actions"},h("button",{type:"button",className:"menu-btn",onClick:()=>setDraft(d=>({...d,ex:[...d.ex,{name:"",sets:0,reps:0,actualSets:null,actualReps:null,weight:0,rir:null,notes:""}]}))},"Adicionar exercício"),h("button",{type:"button",className:"menu-btn",onClick:()=>{setEditingId(null);setDraft(null);}},"Cancelar"),h("button",{type:"button",className:"menu-btn main",onClick:saveEdit},"Guardar alterações"))
+ ):null;
+ return h("div",{className:"card progress-card"},
+  h("div",{className:"pc-head"},h("div",{className:"pc-title"},"Histórico de treinos"),h("div",{className:"pc-badge"},sessions.length+(sessions.length===1?" treino":" treinos"))),
+  sessions.length===0?h("div",{className:"pc-empty"},"Ainda não registaste nenhum treino. Guarda um treino acima para começares o histórico."):h(React.Fragment,null,
+   editing,
+   shown.map(session=>h("div",{className:"hist-row",key:session.id},
+    h("div",{className:"hist-top"},h("span",{className:"hist-date"},fmt(session.date)),h("span",{className:"hist-name"},session.name),h("button",{className:"hist-edit-btn",onClick:()=>beginEdit(session),"aria-label":"Editar sessão de "+fmt(session.date)},"Editar"),h("button",{className:"hist-del",onClick:()=>del(session.id),"aria-label":"Apagar treino"},h(I,{name:"trash",size:13}))),
+    h("div",{className:"hist-ex"},(session.ex||[]).filter(e=>e.name).map(e=>e.name+(e.actualSets?" · "+e.actualSets+" séries feitas":(e.sets?" · "+e.sets+" séries planeadas":""))+(e.actualReps?" · "+e.actualReps+" reps reais/série":(e.reps?" · meta "+repsLbl(e)+" reps":""))+(e.weight?" · "+fmtNum(e.weight)+"kg":"")+(e.rir!=null?" · RIR "+rirLabel(e.rir):"")).join(" · ")),
+    (session.ex||[]).filter(e=>e.name&&e.notes).map((e,ni)=>h("div",{className:"hist-note",key:"note-"+ni},h("strong",null,e.name+": "),e.notes))
+   )),
+   sessions.length>5&&h("button",{className:"collapse-btn",style:{marginTop:8,marginBottom:0},onClick:()=>setExpanded(v=>!v)},expanded?"Mostrar menos":"Ver histórico completo ("+sessions.length+")",h(I,{name:"chevron",size:15,className:"chev"+(expanded?" open":"")}))
+  ),message&&h("div",{className:"evf-tools-message",role:"status"},message)
+ );
 }
+
 function WorkoutLogger({
  history = [],
  exercises,
  onSave,
- loggedToday,
+ loggedSelected,
+ sessionDate,
+ canSave=true,
  today,
  last
 }) {
  const initRow = x => {
  const t = today && today.ex.find(e => e.name === x.name);
  return {
- weight: fmtNum(x.weight),
- notes: x.notes || "",
+ weight: fmtNum(t ? t.weight : x.weight),
+ notes: t && t.notes != null ? t.notes : (x.notes || ""),
  rir: t && t.rir != null ? t.rir : null,
- repsS: t && t.repsS ? String(t.repsS) : "",
- repsB: t && t.repsB ? String(t.repsB) : ""
  };
  };
  const firstIncomplete = rows => {
@@ -3604,6 +3617,7 @@ function WorkoutLogger({
  return idx === -1 ? null : idx;
  };
  const [draft, setDraft] = useState(exercises.map(initRow));
+ const [saveFeedback,setSaveFeedback]=useState("");
  const [openIdx, setOpenIdx] = useState(() => firstIncomplete(exercises.map(initRow)));
  const [openNotes, setOpenNotes] = useState(() => {
  const o = {};
@@ -3621,6 +3635,7 @@ function WorkoutLogger({
  }, [exercises.length]);
  const row = (x, i) => draft[i] || initRow(x);
  const setField = (i, field, val) => {
+ setSaveFeedback("");
  const d = [...draft];
  d[i] = {
  ...row(exercises[i], i),
@@ -3660,8 +3675,6 @@ function WorkoutLogger({
  weight: fmtNum(prev.weight),
  notes: row(x, i).notes,
  rir: prev.rir != null ? prev.rir : rirOf(x),
- repsS: "",
- repsB: ""
  } : row(x, i);
  });
  setDraft(d);
@@ -3692,8 +3705,7 @@ function WorkoutLogger({
  t: "Alvo RIR " + rirLabel(tgt) + (parts.length ? " · última vez " + parts.join(" · ") : "")
  };
  const done = r.rir != null;
- const isUni = /single-arm db chest/i.test(x.name);
- const sug = progressionTip(history.filter(se => se.date !== todayKey), x.name, parseNum(r.weight), tgt);
+ const sug = progressionTip(history.filter(se => se.date !== sessionDate), x.name, parseNum(r.weight), tgt, x.exerciseId);
  const isOpen = openIdx === i;
  return /*#__PURE__*/React.createElement("div", {
  className: "log-entry" + (isOpen ? " open" : ""),
@@ -3753,20 +3765,7 @@ function WorkoutLogger({
  }, /*#__PURE__*/React.createElement(I, {
  name: "note",
  size: 15
- }))), isUni && /*#__PURE__*/React.createElement("div", {
- className: "pl-grid",
- style: {
- gridTemplateColumns: "1fr 1fr"
- }
- }, [["repsS", "Lado menor (reps)"], ["repsB", "Lado maior (reps)"]].map(([f, l]) => /*#__PURE__*/React.createElement("div", {
- className: "pl-f",
- key: f
- }, /*#__PURE__*/React.createElement("label", null, l), /*#__PURE__*/React.createElement("input", {
- className: "in",
- inputMode: "numeric",
- value: r[f],
- onChange: e => setField(i, f, e.target.value.replace(/\D/g, "").slice(0, 3))
- })))), !!sug && /*#__PURE__*/React.createElement("button", {
+ }))), !!sug && /*#__PURE__*/React.createElement("button", {
  type: "button",
  className: "log-quickfill",
  style: {
@@ -3790,13 +3789,18 @@ function WorkoutLogger({
  value: r.notes,
  onChange: e => setField(i, "notes", e.target.value)
  })));
- }), /*#__PURE__*/React.createElement("button", {
+ }), !canSave&& /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Esta data ainda é futura. A sessão ficará disponível para guardar no próprio dia."), /*#__PURE__*/React.createElement("button", {
  className: "big-btn coral log-save",
- onClick: () => onSave(exercises.map((x, i) => row(x, i)))
+ disabled: !canSave,
+ onClick: () => {
+  if(!canSave)return;
+  onSave(exercises.map((x, i) => row(x, i)));
+  setSaveFeedback(window.EvolveFitLocalStatus?.status==="error"?"Não foi possível confirmar a gravação neste dispositivo.":window.__evfSyncMode==="cloud"?"Sessão guardada neste dispositivo. Consulta «Sincronização» no menu da conta para ver o estado da cloud.":"Sessão guardada neste dispositivo; sincronização cloud não configurada.");
+ }
  }, /*#__PURE__*/React.createElement(I, {
  name: "check",
  size: 17
- }), " ", loggedToday ? "Atualizar treino de hoje" : "Guardar treino de hoje"));
+ }), " ", loggedSelected ? "Atualizar sessão" : "Guardar sessão"), saveFeedback&& /*#__PURE__*/React.createElement("div",{className:"evf-tools-message log-save-feedback",role:"status"},saveFeedback));
 }
 
 /* --------------------- temporizador, progressão, assimetria -------------------- */
@@ -3890,8 +3894,8 @@ function RestTimer() {
  onClick: () => start(sec)
  }, l))));
 }
-const progressionTip = (history, name, curW, tgt) => {
- const rec = [...history].sort((a, b) => a.date.localeCompare(b.date)).map(se => (se.ex || []).find(e => e.name === name)).filter(e => e && e.weight > 0 && e.rir != null).slice(-2);
+const progressionTip = (history, name, curW, tgt, exerciseId) => {
+ const rec = [...history].sort((a, b) => a.date.localeCompare(b.date)).map(se => (se.ex || []).find(e => exerciseId&&e.exerciseId ? e.exerciseId===exerciseId : e.name === name)).filter(e => e && e.weight > 0 && e.rir != null).slice(-2);
  if (rec.length < 2 || rec[0].weight !== rec[1].weight || rec[1].weight !== curW) return null;
  if (!rec.every(e => e.rir >= (e.rirAlvo != null ? e.rirAlvo : tgt))) return null;
  const inc = curW < 20 ? 1 : curW < 60 ? 2.5 : 5;
@@ -3899,65 +3903,6 @@ const progressionTip = (history, name, curW, tgt) => {
  nw: curW + inc
  };
 };
-function AsymmetryCard({
- state
-}) {
- const h = React.createElement;
- const by = {};
- [...state.sessions].sort((a, b) => a.date.localeCompare(b.date)).forEach(se => (se.ex || []).forEach(e => {
- if (e.repsS > 0 && e.repsB > 0) (by[e.name] = by[e.name] || []).push({
- date: se.date,
- s: e.repsS,
- b: e.repsB,
- w: e.weight
- });
- }));
- const names = Object.keys(by);
- if (!names.length) return null;
- const fd = d => d.slice(8, 10) + "/" + d.slice(5, 7);
- return h("div", {
- className: "card"
- }, h("div", {
- className: "water-title",
- style: {
- marginBottom: 8
- }
- }, "Assimetria (lado menor vs maior)"), names.length === 0 ? h("div", {
- className: "menu-sub"
- }, "Regista as reps de cada lado no Single-Arm DB Chest Press (Quinta) para acompanhar a diferença.") : names.map(n => {
- const L = by[n],
- diffs = L.map(r => r.b - r.s),
- avg = a => a.reduce((x, y) => x + y, 0) / a.length;
- const trend = L.length >= 4 ? avg(diffs.slice(-2)) - avg(diffs.slice(0, 2)) : null;
- return h("div", {
- key: n,
- style: {
- marginBottom: 10
- }
- }, h("div", {
- className: "menu-m"
- }, n), trend != null && h("div", {
- className: "menu-sub",
- style: {
- margin: "2px 0 4px"
- }
- }, trend < 0 ? "A diferença está a diminuir (" + trend.toFixed(1) + " reps)" : trend > 0 ? "A diferença aumentou (+" + trend.toFixed(1) + " reps)" : "Diferença estável"), L.slice(-6).reverse().map((r, i) => h("div", {
- className: "menu-row",
- key: i,
- style: {
- padding: "6px 0"
- }
- }, h("div", {
- className: "menu-h"
- }, fd(r.date)), h("div", {
- style: {
- flex: 1
- }
- }, "menor " + r.s + " · maior " + r.b + (r.w ? " · " + fmtNum(r.w) + " kg" : "")), h("div", {
- className: "menu-sub"
- }, "dif. " + (r.b - r.s)))));
- }));
-}
 /* ============================ PROGRESSO CORPO =========================== */
 const BODY_METRICS = [{
  k: "weight",
@@ -4847,7 +4792,12 @@ function Coach2027({ state, update, onNavigate }) {
      const timeout = setTimeout(() => controller.abort(), 30000);
      try{
        const idToken = await evolveFitFirebaseIdToken();
-       if(!idToken) throw new Error("Utilizador Firebase não autenticado.");
+       if(!idToken){
+         const detail=window.__evfAuthError||"Não foi possível criar uma sessão anónima Firebase.";
+         const code=String(detail).toLowerCase();
+         const hint=code.includes("operation-not-allowed")?" Ativa Authentication → Sign-in method → Anonymous no projeto Firebase.":code.includes("unauthorized-domain")?" Adiciona o domínio desta app em Authentication → Settings → Authorized domains.":" Confirma que o fornecedor Anonymous está ativo e que o domínio está autorizado em Firebase Authentication.";
+         throw new Error("Gemini Cloud precisa de uma sessão Firebase autenticada. "+detail+hint);
+       }
        const r = await fetch(endpoint,{
          method:"POST",
          mode:"cors",
@@ -4890,6 +4840,11 @@ function Coach2027({ state, update, onNavigate }) {
  try{return JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")}catch(e){return[]}
  });
  const PH_KEY = "evolvefit_progress_photos_v1";
+ useEffect(()=>{
+  const clear=()=>{setPhotos([]);try{localStorage.removeItem(PH_KEY);}catch(e){}};
+  window.addEventListener("evolvefit-clear-photos",clear);
+  return()=>window.removeEventListener("evolvefit-clear-photos",clear);
+ },[]);
  // Fotos ficam só neste dispositivo (por escolha); o resto dos dados vai para a nuvem.
  const savePhotos = arr => {
  setPhotos(arr);
@@ -5044,7 +4999,7 @@ function Coach2027({ state, update, onNavigate }) {
      /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",fontWeight:750,color:"var(--muted)",marginBottom:"8px"}},"Perguntas rápidas"),
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-prompts"},
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha evolução corporal? Analisa peso, gordura corporal e cintura e compara os dados mais recentes com o meu ponto de partida.")},"Corpo"),
-       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha progressão no treino? Analisa cargas, reps, RIR, volume, frequência e evolução dos exercícios recentes.")},"Treino"),
+       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a evolução das cargas por exercício? Resume o que subiu, o que se manteve e o que ainda tem poucos registos.")},"Treino"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("A minha nutrição e atividade estão alinhadas com o objetivo? Analisa calorias, proteína, gordura, passos, água e cardio.")},"Nutrição"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha recuperação? Analisa sono, água, cardio, frequência de treino e carga e diz se estou a recuperar o suficiente.")},"Recuperação"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Analisa a minha assimetria no Single-Arm DB Chest Press. Compara lado menor e maior, reps, carga e RIR e diz-me se devo manter ou ajustar.")},"Assimetria"),
@@ -5134,6 +5089,7 @@ function App() {
          const credential = await fbAuth.signInAnonymously();
          setUser((credential && credential.user) || fbAuth.currentUser || null);
        } catch (authError) {
+         window.__evfAuthError=(authError&&authError.code?authError.code+": ":"")+((authError&&authError.message)||"autenticação indisponível");
          console.warn("Acesso automático indisponível; a app continuará em modo local:", authError);
          setUser(null);
        }

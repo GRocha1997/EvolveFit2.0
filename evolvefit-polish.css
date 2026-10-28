@@ -637,3 +637,83 @@ button:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
+
+/* Backup, local recovery, and session editing controls */
+.evf-snapshots {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 14px 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  color: var(--text);
+  font-size: 12px;
+}
+.evf-snapshot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+}
+.evf-snapshot-row .menu-btn { max-width: 110px; }
+.evf-danger-button {
+  width: 100%;
+  min-height: 44px;
+  border-color: color-mix(in srgb, var(--bad) 45%, var(--border));
+  color: var(--bad);
+}
+.hist-top { gap: 7px; }
+.hist-edit-btn {
+  min-width: 54px;
+  min-height: 40px;
+  padding: 5px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+}
+.hist-edit { margin-bottom: 12px; }
+.hist-edit-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.hist-edit-ex {
+  margin: 10px 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+}
+.hist-edit-field {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 7px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+.hist-edit-field input {
+  min-width: 0;
+  width: 100%;
+  min-height: 42px;
+  padding: 7px 9px;
+  border: 1px solid var(--border);
+  border-radius: 9px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+@media (max-width: 360px) {
+  .hist-edit-grid { grid-template-columns: 1fr; }
+}
+
+.log-save-feedback { margin-top: 8px; }
+.exercise-chart-area { fill: var(--coral); }
