@@ -747,3 +747,23 @@ button:disabled {
   font-size: 16px;
 }
 .evf-auth-form button:disabled { opacity: .65; cursor: wait; }
+
+/* Past planned workouts not marked as done */
+#root .dp.missed {
+  color: var(--bad);
+  border-color: rgba(192, 57, 43, .42);
+  background: rgba(192, 57, 43, .075);
+}
+#root .dp.missed.on {
+  color: #fff;
+  border-color: var(--bad);
+  background: var(--bad);
+}
+#root .dp-dot-missed { background: var(--bad) !important; }
+#root .dp.missed.on .dp-dot-missed { background: rgba(255,255,255,.9) !important; }
+#root .missed-workout-note {
+  margin: -3px 2px 12px;
+  color: var(--bad);
+  font-size: 11px;
+  line-height: 1.4;
+}
