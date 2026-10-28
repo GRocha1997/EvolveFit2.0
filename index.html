@@ -824,19 +824,41 @@ function evolveFitDecodeJwtPayload(token){
 
 async function evolveFitFirebaseIdToken(){
   try{
-    if(typeof firebase === "undefined" || !firebase.auth) return null;
-    const user = firebase.auth().currentUser;
-    if(!user) return null;
-    // getIdToken() só renova quando o token está perto de expirar.
-    const token = await user.getIdToken();
-    const payload = evolveFitDecodeJwtPayload(token);
-    if(!payload || payload.aud !== EVOLVEFIT_FIREBASE_PROJECT_ID){
-      console.warn("Firebase token de projeto incorreto:", payload && payload.aud, "=> esperado:", EVOLVEFIT_FIREBASE_PROJECT_ID);
+    if(typeof firebase === "undefined" || !firebase.auth){
+      window.__evfAuthError="Firebase Authentication SDK indisponível.";
       return null;
     }
+    const auth=firebase.auth();
+    let user=auth.currentUser;
+    if(!user){
+      try{
+        const credential=await auth.signInAnonymously();
+        user=(credential&&credential.user)||auth.currentUser||null;
+      }catch(authError){
+        const code=authError&&authError.code?authError.code+": ":"";
+        window.__evfAuthError=(code+((authError&&authError.message)||"não foi possível iniciar sessão anónima.")).slice(0,180);
+        console.warn("Firebase Auth: não foi possível iniciar sessão anónima:",authError);
+        return null;
+      }
+    }
+    if(!user){
+      window.__evfAuthError="Firebase não devolveu um utilizador autenticado.";
+      return null;
+    }
+    // getIdToken() renova o token apenas quando está perto de expirar.
+    const token=await user.getIdToken();
+    const payload=evolveFitDecodeJwtPayload(token);
+    if(!payload||payload.aud!==EVOLVEFIT_FIREBASE_PROJECT_ID){
+      window.__evfAuthError="Token Firebase inválido ou pertencente a outro projeto.";
+      console.warn("Firebase token de projeto incorreto:",payload&&payload.aud,"=> esperado:",EVOLVEFIT_FIREBASE_PROJECT_ID);
+      return null;
+    }
+    window.__evfAuthError=null;
     return token;
   }catch(e){
-    console.error("Firebase Auth token:", e);
+    const code=e&&e.code?e.code+": ":"";
+    window.__evfAuthError=(code+((e&&e.message)||e||"erro de autenticação")).slice(0,180);
+    console.error("Firebase Auth token:",e);
     return null;
   }
 }
@@ -4908,7 +4930,12 @@ function Coach2027({ state, update, onNavigate }) {
      const timeout = setTimeout(() => controller.abort(), 30000);
      try{
        const idToken = await evolveFitFirebaseIdToken();
-       if(!idToken) throw new Error("Utilizador Firebase não autenticado.");
+       if(!idToken){
+         const detail=window.__evfAuthError||"Não foi possível criar uma sessão anónima Firebase.";
+         const code=String(detail).toLowerCase();
+         const hint=code.includes("operation-not-allowed")?" Ativa Authentication → Sign-in method → Anonymous no projeto Firebase.":code.includes("unauthorized-domain")?" Adiciona o domínio desta app em Authentication → Settings → Authorized domains.":" Confirma que o fornecedor Anonymous está ativo e que o domínio está autorizado em Firebase Authentication.";
+         throw new Error("Gemini Cloud precisa de uma sessão Firebase autenticada. "+detail+hint);
+       }
        const r = await fetch(endpoint,{
          method:"POST",
          mode:"cors",
@@ -5200,6 +5227,7 @@ function App() {
          const credential = await fbAuth.signInAnonymously();
          setUser((credential && credential.user) || fbAuth.currentUser || null);
        } catch (authError) {
+         window.__evfAuthError=(authError&&authError.code?authError.code+": ":"")+((authError&&authError.message)||"autenticação indisponível");
          console.warn("Acesso automático indisponível; a app continuará em modo local:", authError);
          setUser(null);
        }
