@@ -1,11 +1,11 @@
 {
   "name": "EvolveFit",
   "short_name": "EvolveFit",
-  "description": "Treino, corpo, progresso e AI Coach.",
+  "description": "Organiza os teus treinos, acompanha a evolução do corpo e transforma consistência em progresso.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",
-  "background_color": "#F3F5F6",
+  "background_color": "#F2F4F6",
   "theme_color": "#263A4D",
   "orientation": "portrait-primary",
   "icons": [

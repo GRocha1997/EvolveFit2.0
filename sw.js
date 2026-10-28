@@ -1,5 +1,5 @@
-const CACHE="evolvefit-pwa-v2";
-const SHELL=["./","./index.html","./manifest.webmanifest","./evolvefit-icon-192.png","./evolvefit-icon-512.png"];
+const CACHE="evolvefit-pwa-v6";
+const SHELL=["./","./index.html","./manifest.webmanifest","./evolvefit-polish.css?v=6","./evolvefit-icon-192.png","./evolvefit-icon-512.png"];
 self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL).catch(()=>{})).then(()=>self.skipWaiting()))});
 self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 self.addEventListener("fetch",e=>{
@@ -23,6 +23,21 @@ self.addEventListener("push",e=>{
 });
 self.addEventListener("notificationclick",e=>{
   e.notification.close();
-  const target=e.notification.data||"./";
-  e.waitUntil(clients.matchAll({type:"window",includeUncontrolled:true}).then(list=>{for(const c of list){if("focus" in c){c.navigate(target);return c.focus();}}return clients.openWindow(target)}));
+  let target;
+  try {
+    const requested = new URL(String(e.notification.data || "./"), self.registration.scope);
+    target = requested.origin === self.location.origin
+      ? requested.href
+      : new URL("./", self.registration.scope).href;
+  } catch (_) {
+    target = new URL("./", self.registration.scope).href;
+  }
+  e.waitUntil(clients.matchAll({type:"window",includeUncontrolled:true}).then(async list=>{
+    const appClient = list.find(c => c.url.startsWith(self.registration.scope));
+    if (appClient) {
+      try { await appClient.navigate(target); } catch (_) {}
+      return appClient.focus();
+    }
+    return clients.openWindow(target);
+  }));
 });
