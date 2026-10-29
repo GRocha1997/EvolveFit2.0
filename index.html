@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=12">
+<link rel="stylesheet" href="evolvefit-polish.css?v=13">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -5076,7 +5076,23 @@ function Coach2027({ state, update, onNavigate }) {
 
  return /*#__PURE__*/React.createElement("div",null,
  /*#__PURE__*/React.createElement(TabHead,{title:"Coach",sub:"Revisão semanal e orientação; análise local por defeito"}),
-
+ /*#__PURE__*/React.createElement("section",{className:"card evf-measure-guide","aria-labelledby":"evf-measure-guide-title"},
+   /*#__PURE__*/React.createElement("div",{className:"pc-title",id:"evf-measure-guide-title"},"O que medir"),
+   /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-list"},
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Peso"), /*#__PURE__*/React.createElement("span",null,"Diariamente · acompanhar a média de 7 dias")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Cintura"), /*#__PURE__*/React.createElement("span",null,"Medir ao domingo")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Cargas"), /*#__PURE__*/React.createElement("span",null,"Registar em todas as sessões")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Fotografias"), /*#__PURE__*/React.createElement("span",null,"De 2 em 2 semanas"))
+   ),
+   /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide"},
+     /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide-title"},"Só ajustar calorias após 3 semanas de dados"),
+     /*#__PURE__*/React.createElement("ul",{className:"evf-calorie-guide-rules"},
+       /*#__PURE__*/React.createElement("li",null,"Perda de 0,4–0,7 kg/semana: manter"),
+       /*#__PURE__*/React.createElement("li",null,"Perda inferior a 0,2 kg/semana com cintura parada: −150 kcal"),
+       /*#__PURE__*/React.createElement("li",null,"Perda superior a 1 kg/semana ou fome constante: +150 kcal")
+     )
+   )
+ ),
  hasCoachData && /*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
    /*#__PURE__*/React.createElement("div",{className:"coach27-badge"}," EVOLVEFIT COACH"),
    /*#__PURE__*/React.createElement("div",{style:{fontSize:"25px",fontWeight:800,marginTop:"10px"}},status),
