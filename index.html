@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=16">
+<link rel="stylesheet" href="evolvefit-polish.css?v=17">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -672,7 +672,8 @@ function normalize(s) {
  s.sessions = (Array.isArray(s.sessions) ? s.sessions : []).filter(se=>se&&typeof se==="object").map((se,i)=>({
    ...se,
    id:String(se.id||("legacy-"+String(se.date||"unknown")+"-"+String(se.dayIdx??"x")+"-"+i)),
-   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>({...e})):[]
+   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>({...e})):[],
+   cardio:Array.isArray(se.cardio)?se.cardio.filter(c=>c&&typeof c==="object").map(c=>({...c,name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0):[]
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
  if (s.profile.name == null) s.profile.name = "Gonçalo";
@@ -3221,7 +3222,7 @@ function Workouts({
   ...(plano[1]?.ex||[]).filter(x=>/hack/i.test(x.name||"")).slice(0,1),
   ...(plano[4]?.ex||[]).filter(x=>/romanian deadlift|hip thrust|leg curl|calf raise/i.test(x.name||""))
  ] : (plano[sel]?.ex||[]);
- const saveSession = entries => update(s => {
+ const saveSession = (entries,cardioEntries=[]) => update(s => {
   const ex=loggerExercises.map((x,i)=>{
    const entry=entries[i]||{};
    const weight=parseNum(entry.weight), notes=entry.notes||"";
@@ -3231,7 +3232,8 @@ function Workouts({
    return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),repsS:parseInt(entry.repsS,10)>0?parseInt(entry.repsS,10):(parseInt(x.repsS,10)||0),repsB:parseInt(entry.repsB,10)>0?parseInt(entry.repsB,10):(parseInt(x.repsB,10)||0),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
   });
   const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
-  const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex};
+  const cardio=(Array.isArray(cardioEntries)?cardioEntries:[]).map(c=>({name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0);
+  const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex,cardio};
   if(i>=0)s.sessions[i]=rec;else s.sessions.push(rec);
   // O registo do treino é separado da marcação "Treinei" nas estatísticas.
  });
@@ -3329,8 +3331,9 @@ function Workouts({
  }, trainedSelected ? "Desmarcar treino" : canMarkSelected ? "Treinei" : "Treino futuro"), !canToggleSelected && /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Disponível para marcar como concluído na "+selectedWeekday+"."), /*#__PURE__*/React.createElement("button", { className: "reset-btn", onClick: () => setShowRir(v => !v) }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
  className: "rir-help"
  }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
- key: sel,
+ key: sel + ":" + selectedDayKey,
  exercises: loggerExercises,
+ cardioTarget: plano[sel]?.cardioMinutes||0,
  sessionNote: fridayFallback ? "Como terça-feira não foi concluída, hoje passa a ser pernas completas: Hack Squat, Romanian Deadlift, Hip Thrust, Leg Curl e Calf Raise." : "",
  history: state.sessions,
  onSave: saveSession,
@@ -3632,7 +3635,8 @@ function TrainingHistory({state,update}) {
    shown.map(session=>h("div",{className:"hist-row",key:session.id},
     h("div",{className:"hist-top"},h("span",{className:"hist-date"},fmt(session.date)),h("span",{className:"hist-name"},session.name),h("button",{className:"hist-edit-btn",onClick:()=>beginEdit(session),"aria-label":"Editar sessão de "+fmt(session.date)},"Editar"),h("button",{className:"hist-del",onClick:()=>del(session.id),"aria-label":"Apagar treino"},h(I,{name:"trash",size:13}))),
     h("div",{className:"hist-ex"},(session.ex||[]).filter(e=>e.name).map(e=>e.name+(e.actualSets?" · "+e.actualSets+" séries feitas":(e.sets?" · "+e.sets+" séries planeadas":""))+(e.actualReps?" · "+e.actualReps+" reps reais/série":(e.reps?" · meta "+repsLbl(e)+" reps":""))+(e.weight?" · "+fmtNum(e.weight)+"kg":"")+(e.rir!=null?" · RIR "+rirLabel(e.rir):"")).join(" · ")),
-    (session.ex||[]).filter(e=>e.name&&e.notes).map((e,ni)=>h("div",{className:"hist-note",key:"note-"+ni},h("strong",null,e.name+": "),e.notes))
+    (session.cardio||[]).filter(c=>Number(c.minutes)>0).length>0&&h("div",{className:"hist-cardio"},h("strong",null,"Cardio: "),(session.cardio||[]).filter(c=>Number(c.minutes)>0).map(c=>(c.name||"Cardio")+" · "+c.minutes+" min").join(" · ")),
+   (session.ex||[]).filter(e=>e.name&&e.notes).map((e,ni)=>h("div",{className:"hist-note",key:"note-"+ni},h("strong",null,e.name+": "),e.notes))
    )),
    sessions.length>5&&h("button",{className:"collapse-btn",style:{marginTop:8,marginBottom:0},onClick:()=>setExpanded(v=>!v)},expanded?"Mostrar menos":"Ver histórico completo ("+sessions.length+")",h(I,{name:"chevron",size:15,className:"chev"+(expanded?" open":"")}))
   ),message&&h("div",{className:"evf-tools-message",role:"status"},message)
@@ -3648,6 +3652,7 @@ function WorkoutLogger({
  canSave=true,
  today,
  last,
+ cardioTarget=0,
  sessionNote=""
 }) {
  const initRow = x => {
@@ -3663,6 +3668,7 @@ function WorkoutLogger({
  return idx === -1 ? null : idx;
  };
  const [draft, setDraft] = useState(exercises.map(initRow));
+ const [cardioRows,setCardioRows]=useState(()=>((today&&Array.isArray(today.cardio))?today.cardio:[]).map((c,i)=>({id:"cardio-"+i,name:String(c.name||""),minutes:c.minutes==null?"":String(c.minutes)})));
  const [saveFeedback,setSaveFeedback]=useState("");
  const [openIdx, setOpenIdx] = useState(() => firstIncomplete(exercises.map(initRow)));
  const [openNotes, setOpenNotes] = useState(() => {
@@ -3726,6 +3732,9 @@ function WorkoutLogger({
  setDraft(d);
  setOpenIdx(null);
  };
+ const addCardio=()=>setCardioRows(rows=>[...rows,{id:"cardio-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),name:"",minutes:""}]);
+ const setCardioField=(id,field,value)=>setCardioRows(rows=>rows.map(c=>c.id===id?{...c,[field]:value}:c));
+ const removeCardio=id=>setCardioRows(rows=>rows.filter(c=>c.id!==id));
  const doneCount = exercises.filter((x, i) => row(x, i).rir != null).length;
  return /*#__PURE__*/React.createElement("div", null, sessionNote && React.createElement("div",{className:"log-session-note",role:"status"},sessionNote), /*#__PURE__*/React.createElement("div", {
  className: "log-progress"
@@ -3840,12 +3849,23 @@ function WorkoutLogger({
  value: r.notes,
  onChange: e => setField(i, "notes", e.target.value)
  })));
- }), !canSave&& /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Esta data ainda é futura. A sessão ficará disponível para guardar no próprio dia."), /*#__PURE__*/React.createElement("button", {
+ }), /*#__PURE__*/React.createElement("section",{className:"log-cardio","aria-label":"Cardio desta sessão"},
+  /*#__PURE__*/React.createElement("div",{className:"log-cardio-head"},
+   /*#__PURE__*/React.createElement("strong",null,"Cardio"),
+   /*#__PURE__*/React.createElement("span",null,cardioTarget>0?"No plano: "+cardioTarget+" min":"Opcional nesta sessão")
+  ),
+  cardioRows.map((c,i)=>React.createElement("div",{className:"log-cardio-row",key:c.id},
+   React.createElement("input",{className:"log-cardio-name",type:"text",value:c.name,placeholder:"Modalidade (ex.: passadeira)","aria-label":"Modalidade de cardio "+(i+1),onChange:e=>setCardioField(c.id,"name",e.target.value)}),
+   React.createElement("input",{className:"log-cardio-min",type:"number",min:"1",step:"1",inputMode:"numeric",value:c.minutes,placeholder:"min","aria-label":"Minutos de cardio "+(i+1),onChange:e=>setCardioField(c.id,"minutes",e.target.value)}),
+   React.createElement("button",{type:"button",className:"log-cardio-remove",onClick:()=>removeCardio(c.id),"aria-label":"Remover cardio "+(i+1)},React.createElement(I,{name:"trash",size:15}))
+  )),
+  React.createElement("button",{type:"button",className:"log-cardio-add",onClick:addCardio},React.createElement(I,{name:"plus",size:14})," Adicionar cardio")
+ ), !canSave&& /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Esta data ainda é futura. A sessão ficará disponível para guardar no próprio dia."), /*#__PURE__*/React.createElement("button", {
  className: "big-btn coral log-save",
  disabled: !canSave,
  onClick: () => {
   if(!canSave)return;
-  onSave(exercises.map((x, i) => row(x, i)));
+  onSave(exercises.map((x, i) => row(x, i)),cardioRows.map(c=>({name:c.name,minutes:c.minutes})).filter(c=>parseInt(c.minutes,10)>0));
   setSaveFeedback(window.EvolveFitLocalStatus?.status==="error"?"Não foi possível confirmar a gravação neste dispositivo.":window.__evfSyncMode==="cloud"?"Sessão guardada neste dispositivo. Consulta «Sincronização» no menu da conta para ver o estado da cloud.":"Sessão guardada neste dispositivo; sincronização cloud não configurada.");
  }
  }, /*#__PURE__*/React.createElement(I, {
