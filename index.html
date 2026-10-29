@@ -672,7 +672,7 @@ function normalize(s) {
  s.sessions = (Array.isArray(s.sessions) ? s.sessions : []).filter(se=>se&&typeof se==="object").map((se,i)=>({
    ...se,
    id:String(se.id||("legacy-"+String(se.date||"unknown")+"-"+String(se.dayIdx??"x")+"-"+i)),
-   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>({...e})):[],
+   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>{const clean={...e};delete clean.repsS;delete clean.repsB;return clean;}):[],
    cardio:Array.isArray(se.cardio)?se.cardio.filter(c=>c&&typeof c==="object").map(c=>({...c,name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0):[]
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
@@ -3229,7 +3229,7 @@ function Workouts({
    const allPlanEx=s.plano.flatMap(pd=>pd.ex||[]);
    const planMatch=allPlanEx.find(p=>x.exerciseId&&p.exerciseId===x.exerciseId)||(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
    if(planMatch){planMatch.weight=weight;planMatch.notes=notes;if(planMatch.week1Start==null&&weight>0){planMatch.week1Start=weight;planMatch.week1StartLabel=fmtNum(weight)+" kg";}}
-   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),repsS:parseInt(entry.repsS,10)>0?parseInt(entry.repsS,10):(parseInt(x.repsS,10)||0),repsB:parseInt(entry.repsB,10)>0?parseInt(entry.repsB,10):(parseInt(x.repsB,10)||0),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
+   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
   });
   const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
   const cardio=(Array.isArray(cardioEntries)?cardioEntries:[]).map(c=>({name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0);
@@ -3874,7 +3874,7 @@ function WorkoutLogger({
  }), " ", loggedSelected ? "Atualizar sessão" : "Guardar sessão"), saveFeedback&& /*#__PURE__*/React.createElement("div",{className:"evf-tools-message log-save-feedback",role:"status"},saveFeedback));
 }
 
-/* --------------------- temporizador, progressão, assimetria -------------------- */
+/* --------------------- temporizador e progressão -------------------- */
 function RestTimer() {
  const h = React.createElement;
  const [end, setEnd] = useState(null);
@@ -4727,12 +4727,6 @@ function Coach2027({ state, update, onNavigate }) {
  if(enoughData && waistTrend!=null && waistTrend<0) alerts.push({text:"Cintura em tendência descendente.", level:"positive", tab:"body"});
  if(enoughData && weightTrend!=null && Math.abs(weightTrend)<0.2 && (waistTrend==null || Math.abs(waistTrend)<0.3)) alerts.push({text:"Peso e cintura estão estáveis. Continua a registar para confirmar a tendência.", level:"neutral", tab:"body"});
 
- const asymSessions=(state.sessions||[]).filter(s => Array.isArray(s.ex) && s.ex.some(e=>/single-arm db chest/i.test(e.name))).slice(-6);
- const asymRows=asymSessions.map(s=>{
- const e=s.ex.find(e=>/single-arm db chest/i.test(e.name));
- return {date:s.date, weight:e&&e.weight, small:e&&e.repsS, big:e&&e.repsB, rir:e&&e.rir};
- }).filter(x=>x.small>0&&x.big>0);
-
  const fourWeeksAgo = new Date(TODAY); fourWeeksAgo.setDate(fourWeeksAgo.getDate()-28);
  const cutoff28 = iso(fourWeeksAgo);
  const latestWeight = [...body].reverse().find(x=>x.weight>0) || null;
@@ -4775,7 +4769,7 @@ function Coach2027({ state, update, onNavigate }) {
    dayIdx:se.dayIdx,
    exercises:(se.ex||[]).slice(0,12).map(e=>({
      name:e.name, sets:aiPositive(e.sets), reps:aiPositive(e.reps), weight:aiPositive(e.weight),
-     rir:e.rir==null?null:Number(e.rir), repsS:aiPositive(e.repsS), repsB:aiPositive(e.repsB)
+     rir:e.rir==null?null:Number(e.rir)
    }))
  }));
  const aiRecentDays = (d7||[]).map(x=>({
@@ -5057,7 +5051,7 @@ function Coach2027({ state, update, onNavigate }) {
      /*#__PURE__*/React.createElement("span",{style:{fontSize:"15px",opacity:.65}},"›")
    ))
  ),
- (currentMetrics.length>0||coachMetrics.length>0||asymRows.length>0||reviewMetrics.length>0) && /*#__PURE__*/React.createElement("div",{className:"evf-coach-section-label"},"Detalhes de progresso"),
+ (currentMetrics.length>0||coachMetrics.length>0||reviewMetrics.length>0) && /*#__PURE__*/React.createElement("div",{className:"evf-coach-section-label"},"Detalhes de progresso"),
  currentMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
    /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Estado atual"),
    /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},currentMetrics),
@@ -5068,21 +5062,6 @@ function Coach2027({ state, update, onNavigate }) {
  coachMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
    /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Últimos 7 dias"),
    /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},coachMetrics)
- ),
- asymRows.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
-   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Assimetria do peito"),
-   /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",lineHeight:1.5,marginTop:"7px"}},"Single-Arm DB Chest Press · lado menor primeiro · iguala o lado maior ao lado menor · 1–2 RIR."),
-   asymRows.slice(-3).reverse().map((r,i)=>{
-     const values=["menor "+r.small,"maior "+r.big];
-     if(r.weight>0) values.unshift(r.weight+" kg");
-     if(r.rir!=null) values.push("RIR "+r.rir);
-     return /*#__PURE__*/React.createElement("div",{className:"prog-row",key:i},
-       /*#__PURE__*/React.createElement("div",null,
-         /*#__PURE__*/React.createElement("div",{className:"prog-name"},r.date),
-         /*#__PURE__*/React.createElement("div",{className:"prog-vals"},values.join(" · "))
-       )
-     );
-   })
  ),
  reviewMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
    /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Revisão de 4 semanas"),
@@ -5117,7 +5096,6 @@ function Coach2027({ state, update, onNavigate }) {
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a evolução das cargas por exercício? Resume o que subiu, o que se manteve e o que ainda tem poucos registos.")},"Treino"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("A minha nutrição e atividade estão alinhadas com o objetivo? Analisa calorias, proteína, gordura, passos, água e cardio.")},"Nutrição"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha recuperação? Analisa sono, água, cardio, frequência de treino e carga e diz se estou a recuperar o suficiente.")},"Recuperação"),
-       /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Analisa a minha assimetria no Single-Arm DB Chest Press. Compara lado menor e maior, reps, carga e RIR e diz-me se devo manter ou ajustar.")},"Assimetria"),
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Cruza todos os meus dados atuais e diz-me qual é a única prioridade que devo atacar nos próximos 7 dias. Explica a decisão com dados concretos.")},"Prioridade")
      ),
      /*#__PURE__*/React.createElement("textarea",{className:"evf-ai-question",value:aiQuestion,onChange:e=>setAiQuestion(e.target.value),placeholder:"Escreve uma pergunta ao Coach…"}),
