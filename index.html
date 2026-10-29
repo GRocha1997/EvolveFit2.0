@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=11">
+<link rel="stylesheet" href="evolvefit-polish.css?v=12">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -3440,7 +3440,7 @@ function Workouts({
  },d.day.slice(0,3),(missed||loggedDayIdx.has(i)||completed)&&React.createElement("span",{
   className:"dp-dot"+(missed?" dp-dot-missed":"")
  }));
- })), plano.some((_,i)=>weekDays[i]&&missedTrainingOn(state,weekDays[i].key))&&React.createElement("div",{className:"missed-workout-note",role:"note"},"A vermelho: dia passado sem a marcação «Treinei»."), /*#__PURE__*/React.createElement("div", {
+ })), /*#__PURE__*/React.createElement("div", {
  className: "card logger"
  }, /*#__PURE__*/React.createElement("div", {
  className: "logger-head"
