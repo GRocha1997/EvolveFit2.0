@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=15">
+<link rel="stylesheet" href="evolvefit-polish.css?v=16">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -691,12 +691,18 @@ function normalize(s) {
  if (!Array.isArray(s.profile.planAdjustments)) s.profile.planAdjustments = [];
  if (s.theme == null) s.theme = "light";
  if (!s.menus || typeof s.menus !== "object" || !s.menus.manha || !s.menus.tarde) s.menus = clone(MENUS);
+ const planNameKey=name=>String(name||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
+ const planStructureIsCurrent=()=>Array.isArray(s.plano)&&s.plano.length===PLAN.length&&PLAN.every(day=>{
+  const savedDay=s.plano.find(x=>x&&x.day===day.day);
+  const exercises=savedDay&&Array.isArray(savedDay.ex)?savedDay.ex:[];
+  return !!savedDay&&day.ex.every(ex=>exercises.some(saved=>saved&&(saved.exerciseId===ex.exerciseId||planNameKey(saved.name)===planNameKey(ex.name))));
+ });
  if (!Array.isArray(s.plano) || !s.plano.length) {
  s.plano = clone(PLAN);
  s.planoVersion = PLAN_VERSION;
- } else if ((Number(s.planoVersion)||0) !== PLAN_VERSION) {
- // A versão 5 substitui a estrutura do plano, mas mantém cargas de exercícios
- // já existentes quando o novo plano não especifica uma carga inicial.
+ } else if ((Number(s.planoVersion)||0) !== PLAN_VERSION || !planStructureIsCurrent()) {
+ // Repara também estados mistos/incompletos que já tenham a versão atual gravada.
+ // A estrutura nova mantém sessões, IDs compatíveis e cargas sem valor inicial definido.
  const oldPlan=Array.isArray(s.plano)?s.plano:[];
  const planKey=name=>String(name||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
  const planAliases={

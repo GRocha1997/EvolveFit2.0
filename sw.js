@@ -1,5 +1,5 @@
-const CACHE="evolvefit-pwa-v15";
-const SHELL=["./","./index.html","./manifest.webmanifest","./evolvefit-polish.css?v=15","./evolvefit-icon-192.png","./evolvefit-icon-512.png"];
+const CACHE="evolvefit-pwa-v16";
+const SHELL=["./","./index.html","./manifest.webmanifest","./evolvefit-polish.css?v=16","./evolvefit-icon-192.png","./evolvefit-icon-512.png"];
 self.addEventListener("install",e=>{e.waitUntil(caches.open(CACHE).then(c=>c.addAll(SHELL).catch(()=>{})).then(()=>self.skipWaiting()))});
 self.addEventListener("activate",e=>{e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k)))).then(()=>self.clients.claim()))});
 self.addEventListener("fetch",e=>{
