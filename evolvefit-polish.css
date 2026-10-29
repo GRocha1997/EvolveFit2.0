@@ -877,3 +877,31 @@ button:disabled {
   .evf-nutrition-macro { padding: 9px 4px; }
   .evf-nutrition-macro strong { font-size: 15px; }
 }
+
+/* Plano de treino v5 */
+.training-cycle { padding: 14px; }
+.training-cycle-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; margin-bottom: 11px; }
+.training-cycle-head h2 { margin: 0; color: var(--text); font-size: 16px; letter-spacing: -.02em; }
+.training-cycle-head p { margin: 4px 0 0; color: var(--muted); font-size: 11px; }
+.training-cycle-badge { padding: 5px 8px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 10px; font-weight: 800; }
+.training-cycle-phases { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+.training-cycle-phase { padding: 9px; border: 1px solid var(--border); border-radius: 11px; background: var(--surface2); }
+.training-cycle-phase strong { color: var(--text); font-size: 11px; }
+.training-cycle-phase p { margin: 5px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }
+.training-cycle-routine { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 8px; }
+.training-cycle-routine p { margin: 0; padding: 9px; border-radius: 10px; background: var(--surface2); color: var(--muted); font-size: 10px; line-height: 1.4; }
+.training-cycle-routine strong { color: var(--text); }
+.training-cycle-measures { margin-top: 8px; border-top: 1px solid var(--border); }
+.training-cycle-measures summary { min-height: 42px; display: flex; align-items: center; color: var(--text); font-size: 11px; font-weight: 750; cursor: pointer; }
+.training-cycle-measure-body p { margin: 0 0 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.plan-meta { display: flex; flex-wrap: wrap; gap: 5px; margin: -2px 0 10px; }
+.plan-meta span { padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 10px; line-height: 1.2; }
+.plan-meta .plan-meta-anchor { color: var(--text); font-weight: 800; }
+.plan-meta .plan-meta-superset { color: var(--text); font-weight: 750; }
+.log-session-note { margin: 0 0 10px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface2); color: var(--text); font-size: 12px; line-height: 1.45; }
+@media (max-width: 360px) {
+  .training-cycle-phases, .training-cycle-routine { grid-template-columns: 1fr; }
+}
+.log-plan-meta { display: flex; flex-wrap: wrap; gap: 5px; margin: 0 0 9px; }
+.log-plan-meta span { padding: 4px 7px; border: 1px solid var(--border); border-radius: 999px; color: var(--muted); font-size: 10px; line-height: 1.2; }
+.log-plan-meta .plan-meta-anchor, .log-plan-meta .plan-meta-superset { color: var(--text); font-weight: 750; }

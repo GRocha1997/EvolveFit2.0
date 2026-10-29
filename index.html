@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=14">
+<link rel="stylesheet" href="evolvefit-polish.css?v=15">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -694,64 +694,43 @@ function normalize(s) {
  if (!Array.isArray(s.plano) || !s.plano.length) {
  s.plano = clone(PLAN);
  s.planoVersion = PLAN_VERSION;
- } else if (s.planoVersion !== PLAN_VERSION) {
- // Nunca repor o plano: preserva cargas, reps e edições do utilizador.
- // Só acrescenta dias do plano base que ainda não existam.
- PLAN.forEach(pd => { if (!s.plano.some(d => d && d.day === pd.day)) s.plano.push(clone(pd)); });
- s.planoVersion = PLAN_VERSION;
- }
- // Migração Verão 2027: Quinta troca Cable Fly por Single-Arm DB Chest Press (mantém as cargas guardadas)
- if (!s.migVerao27) {
- s.migVerao27 = true;
- const q = s.plano.find(d => d.day === "Quinta");
- if (q && Array.isArray(q.ex)) {
- const i = q.ex.findIndex(x => /cable fly/i.test(x.name));
- if (i >= 0) q.ex[i] = clone(PLAN[3].ex[2]);
- }
- const note = (day, re, txt) => {
- const d = s.plano.find(x => x.day === day);
- const e = d && d.ex.find(x => re.test(x.name));
- if (e && !e.notes) e.notes = txt;
+ } else if ((Number(s.planoVersion)||0) !== PLAN_VERSION) {
+ // A versão 5 substitui a estrutura do plano, mas mantém cargas de exercícios
+ // já existentes quando o novo plano não especifica uma carga inicial.
+ const oldPlan=Array.isArray(s.plano)?s.plano:[];
+ const planKey=name=>String(name||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
+ const planAliases={
+  "seatedcablerowneutra":["seated cable row"],
+  "legextension":["seated leg extension"],
+  "ezbarcurl":["ez curls"],
+  "hammercurl":["hammer curl db"],
+  "cablelateralraiseunilateral":["cable lateral raise machine"],
+  "barbellromaniandeadlift":["romanian deadlift"],
+  "hipthrust":["hip thrust machine"]
  };
- note("Segunda", /flat db press/i, PLAN[0].ex[0].notes);
- note("Terça", /leg press unilateral/i, PLAN[1].ex[0].notes);
+ s.plano=clone(PLAN).map(pd=>{
+  const oldDay=oldPlan.find(x=>x&&x.day===pd.day);
+  return {...pd,ex:pd.ex.map(ex=>{
+   const keys=[planKey(ex.name),...(planAliases[planKey(ex.name)]||[]).map(planKey)];
+   const sameDay=(oldDay&&Array.isArray(oldDay.ex)?oldDay.ex:[]).find(prev=>keys.includes(planKey(prev&&prev.name)));
+   const anyDay=oldPlan.flatMap(x=>Array.isArray(x&&x.ex)?x.ex:[]).find(prev=>keys.includes(planKey(prev&&prev.name)));
+   const previous=sameDay||anyDay;
+   const prescribed=parseNum(ex.weight)||0;
+   const oldWeight=parseNum(previous&&previous.weight)||0;
+   const weight=prescribed>0?prescribed:oldWeight>0?oldWeight:0;
+   return {...ex,weight,
+    week1Start:ex.week1Start!=null?ex.week1Start:(weight>0?weight:null),
+    week1StartLabel:ex.week1StartLabel||(ex.week1Start==null&&weight>0?fmtNum(weight)+" kg":null),
+    exerciseId:(sameDay&&sameDay.exerciseId)||ex.exerciseId
+   };
+  })};
+ });
+ s.planoVersion=PLAN_VERSION;
  }
- // Migração 2 (plano final): reordena Quinta e atualiza notas, mantendo cargas
- if (!s.migVerao27b) {
- s.migVerao27b = true;
- const q = s.plano.find(d => d.day === "Quinta");
- if (q && Array.isArray(q.ex)) {
- const iF = q.ex.findIndex(x => /flat machine chest/i.test(x.name)),
- iS = q.ex.findIndex(x => /single-arm db chest/i.test(x.name));
- if (iF >= 0 && iS > iF) q.ex.splice(iF, 0, q.ex.splice(iS, 1)[0]);
- const set = (re, txt, olds) => {
- const e = q.ex.find(x => re.test(x.name));
- if (e && (!e.notes || olds.includes(e.notes))) e.notes = txt;
- };
- set(/single-arm db chest/i, "Lado menor primeiro · mesma carga nos dois lados (nunca maior no lado menor) · lado forte faz exatamente as mesmas reps · 1–2 RIR · ~90s descanso · mesma amplitude · não rodar o tronco para ajudar · a recuperar bem: +1 série só no lado menor · manter 8–12 semanas", ["10–12 reps/lado · lado menor primeiro → lado maior, mesma carga e reps · 1–2 RIR · ~90s descanso · a recuperar bem: +1 série só no lado menor · sem Cable Fly · manter 8–12 semanas"]);
- set(/incline db press/i, "8–10 reps", []);
- set(/flat machine chest/i, "10–12 reps", []);
- }
- const t = s.plano.find(d => d.day === "Terça");
- const lp = t && t.ex.find(x => /leg press unilateral/i.test(x.name));
- if (lp && (!lp.notes || lp.notes === "10–12 reps por perna · perna mais fraca primeiro → mesmas reps na outra" || lp.notes === "10–12 reps por perna")) lp.notes = "10–12 reps por perna · começar pela perna mais fraca → mesmas reps na forte · mesma técnica e amplitude · perna dominante não compensa";
- }
- // Migração 3: faixas de reps (mín–máx), mantendo cargas
- if (!s.migVerao27c) {
- s.migVerao27c = true;
- const R = (day, re, mn, mx, oldNote) => {
- const d = s.plano.find(x => x.day === day);
- const e = d && d.ex.find(x => re.test(x.name));
- if (!e) return;
- e.reps = mn;
- e.repsMax = mx;
- if (oldNote && e.notes === oldNote) e.notes = "";
- };
- R("Terça", /leg press unilateral/i, 10, 12);
- R("Quinta", /incline db press/i, 8, 10, "8–10 reps");
- R("Quinta", /single-arm db chest/i, 10, 12);
- R("Quinta", /flat machine chest/i, 10, 12, "10–12 reps");
- }
+ // As migrações antigas do plano foram substituídas pela versão fixa de 5 dias.
+ s.migVerao27=true;
+ s.migVerao27b=true;
+ s.migVerao27c=true;
  // IDs estáveis mantêm a série histórica unida quando o utilizador renomeia exercícios.
  const exKey=name=>String(name||"").trim().toLocaleLowerCase("pt-PT");
  s.plano.forEach((pd,di)=>Array.isArray(pd.ex)&&pd.ex.forEach((x,ei)=>{if(!x.exerciseId)x.exerciseId="plan-"+di+"-"+ei;}));
@@ -1621,201 +1600,65 @@ const repsLbl = x => x.repsMax > x.reps ? x.reps + "–" + x.repsMax : String(x.
 /* --------------------------- workout plan ------------------------------- */
 const PLAN = [{
  day: "Segunda",
- name: "Superior Geral (Peito, Costas, Ombros & Braços)",
- ex: [{
- name: "Flat DB Press",
- sets: 3,
- reps: 12,
- weight: 20,
- notes: "Presses: mesma amplitude dos dois lados · movimento simultâneo · lado dominante não faz mais trabalho · tronco estável"
- }, {
- name: "Seated Cable Row",
- sets: 3,
- reps: 12,
- weight: 50
- }, {
- name: "Incline Smith Press",
- sets: 3,
- reps: 12,
- weight: 30
- }, {
- name: "Lat Pulldown",
- sets: 3,
- reps: 12,
- weight: 40
- }, {
- name: "Lateral Raise Machine",
- sets: 4,
- reps: 20,
- weight: 5
- }, {
- name: "Pushdown",
- sets: 3,
- reps: 12,
- weight: 15
- }, {
- name: "Incline DB Curl",
- sets: 3,
- reps: 12,
- weight: 10
- }]
+ name: "UPPER A (+ cardio 30 min)",
+ cardioMinutes: 30,
+ ex: [
+  {exerciseId:"v5-mon-bench",name:"Barbell Bench Press",sets:3,reps:5,repsMax:8,weight:50,week1Start:50,week1StartLabel:"50 kg",week8Target:"65–70 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:2.5,notes:"Âncora. Semana 1: calibrar a RIR 3; depois, alvo RIR 2."},
+  {exerciseId:"v5-mon-row",name:"Seated Cable Row (neutra)",sets:3,reps:8,repsMax:10,weight:60,week1Start:60,week1StartLabel:"60 kg",week8Target:"75 kg",rir:2,rirDisplay:"2",rest:"2 min",notes:"Pegada neutra."},
+  {exerciseId:"v5-mon-db-shoulder",name:"Seated DB Shoulder Press",sets:3,reps:8,repsMax:10,weight:16,week1Start:16,week1StartLabel:"16–18 kg/mão",week8Target:"22 kg/mão",rir:2,rirDisplay:"2",rest:"2 min"},
+  {exerciseId:"v5-mon-lat-wide",name:"Lat Pulldown (larga)",sets:3,reps:10,repsMax:12,weight:55,week1Start:55,week1StartLabel:"55 kg",week8Target:"65 kg",rir:1,rirDisplay:"1–2",rest:"90 s"},
+  {exerciseId:"v5-mon-db-lateral",name:"DB Lateral Raise",sets:3,reps:12,repsMax:15,weight:8,week1Start:8,week1StartLabel:"8–10 kg/mão",week8Target:"12 kg/mão",rir:1,rirDisplay:"0–1",rest:"60 s"},
+  {exerciseId:"v5-mon-rope-pushdown",name:"Rope Pushdown",sets:2,reps:12,repsMax:15,weight:40,week1Start:40,week1StartLabel:"40 kg",week8Target:"50 kg",rir:1,rirDisplay:"0–1",rest:"60 s",superset:"A",supersetPart:"6a"},
+  {exerciseId:"v5-mon-ez-curl",name:"EZ Bar Curl",sets:2,reps:10,repsMax:12,weight:15,week1Start:15,week1StartLabel:"15 kg",week8Target:"20 kg",rir:1,rirDisplay:"0–1",rest:"60 s",superset:"A",supersetPart:"6b"}
+ ]
 }, {
  day: "Terça",
- name: "Pernas Completo: Quadríceps & Glúteos",
- ex: [{
- name: "Leg Press Unilateral",
- sets: 3,
- reps: 10,
- repsMax: 12,
- weight: 0,
- notes: "10–12 reps por perna · começar pela perna mais fraca → mesmas reps na forte · mesma técnica e amplitude · perna dominante não compensa"
- }, {
- name: "Seated Leg Curl",
- sets: 3,
- reps: 15,
- weight: 40
- }, {
- name: "Hip Thrust Machine",
- sets: 3,
- reps: 12,
- weight: 40
- }, {
- name: "Hack Squat",
- sets: 2,
- reps: 10,
- weight: 60
- }, {
- name: "Seated Calf Raise",
- sets: 4,
- reps: 15,
- weight: 10
- }, {
- name: "Crunch Machine",
- sets: 3,
- reps: 15,
- weight: 15
- }]
+ name: "LOWER A (quadricípite)",
+ ex: [
+  {exerciseId:"v5-tue-hack-squat",name:"Hack Squat",sets:3,reps:5,repsMax:8,weight:0,week1Start:null,week8Target:"+20 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:5},
+  {exerciseId:"v5-tue-leg-press",name:"Leg Press",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+20–30 kg",rir:2,rirDisplay:"2",rest:"2 min"},
+  {exerciseId:"v5-tue-seated-curl",name:"Seated Leg Curl",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+2 placas",rir:1,rirDisplay:"1",rest:"90 s"},
+  {exerciseId:"v5-tue-leg-extension",name:"Leg Extension",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1–2 placas",rir:1,rirDisplay:"0–1",rest:"75 s",notes:"Pausa no topo."},
+  {exerciseId:"v5-tue-standing-calf",name:"Standing Calf Raise",sets:3,reps:8,repsMax:12,weight:0,week1Start:null,week8Target:"+10–15 kg",rir:1,rirDisplay:"1",rest:"75 s",notes:"Pausa em baixo."},
+  {exerciseId:"v5-tue-cable-crunch",name:"Cable Crunch",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1 placa",rir:1,rirDisplay:"1",rest:"60 s"}
+ ]
 }, {
  day: "Quarta",
- name: "Costas, Bíceps & Deltoide Posterior",
- ex: [{
- name: "Lat Pulldown",
- sets: 4,
- reps: 10,
- weight: 55
- }, {
- name: "Chest Supported Row",
- sets: 3,
- reps: 12,
- weight: 40
- }, {
- name: "Single-Arm Cable Row",
- sets: 2,
- reps: 12,
- weight: 20
- }, {
- name: "Reverse Pec Deck",
- sets: 3,
- reps: 20,
- weight: 15
- }, {
- name: "Ez Curls",
- sets: 3,
- reps: 12,
- weight: 10
- }, {
- name: "Hammer Curl (DB)",
- sets: 3,
- reps: 12,
- weight: 10
- }, {
- name: "Standing Face Pulls",
- sets: 3,
- reps: 20,
- weight: 30
- }]
+ name: "PULL (+ cardio 30 min)",
+ cardioMinutes: 30,
+ ex: [
+  {exerciseId:"v5-wed-lat-anchor",name:"Lat Pulldown",sets:4,reps:5,repsMax:8,weight:65,week1Start:65,week1StartLabel:"65 kg",week8Target:"80 kg",rir:2,rirDisplay:"2",rest:"2–3 min",anchor:true,progressionStep:2.5,notes:"Âncora. Semana 1: calibrar a RIR 3; depois, alvo RIR 2."},
+  {exerciseId:"v5-wed-chest-row",name:"Chest Supported Row",sets:3,reps:8,repsMax:10,weight:45,week1Start:45,week1StartLabel:"45 kg",week8Target:"60 kg",rir:2,rirDisplay:"2",rest:"2 min"},
+  {exerciseId:"v5-wed-db-row",name:"Single-Arm DB Row",sets:3,reps:8,repsMax:10,weight:26,week1Start:26,week1StartLabel:"26–28 kg/lado",week8Target:"34 kg/lado",rir:2,rirDisplay:"1–2",rest:"90 s",notes:"Por lado."},
+  {exerciseId:"v5-wed-reverse-pec",name:"Reverse Pec Deck",sets:3,reps:12,repsMax:15,weight:15,week1Start:15,week1StartLabel:"15 kg",week8Target:"25 kg",rir:1,rirDisplay:"0–1",rest:"60 s"},
+  {exerciseId:"v5-wed-incline-curl",name:"Incline DB Curl",sets:3,reps:8,repsMax:10,weight:10,week1Start:10,week1StartLabel:"10 kg/mão",week8Target:"14 kg/mão",rir:1,rirDisplay:"1",rest:"90 s"},
+  {exerciseId:"v5-wed-hammer-curl",name:"Hammer Curl",sets:2,reps:10,repsMax:12,weight:12.5,week1Start:12.5,week1StartLabel:"12,5 kg/mão",week8Target:"16 kg/mão",rir:1,rirDisplay:"0–1",rest:"60 s"}
+ ]
 }, {
  day: "Quinta",
- name: "Peito, Ombros (Lateral/Anterior) & Tríceps",
- ex: [{
- name: "Incline DB Press",
- sets: 4,
- reps: 8,
- repsMax: 10,
- weight: 25
- }, {
- name: "Single-Arm DB Chest Press",
- sets: 3,
- reps: 10,
- repsMax: 12,
- weight: 0,
- notes: "Lado menor primeiro · mesma carga nos dois lados (nunca maior no lado menor) · lado forte faz exatamente as mesmas reps · 1–2 RIR · ~90s descanso · mesma amplitude · não rodar o tronco para ajudar · a recuperar bem: +1 série só no lado menor · manter 8–12 semanas"
- }, {
- name: "Flat Machine Chest Press",
- sets: 3,
- reps: 10,
- repsMax: 12,
- weight: 65
- }, {
- name: "Seated DB Shoulder Press",
- sets: 3,
- reps: 12,
- weight: 20
- }, {
- name: "Cable Lateral Raise Machine",
- sets: 4,
- reps: 25,
- weight: 15
- }, {
- name: "Rope PushDown",
- sets: 3,
- reps: 15,
- weight: 20
- }, {
- name: "Overhead Rope Extension",
- sets: 3,
- reps: 15,
- weight: 7
- }]
+ name: "PUSH",
+ ex: [
+  {exerciseId:"v5-thu-smith-incline",name:"Incline Smith Press",sets:3,reps:6,repsMax:8,weight:45,week1Start:45,week1StartLabel:"45 kg",week8Target:"60 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:2.5,notes:"Âncora. Semana 1: calibrar a RIR 3; depois, alvo RIR 2."},
+  {exerciseId:"v5-thu-flat-machine",name:"Flat Machine Chest Press",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+15 kg",rir:2,rirDisplay:"1–2",rest:"90 s"},
+  {exerciseId:"v5-thu-machine-shoulder",name:"Machine Shoulder Press",sets:3,reps:8,repsMax:10,weight:0,week1Start:null,week8Target:"+10 kg",rir:2,rirDisplay:"2",rest:"2 min"},
+  {exerciseId:"v5-thu-cable-fly",name:"Cable Fly",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1 placa/lado",rir:1,rirDisplay:"0–1",rest:"60 s"},
+  {exerciseId:"v5-thu-cable-lateral",name:"Cable Lateral Raise (unilateral)",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1 placa",rir:1,rirDisplay:"0–1",rest:"60 s"},
+  {exerciseId:"v5-thu-overhead-rope",name:"Overhead Rope Extension",sets:2,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+1 placa",rir:1,rirDisplay:"1",rest:"75 s"},
+  {exerciseId:"v5-thu-rope-pushdown",name:"Rope Pushdown",sets:2,reps:12,repsMax:15,weight:40,week1Start:40,week1StartLabel:"40 kg",week8Target:"50 kg",rir:0,rirDisplay:"0",rest:"60 s"}
+ ]
 }, {
  day: "Sexta",
- name: "Pernas Completo: Cadeia Posterior & Panturrilhas",
- ex: [{
- name: "Back Squat",
- sets: 3,
- reps: 8,
- weight: 60
- }, {
- name: "Romanian Deadlift",
- sets: 3,
- reps: 10,
- weight: 80
- }, {
- name: "Lunges (DB)",
- sets: 3,
- reps: 10,
- weight: 15
- }, {
- name: "Seated Leg Extension",
- sets: 3,
- reps: 15,
- weight: 40
- }, {
- name: "Leg Press Calf Raises",
- sets: 4,
- reps: 15,
- weight: 15
- }, {
- name: "Hanging Leg Raise",
- sets: 3,
- reps: 15,
- weight: 0
- }]
+ name: "LOWER B (posterior e glúteo)",
+ ex: [
+  {exerciseId:"v5-fri-rdl",name:"Barbell Romanian Deadlift",sets:3,reps:6,repsMax:8,weight:60,week1Start:60,week1StartLabel:"60 kg",week8Target:"85–90 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:5,notes:"Âncora. Semana 1: calibrar a RIR 3; depois, alvo RIR 2."},
+  {exerciseId:"v5-fri-hip-thrust",name:"Hip Thrust",sets:3,reps:8,repsMax:10,weight:0,week1Start:null,week8Target:"+20–30 kg",rir:2,rirDisplay:"2",rest:"2 min"},
+  {exerciseId:"v5-fri-bulgarian",name:"Bulgarian Split Squat (DB)",sets:3,reps:8,repsMax:10,weight:12,week1Start:12,week1StartLabel:"12–14 kg/mão",week8Target:"18 kg/mão",rir:2,rirDisplay:"2",rest:"90 s",notes:"Por perna."},
+  {exerciseId:"v5-fri-lying-curl",name:"Lying Leg Curl",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+2 placas",rir:1,rirDisplay:"0–1",rest:"75 s"},
+  {exerciseId:"v5-fri-seated-calf",name:"Seated Calf Raise",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+10 kg",rir:1,rirDisplay:"1",rest:"60 s",notes:"Pausa em baixo."},
+  {exerciseId:"v5-fri-hanging-raise",name:"Hanging Leg Raise",sets:3,reps:10,repsMax:15,weight:0,week1Start:null,week8Target:"15 × 3 limpas",rir:1,rirDisplay:"1",rest:"60 s"}
+ ]
 }];
-/* Sobe este número sempre que o PLAN acima mudar. Ao arrancar, se o plano
- guardado tiver uma versão diferente, é substituído por este (o histórico
- de sessões, medidas, etc. mantém-se). */
-const PLAN_VERSION = 4;
+const PLAN_VERSION = 5;
 const lastWeekdayDate = W => {
  let d = new Date(TODAY);
  for (let i = 0; i < 8; i++) {
@@ -3361,13 +3204,21 @@ function Workouts({
  const selectedWeekday = new Date(selectedDayKey + "T12:00:00").toLocaleDateString("pt-PT", {weekday:"long"});
  const selectedDateLabel = new Date(selectedDayKey + "T12:00:00").toLocaleDateString("pt-PT", {day:"numeric",month:"short"});
  const loggedDayIdx = new Set(state.sessions.filter(s => weekDays.some(w => w.key === s.date)).map(s => s.dayIdx));
- const loggerExercises = selectedSession && Array.isArray(selectedSession.ex) && selectedSession.ex.length ? selectedSession.ex : (plano[sel]?.ex||[]);
+ const tuesdayKey=weekDays[1]?.key;
+ const tuesdayLogged=(state.sessions||[]).some(se=>se.date===tuesdayKey&&Number(se.dayIdx)===1);
+ const tuesdayMissed=!!(tuesdayKey&&tuesdayKey<todayKey&&!trainedOn(state,tuesdayKey)&&!tuesdayLogged);
+ const fridayFallback=sel===4&&tuesdayMissed&&!selectedSession;
+ const loggerExercises = selectedSession && Array.isArray(selectedSession.ex) && selectedSession.ex.length ? selectedSession.ex : fridayFallback ? [
+  ...(plano[1]?.ex||[]).filter(x=>/hack/i.test(x.name||"")).slice(0,1),
+  ...(plano[4]?.ex||[]).filter(x=>/romanian deadlift|hip thrust|leg curl|calf raise/i.test(x.name||""))
+ ] : (plano[sel]?.ex||[]);
  const saveSession = entries => update(s => {
   const ex=loggerExercises.map((x,i)=>{
    const entry=entries[i]||{};
    const weight=parseNum(entry.weight), notes=entry.notes||"";
-   const planMatch=(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
-   if(planMatch){planMatch.weight=weight;planMatch.notes=notes;}
+   const allPlanEx=s.plano.flatMap(pd=>pd.ex||[]);
+   const planMatch=allPlanEx.find(p=>x.exerciseId&&p.exerciseId===x.exerciseId)||(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
+   if(planMatch){planMatch.weight=weight;planMatch.notes=notes;if(planMatch.week1Start==null&&weight>0){planMatch.week1Start=weight;planMatch.week1StartLabel=fmtNum(weight)+" kg";}}
    return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),repsS:parseInt(entry.repsS,10)>0?parseInt(entry.repsS,10):(parseInt(x.repsS,10)||0),repsB:parseInt(entry.repsB,10)>0?parseInt(entry.repsB,10):(parseInt(x.repsB,10)||0),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
   });
   const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
@@ -3377,7 +3228,9 @@ function Workouts({
  });
 
  const setPlanEx = (di, xi, f, val) => update(s => {
- s.plano[di].ex[xi][f] = f === "name" || f === "notes" ? val : f === "weight" ? parseNum(val) : parseInt(val, 10) || 0;
+ const ex=s.plano[di].ex[xi];
+ ex[f] = f === "name" || f === "notes" ? val : f === "weight" ? parseNum(val) : parseInt(val, 10) || 0;
+ if(f==="weight"&&Number(ex.weight)>0&&ex.week1Start==null){ex.week1Start=Number(ex.weight);ex.week1StartLabel=fmtNum(ex.weight)+" kg";}
  });
  const setPlanName = (di, val) => update(s => {
  s.plano[di].name = val;
@@ -3446,7 +3299,7 @@ function Workouts({
  className: "logger-head"
  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
  className: "logger-title"
- }, plano[sel].name), /*#__PURE__*/React.createElement("div", {
+ }, fridayFallback ? "Pernas completas (terça-feira em falta)" : plano[sel].name), /*#__PURE__*/React.createElement("div", {
  className: "logger-sub"
  }, plano[sel].day+" · "+selectedWeekday+" "+selectedDateLabel)), trainedSelected && /*#__PURE__*/React.createElement("div", {
  className: "logged-badge"
@@ -3469,6 +3322,7 @@ function Workouts({
  }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
  key: sel,
  exercises: loggerExercises,
+ sessionNote: fridayFallback ? "Como terça-feira não foi concluída, hoje passa a ser pernas completas: Hack Squat, Romanian Deadlift, Hip Thrust, Leg Curl e Calf Raise." : "",
  history: state.sessions,
  onSave: saveSession,
  loggedSelected: loggedSelected,
@@ -3489,7 +3343,7 @@ function Workouts({
  ), view === "historico" && /*#__PURE__*/React.createElement(TrainingHistory, {
  state: state,
  update: update
- }), view === "plano" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement("div", {
+ }), view === "plano" && /*#__PURE__*/React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(TrainingCycleGuide), /*#__PURE__*/React.createElement("div", {
  className: "day-picker"
  }, plano.map((d, i) => /*#__PURE__*/React.createElement("button", {
  key: i,
@@ -3609,6 +3463,24 @@ function arrayMove(arr, from, to) {
  a.splice(to, 0, item);
  return a;
 }
+function TrainingCycleGuide(){
+ const h=React.createElement;
+ const phases=[
+  {title:"Semana 1 · calibrar",text:"Nas âncoras, encontra uma carga que permita trabalhar a RIR 3. Se 8 reps forem fáceis, acrescenta 2,5 kg no tronco ou 5 kg nas pernas na série seguinte."},
+  {title:"Semanas 2–4 · construir",text:"Âncoras: +2,5 kg/semana no supino, Smith e pulldown; +5 kg/semana no hack e RDL, desde que atinjas pelo menos 5 reps em todas as séries. Restantes exercícios: dupla progressão."},
+  {title:"Semanas 5–7 · consolidar",text:"Ao completar 8 reps em todas as séries a RIR 2, sobe a carga e regressa a 5–6 reps. Nos isolamentos, leva a última série a RIR 0."},
+  {title:"Semana 8 · deload",text:"Faz metade das séries e, no ciclo seguinte, recomeça com as cargas da semana 7."}
+ ];
+ return h("section",{className:"card training-cycle","aria-labelledby":"training-cycle-title"},
+  h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Ciclo de treino"),h("p",null,"5 dias · 8 semanas · progressão centrada na carga")),h("span",{className:"training-cycle-badge"},"v5")),
+  h("div",{className:"training-cycle-phases"},phases.map((phase,i)=>h("article",{className:"training-cycle-phase",key:i},h("strong",null,phase.title),h("p",null,phase.text)))),
+  h("div",{className:"training-cycle-routine"},h("p",null,h("strong",null,"Cardio: "),"30 min à segunda e quarta."),h("p",null,h("strong",null,"Sábado e domingo: "),"descanso e 8–10 mil passos.")),
+  h("details",{className:"training-cycle-measures"},h("summary",null,"Medições e regra para ajustar calorias"),h("div",{className:"training-cycle-measure-body"},
+   h("p",null,"Regista o peso diariamente e acompanha a média de 7 dias; mede a cintura ao domingo, guarda as cargas de todas as sessões e tira fotos de 15 em 15 dias."),
+   h("p",null,"Só ajusta as calorias após 3 semanas de dados: perda de 0,4–0,7 kg/semana, mantém; abaixo de 0,2 kg/semana com cintura parada, −150 kcal; acima de 1 kg/semana ou fome constante, +150 kcal.")
+  ))
+ );
+}
 function PlanDayCard({
  d,
  di,
@@ -3644,6 +3516,8 @@ function PlanDayCard({
  name,
  size: 15
  }));
+ const startMeta=x=>x.week1StartLabel||(x.week1Start!=null?fmtNum(x.week1Start)+" kg":Number(x.weight)>0?fmtNum(x.weight)+" kg":"calibrar na semana 1");
+ const hasMeta=x=>!!(x.anchor||x.superset||x.rest||x.rirDisplay||x.week8Target||x.week1StartLabel||x.week1Start!=null||Number(x.weight)<=0);
  return h("div", {
  className: "card plano-day"
  }, h("div", {
@@ -3666,7 +3540,14 @@ function PlanDayCard({
  value: x.name,
  placeholder: "Nome do exercício",
  onChange: e => onEditField(di, i, "name", e.target.value)
- }), ico("arrowUp", () => move(i, -1), i === 0, "Subir"), ico("arrowDown", () => move(i, 1), i === d.ex.length - 1, "Descer"), ico("trash", () => onDelete(di, i), false, "Apagar exercício")), h("div", {
+ }), ico("arrowUp", () => move(i, -1), i === 0, "Subir"), ico("arrowDown", () => move(i, 1), i === d.ex.length - 1, "Descer"), ico("trash", () => onDelete(di, i), false, "Apagar exercício")), hasMeta(x) && h("div",{className:"plan-meta"},
+  x.anchor&&h("span",{className:"plan-meta-anchor"},"Âncora pesada"),
+  x.superset&&h("span",{className:"plan-meta-superset"},"Superset "+x.superset+(x.supersetPart?" · "+x.supersetPart:"")),
+  x.rirDisplay&&h("span",null,"RIR "+x.rirDisplay),
+  x.rest&&h("span",null,"Descanso "+x.rest),
+  h("span",null,"Início: "+startMeta(x)),
+  x.week8Target&&h("span",null,"Alvo sem. 8: "+x.week8Target)
+ ), h("div", {
  className: "pl-grid"
  }, field("Séries", i, "sets", x.sets || "", "numeric"), field("Reps mín", i, "reps", x.reps || "", "numeric"), field("Reps máx", i, "repsMax", x.repsMax || "", "numeric", "opc."), h("div", {
  className: "pl-f"
@@ -3757,7 +3638,8 @@ function WorkoutLogger({
  sessionDate,
  canSave=true,
  today,
- last
+ last,
+ sessionNote=""
 }) {
  const initRow = x => {
  const t = today && today.ex.find(e => e.name === x.name);
@@ -3836,7 +3718,7 @@ function WorkoutLogger({
  setOpenIdx(null);
  };
  const doneCount = exercises.filter((x, i) => row(x, i).rir != null).length;
- return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ return /*#__PURE__*/React.createElement("div", null, sessionNote && React.createElement("div",{className:"log-session-note",role:"status"},sessionNote), /*#__PURE__*/React.createElement("div", {
  className: "log-progress"
  }, /*#__PURE__*/React.createElement("div", {
  className: "log-progress-bar"
@@ -3900,7 +3782,12 @@ function WorkoutLogger({
  className: "log-chev" + (isOpen ? " open" : "")
  })), isOpen && /*#__PURE__*/React.createElement("div", {
  className: "log-panel"
- }, /*#__PURE__*/React.createElement("div", {
+ }, (x.anchor||x.superset||x.rest||x.week8Target) && React.createElement("div",{className:"log-plan-meta"},
+  x.anchor&&React.createElement("span",{className:"plan-meta-anchor"},"Âncora pesada"),
+  x.superset&&React.createElement("span",{className:"plan-meta-superset"},"Superset "+x.superset+(x.supersetPart?" · "+x.supersetPart:"")),
+  x.rest&&React.createElement("span",null,"Descanso "+x.rest),
+  x.week8Target&&React.createElement("span",null,"Alvo sem. 8: "+x.week8Target)
+ ), /*#__PURE__*/React.createElement("div", {
  className: "log-panel-row"
  }, /*#__PURE__*/React.createElement("input", {
  className: "log-w",
