@@ -761,9 +761,3 @@ button:disabled {
 }
 #root .dp-dot-missed { background: var(--bad) !important; }
 #root .dp.missed.on .dp-dot-missed { background: rgba(255,255,255,.9) !important; }
-#root .missed-workout-note {
-  margin: -3px 2px 12px;
-  color: var(--bad);
-  font-size: 11px;
-  line-height: 1.4;
-}
