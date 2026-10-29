@@ -761,3 +761,43 @@ button:disabled {
 }
 #root .dp-dot-missed { background: var(--bad) !important; }
 #root .dp.missed.on .dp-dot-missed { background: rgba(255,255,255,.9) !important; }
+
+.evf-measure-guide-list {
+  display: grid;
+  gap: 0;
+}
+.evf-measure-guide-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 10px;
+  padding: 9px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  line-height: 1.45;
+}
+.evf-measure-guide-row:first-child { padding-top: 2px; }
+.evf-measure-guide-row:last-child { border-bottom: 0; }
+.evf-measure-guide-row strong { color: var(--text); }
+.evf-measure-guide-row span { color: var(--muted); }
+.evf-calorie-guide {
+  margin-top: 12px;
+  padding: 12px;
+  border-radius: 12px;
+  background: var(--surface2);
+}
+.evf-calorie-guide-title {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+.evf-calorie-guide-rules {
+  display: grid;
+  gap: 7px;
+  margin: 9px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.evf-calorie-guide-rules li::marker { color: var(--coral); }
