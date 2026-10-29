@@ -801,3 +801,79 @@ button:disabled {
   line-height: 1.45;
 }
 .evf-calorie-guide-rules li::marker { color: var(--coral); }
+
+.evf-nutrition-macros {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin: 12px 0 10px;
+}
+.evf-nutrition-macro {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 8px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface);
+  text-align: center;
+}
+.evf-nutrition-macro span { color: var(--muted); font-size: 10px; font-weight: 700; }
+.evf-nutrition-macro strong { color: var(--text); font-size: 17px; }
+.evf-nutrition-calories {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.evf-nutrition-details {
+  margin-top: 12px;
+  border-top: 1px solid var(--border);
+}
+.evf-nutrition-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 750;
+  cursor: pointer;
+}
+.evf-nutrition-detail-body p {
+  margin: 0 0 9px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.evf-nutrition-detail-body p strong { color: var(--text); }
+.evf-nutrition-tolerance-title {
+  margin-top: 12px;
+  color: var(--text);
+  font-size: 12px;
+  font-weight: 800;
+}
+.evf-nutrition-tolerances {
+  display: grid;
+  gap: 6px;
+  margin: 7px 0 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+.evf-nutrition-tolerances li::marker { color: var(--coral); }
+.evf-nutrition-week {
+  display: grid;
+  gap: 4px;
+  margin-top: 12px;
+  padding: 11px 12px;
+  border-radius: 11px;
+  background: var(--surface2);
+}
+.evf-nutrition-week strong { color: var(--text); font-size: 12px; }
+.evf-nutrition-week span { color: var(--text); font-size: 12px; line-height: 1.45; }
+.evf-nutrition-week small { color: var(--muted); font-size: 10px; line-height: 1.4; }
+@media (max-width: 340px) {
+  .evf-nutrition-macros { gap: 5px; }
+  .evf-nutrition-macro { padding: 9px 4px; }
+  .evf-nutrition-macro strong { font-size: 15px; }
+}
