@@ -3208,7 +3208,10 @@ function Workouts({
  const tuesdayLogged=(state.sessions||[]).some(se=>se.date===tuesdayKey&&Number(se.dayIdx)===1);
  const tuesdayMissed=!!(tuesdayKey&&tuesdayKey<todayKey&&!trainedOn(state,tuesdayKey)&&!tuesdayLogged);
  const fridayFallback=sel===4&&tuesdayMissed&&!selectedSession;
- const loggerExercises = selectedSession && Array.isArray(selectedSession.ex) && selectedSession.ex.length ? selectedSession.ex : fridayFallback ? [
+ // Usa sempre a prescrição atual no registo; uma sessão antiga da semana não deve
+ // voltar a mostrar a lista de exercícios do plano anterior. Os seus dados ficam
+ // guardados na sessão/histórico e são usados para pré-preencher movimentos compatíveis.
+ const loggerExercises = fridayFallback ? [
   ...(plano[1]?.ex||[]).filter(x=>/hack/i.test(x.name||"")).slice(0,1),
   ...(plano[4]?.ex||[]).filter(x=>/romanian deadlift|hip thrust|leg curl|calf raise/i.test(x.name||""))
  ] : (plano[sel]?.ex||[]);
