@@ -970,3 +970,12 @@ button:disabled {
 }
 .hist-cardio { margin-top: 5px; color: var(--muted); font-size: 11px; line-height: 1.4; }
 .hist-cardio strong { color: var(--text); }
+
+
+/* Rename a training-day title directly from the workout logger. */
+.logger-title-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap;}
+.logger-title-edit-btn{display:inline-flex;align-items:center;justify-content:center;gap:5px;min-height:34px;padding:5px 9px;border:1px solid var(--border);border-radius:10px;background:var(--surface2);color:var(--text);font-family:inherit;font-size:12px;font-weight:600;cursor:pointer;flex:none;}
+.logger-title-edit-btn:focus-visible{outline:2px solid var(--coral);outline-offset:2px;}
+.logger-title-editor{display:flex;align-items:center;gap:7px;flex-wrap:wrap;margin-bottom:5px;}
+.logger-title-editor input{flex:1;min-width:150px;font-size:16px;font-weight:750;padding:9px 11px;}
+.logger-title-editor .menu-btn{min-height:38px;}

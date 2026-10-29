@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=17">
+<link rel="stylesheet" href="evolvefit-polish.css?v=19">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -3195,6 +3195,8 @@ function Workouts({
  const [view, setView] = useState("treino");
  const [planDay, setPlanDay] = useState(initialDay != null ? initialDay : todayIdx);
  const [showRir, setShowRir] = useState(false);
+ const [editingWorkoutTitle, setEditingWorkoutTitle] = useState(false);
+ const [workoutTitleDraft, setWorkoutTitleDraft] = useState("");
  const weekDays = weekFromMonday(state.days);
  const treinos = weekDays.filter(w => trainedOn(state, w.key)).length;
  const kcal = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
@@ -3246,6 +3248,12 @@ function Workouts({
  const setPlanName = (di, val) => update(s => {
  s.plano[di].name = val;
  });
+ const saveWorkoutTitle = () => {
+  const title=workoutTitleDraft.trim();
+  if(!title)return;
+  setPlanName(sel,title);
+  setEditingWorkoutTitle(false);
+ };
  const addPlanEx = di => update(s => s.plano[di].ex.push({
  name: "",
  sets: 3,
@@ -3300,7 +3308,7 @@ function Workouts({
   className:"dp"+(sel===i?" on":"")+(missed?" missed":""),
   "aria-label":d.day+(missed?", treino não marcado":completed?", treino concluído":""),
   title:missed?"Treino previsto não marcado":undefined,
-  onClick:()=>setSel(i)
+  onClick:()=>{setEditingWorkoutTitle(false);setSel(i);}
  },d.day.slice(0,3),(missed||loggedDayIdx.has(i)||completed)&&React.createElement("span",{
   className:"dp-dot"+(missed?" dp-dot-missed":"")
  }));
@@ -3308,9 +3316,14 @@ function Workouts({
  className: "card logger"
  }, /*#__PURE__*/React.createElement("div", {
  className: "logger-head"
- }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
- className: "logger-title"
- }, fridayFallback ? "Pernas completas (terça-feira em falta)" : plano[sel].name), /*#__PURE__*/React.createElement("div", {
+ }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/editingWorkoutTitle ? React.createElement("div",{className:"logger-title-editor"},
+ React.createElement("input",{className:"in",value:workoutTitleDraft,maxLength:48,autoFocus:true,"aria-label":"Título do treino diário",onChange:e=>setWorkoutTitleDraft(e.target.value),onKeyDown:e=>{if(e.key==="Enter"){e.preventDefault();saveWorkoutTitle();}if(e.key==="Escape")setEditingWorkoutTitle(false);}}),
+ React.createElement("button",{className:"menu-btn main",onClick:saveWorkoutTitle,disabled:!workoutTitleDraft.trim()},"Guardar"),
+ React.createElement("button",{className:"menu-btn",onClick:()=>setEditingWorkoutTitle(false)},"Cancelar")
+ ) : React.createElement("div",{className:"logger-title-row"},
+ React.createElement("div",{className:"logger-title"},fridayFallback ? "Pernas completas (terça-feira em falta)" : plano[sel].name),
+ !fridayFallback&&React.createElement("button",{className:"logger-title-edit-btn",type:"button","aria-label":"Editar título do treino",onClick:()=>{setWorkoutTitleDraft(plano[sel]?.name||"");setEditingWorkoutTitle(true);}},React.createElement(I,{name:"edit",size:14}),"Editar")
+ ), /*#__PURE__*/React.createElement("div", {
  className: "logger-sub"
  }, plano[sel].day+" · "+selectedWeekday+" "+selectedDateLabel)), trainedSelected && /*#__PURE__*/React.createElement("div", {
  className: "logged-badge"
@@ -3346,7 +3359,7 @@ function Workouts({
  React.createElement("div",{className:"progress-exercise-filter"},
    React.createElement("div",{className:"progress-exercise-filter-label"},"Escolhe o treino"),
    React.createElement("div",{className:"day-picker progress-exercise-days",role:"group","aria-label":"Selecionar treino para consultar a evolução por exercício"},
-     plano.map((d,i)=>React.createElement("button",{key:i,className:"dp"+(sel===i?" on":""),"aria-pressed":sel===i,"aria-label":"Ver evolução de "+(d.name||d.day),onClick:()=>setSel(i)},d.day.slice(0,3)))
+     plano.map((d,i)=>React.createElement("button",{key:i,className:"dp"+(sel===i?" on":""),"aria-pressed":sel===i,"aria-label":"Ver evolução de "+(d.name||d.day),onClick:()=>{setEditingWorkoutTitle(false);setSel(i);}},d.day.slice(0,3)))
    )
  ),
  workoutStats.length>0 && React.createElement("div",{className:"stat-grid"},workoutStats),
