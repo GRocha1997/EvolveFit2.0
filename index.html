@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=21">
+<link rel="stylesheet" href="evolvefit-polish.css?v=22">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -676,6 +676,7 @@ function normalize(s) {
    cardio:Array.isArray(se.cardio)?se.cardio.filter(c=>c&&typeof c==="object").map(c=>({...c,name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0):[]
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
+ delete s.profile.aiCloudConsent;
  if (s.profile.name == null) s.profile.name = "Gonçalo";
  if (s.profile.bfStart == null) s.profile.bfStart = 27.5;
  if (s.profile.bfTarget == null) s.profile.bfTarget = 15;
@@ -777,10 +778,6 @@ const firebaseConfig = {
 };
 const CLOUD_ENABLED = firebaseConfig.apiKey && firebaseConfig.apiKey.indexOf("COLA_AQUI") === -1 && typeof firebase !== "undefined";
 let fbAuth = null, fbDb = null;
-/* Cloud AI — Gemini via Firebase Cloud Function. A API key do Gemini nunca fica no HTML. */
-const EVOLVEFIT_AI_ENDPOINT = "https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi";
-const EVOLVEFIT_FIREBASE_PROJECT_ID = "evolvefit2-df25f";
-let evolveFitAuthRepairing = false;
 
 /* Firestore não aceita listas dentro de listas. Para evitar esse erro, o estado
    é guardado na nuvem como texto JSON dentro de um único campo (_json).
@@ -793,60 +790,6 @@ function fromCloud(data){
     try { return JSON.parse(data._json); } catch (e) { console.error("fromCloud:", e); }
   }
   return data;
-}
-
-function evolveFitDecodeJwtPayload(token){
-  try{
-    const part = String(token || "").split(".")[1];
-    if(!part) return null;
-    const base64 = part.replace(/-/g, "+").replace(/_/g, "/");
-    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4);
-    return JSON.parse(atob(padded));
-  }catch(e){
-    console.warn("Firebase JWT inválido:", e);
-    return null;
-  }
-}
-
-async function evolveFitFirebaseIdToken(){
-  try{
-    if(typeof firebase === "undefined" || !firebase.auth){
-      window.__evfAuthError="Firebase Authentication SDK indisponível.";
-      return null;
-    }
-    const auth=firebase.auth();
-    let user=auth.currentUser;
-    if(!user){
-      try{
-        const credential=await auth.signInAnonymously();
-        user=(credential&&credential.user)||auth.currentUser||null;
-      }catch(authError){
-        const code=authError&&authError.code?authError.code+": ":"";
-        window.__evfAuthError=(code+((authError&&authError.message)||"não foi possível iniciar sessão anónima.")).slice(0,180);
-        console.warn("Firebase Auth: não foi possível iniciar sessão anónima:",authError);
-        return null;
-      }
-    }
-    if(!user){
-      window.__evfAuthError="Firebase não devolveu um utilizador autenticado.";
-      return null;
-    }
-    // getIdToken() renova o token apenas quando está perto de expirar.
-    const token=await user.getIdToken();
-    const payload=evolveFitDecodeJwtPayload(token);
-    if(!payload||payload.aud!==EVOLVEFIT_FIREBASE_PROJECT_ID){
-      window.__evfAuthError="Token Firebase inválido ou pertencente a outro projeto.";
-      console.warn("Firebase token de projeto incorreto:",payload&&payload.aud,"=> esperado:",EVOLVEFIT_FIREBASE_PROJECT_ID);
-      return null;
-    }
-    window.__evfAuthError=null;
-    return token;
-  }catch(e){
-    const code=e&&e.code?e.code+": ":"";
-    window.__evfAuthError=(code+((e&&e.message)||e||"erro de autenticação")).slice(0,180);
-    console.error("Firebase Auth token:",e);
-    return null;
-  }
 }
 
 async function evolveFitMergeDeviceStateIntoAccount(uid,deviceState){
@@ -915,7 +858,6 @@ async function evolveFitAccountAuth(mode,email,password){
  }
 }
 
-// Gemini Cloud configurado: https://us-central1-evolvefit2-df25f.cloudfunctions.net/evolvefitAi
 /* Nota de segurança: a apiKey do Firebase acima é pública por natureza (é
  assim que o SDK client-side funciona) — não é um segredo. A segurança
  real vem das Regras de Segurança do Firestore (Console → Firestore →
@@ -4757,67 +4699,6 @@ function Coach2027({ state, update, onNavigate }) {
  const [aiQuestion,setAiQuestion] = useState("");
  const [aiAnswer,setAiAnswer] = useState("");
  const [aiBusy,setAiBusy] = useState(false);
- const [aiShareData,setAiShareData] = useState(()=>state.profile?.aiCloudConsent===true);
- useEffect(()=>{setAiShareData(state.profile?.aiCloudConsent===true);},[state.profile?.aiCloudConsent]);
- const [aiSource,setAiSource] = useState("Coach local");
- const [aiStatus,setAiStatus] = useState(() => window.EvolveFitLocalAI?.getStatus?.() || {status:"not_loaded",progress:0,error:""});
- useEffect(() => {
-   const handler = e => setAiStatus(e.detail || {status:"not_loaded",progress:0,error:""});
-   window.addEventListener("evolvefit-ai-status", handler);
-   if(window.EvolveFitLocalAI?.getStatus) setAiStatus(window.EvolveFitLocalAI.getStatus());
-   return () => window.removeEventListener("evolvefit-ai-status", handler);
- }, []);
- const loadLocalAI = async () => {
-   try {
-     if(!window.EvolveFitLocalAI) throw new Error("O motor de AI local ainda não foi carregado.");
-     await window.EvolveFitLocalAI.load();
-   } catch(e) {
-     console.error("AI local:", e);
-   }
- };
-
- const aiPositive=value=>{const n=Number(value);return Number.isFinite(n)&&n>0?n:null;};
- const bodyForAI=x=>x?({date:x.date,weight:aiPositive(x.weight),bodyFat:aiPositive(x.bodyFat),bmi:aiPositive(x.bmi),muscle:aiPositive(x.muscle),skeletal:aiPositive(x.skeletal),visceral:aiPositive(x.visceral),waist:aiPositive(x.cintura)}):null;
- const aiRecentSessions = (state.sessions||[]).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))).slice(0,8).map(se=>({
-   date:se.date,
-   dayIdx:se.dayIdx,
-   exercises:(se.ex||[]).slice(0,12).map(e=>({
-     name:e.name, sets:aiPositive(e.sets), reps:aiPositive(e.reps), weight:aiPositive(e.weight),
-     rir:e.rir==null?null:Number(e.rir)
-   }))
- }));
- const aiRecentDays = (d7||[]).map(x=>({
-   date:x.key,
-   calories:aiPositive(x.d?.tasks?.calorias_in?.value ?? x.d?.tasks?.calorias?.value),
-   protein:aiPositive(x.d?.tasks?.proteina?.value),
-   steps:aiPositive(x.d?.tasks?.passos?.value),
-   sleep:aiPositive(x.d?.tasks?.sono?.value),
-   cardio:aiPositive(x.d?.tasks?.cardio?.value)
- }));
- const aiBodySamples=body.length<=6?body:[body[0],...body.slice(-5)];
- const aiContext = {
-   objective: prof.goal || "ganhar músculo e perder gordura",
-   targetDate: prof.summerTargetDate || "2027-06-01",
-   targets:{calories:aiPositive(prof.kcalTarget),protein:aiPositive(prof.proteinTarget),steps:aiPositive(prof.stepsTarget),water:aiPositive(prof.waterTarget),cardio:aiPositive(prof.cardioTarget)},
-   firstWeighIn: bodyForAI(firstBody),
-   latestWeighIn: bodyForAI(latest),
-   bodyMeasurements:aiBodySamples.map(bodyForAI),
-   dataCoverage:{bodyMeasurements:body.length,recentBodyMeasurements:recentBody.length,firstRecentBodyDate:recentBody[0]?.date||null,lastRecentBodyDate:recentBody[recentBody.length-1]?.date||null,daysWithLogs:aiRecentDays.filter(d=>Object.values(d).some(v=>typeof v==="number"&&v>0)).length},
-   recentWeightChange: weightTrend,
-   recentWaistChange: waistTrend,
-   recovery,
-   recoveryLabel: recovery==null ? null : recLabel,
-   avgKcal: avgKcal ? Math.round(avgKcal) : null,
-   avgProtein: avgProtein ? Math.round(avgProtein) : null,
-   avgSteps: avgSteps ? Math.round(avgSteps) : null,
-   cardio7,
-   weeklySessions: wkSessions>0 ? wkSessions : null,
-   alerts: alerts.map(a=>({text:a.text,level:a.level})),
-   adherence28,
-   recentSessions: aiRecentSessions,
-   recentDays: aiRecentDays,
-   instructions: "Considera null ou campo ausente como dado não registado, nunca como zero. Analisa apenas métricas com registos reais; não inventes valores nem tires conclusões sobre dados em falta. Explicita quantos registos sustentam cada tendência e, quando relevante, cita datas e valores concretos. Não faças diagnósticos médicos nem recomendes alterações extremas."
- };
 
  const localAI = question => {
    const q=(question||"").toLowerCase();
@@ -4856,62 +4737,10 @@ function Coach2027({ state, update, onNavigate }) {
    setAiBusy(true);
    const question = aiQuestion.trim() || "Faz uma análise geral da minha situação e diz qual deve ser a minha próxima ação.";
    try{
-     if(!aiShareData){
-       setAiSource("Coach local");
-       setAiAnswer(localAI(question)+"\n\nPrivacidade: a pergunta e os teus registos ficaram neste dispositivo. Ativa «Enviar dados recentes ao Gemini Cloud» se quiseres usar a análise cloud.");
-       return;
-     }
-     /*
-      * Prioridade: Cloud Function Gemini.
-      * A GEMINI_API_KEY fica exclusivamente no Secret Manager/Firebase,
-      * nunca no HTML nem no browser.
-      */
-     const endpoint = EVOLVEFIT_AI_ENDPOINT;
-     const controller = new AbortController();
-     const timeout = setTimeout(() => controller.abort(), 30000);
-     try{
-       const idToken = await evolveFitFirebaseIdToken();
-       if(!idToken){
-         const detail=window.__evfAuthError||"Não foi possível criar uma sessão anónima Firebase.";
-         const code=String(detail).toLowerCase();
-         const hint=code.includes("operation-not-allowed")?" Ativa Authentication → Sign-in method → Anonymous no projeto Firebase.":code.includes("unauthorized-domain")?" Adiciona o domínio desta app em Authentication → Settings → Authorized domains.":" Confirma que o fornecedor Anonymous está ativo e que o domínio está autorizado em Firebase Authentication.";
-         throw new Error("Gemini Cloud precisa de uma sessão Firebase autenticada. "+detail+hint);
-       }
-       const r = await fetch(endpoint,{
-         method:"POST",
-         mode:"cors",
-         headers:{
-           "Content-Type":"application/json",
-           "Authorization":"Bearer "+idToken
-         },
-         body:JSON.stringify({question,context:aiContext}),
-         signal:controller.signal
-       });
-       clearTimeout(timeout);
-       if(!r.ok){
-         const detail = await r.text().catch(()=> "");
-         throw new Error("AI endpoint "+r.status+(detail ? ": "+detail.slice(0,180) : ""));
-       }
-       const data = await r.json();
-       const answer = data && (data.answer || data.text || data.response || data.message);
-       if(!answer) throw new Error("A Cloud Function não devolveu uma resposta de texto.");
-       setAiSource("Gemini");
-       setAiAnswer(String(answer).trim());
-       return;
-     }catch(cloudError){
-       clearTimeout(timeout);
-       console.error("Gemini Cloud Function:",cloudError);
-       /*
-        * Fallback: se a função estiver temporariamente indisponível,
-        * mantém-se o Coach local de regras. O modelo Qwen local continua
-        * disponível como fallback adicional quando o WebGPU estiver pronto.
-        */
-       setAiSource("Coach local");
-       setAiAnswer(localAI(question)+"\n\nNota: o Gemini Cloud não respondeu ("+String((cloudError&&cloudError.message)||cloudError).slice(0,160)+"); foi usada a análise local de regras.");
-     }
+     setAiAnswer(localAI(question)+"\n\nPrivacidade: a análise corre neste navegador. A pergunta e o contexto não são enviados ao Gemini. Os registos continuam sujeitos à sincronização normal da tua conta.");
    }catch(e){
-     console.error("AI Coach:",e);
-     setAiAnswer(localAI(question));
+     console.error("Coach local:",e);
+     setAiAnswer("Não foi possível gerar a análise local. Tenta novamente mais tarde.");
    }finally{setAiBusy(false);}
  };
 
@@ -5083,8 +4912,8 @@ function Coach2027({ state, update, onNavigate }) {
  ),
  /*#__PURE__*/React.createElement("details",{className:"card evf-ai-accordion"},
    /*#__PURE__*/React.createElement("summary",{className:"evf-ai-accordion-summary"},
-     /*#__PURE__*/React.createElement("span",{className:"evf-ai-accordion-title"},"Perguntar ao AI Coach"),
-     /*#__PURE__*/React.createElement("span",{className:"evf-ai-accordion-status"},aiShareData?"Gemini com consentimento":"Local por defeito"),
+     /*#__PURE__*/React.createElement("span",{className:"evf-ai-accordion-title"},"Perguntar ao Coach local"),
+     /*#__PURE__*/React.createElement("span",{className:"evf-ai-accordion-status"},"Apenas local"),
      /*#__PURE__*/React.createElement(I,{name:"chevron",size:17})
    ),
    /*#__PURE__*/React.createElement("div",{className:"evf-ai-card"},
@@ -5092,18 +4921,14 @@ function Coach2027({ state, update, onNavigate }) {
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-head"},
        /*#__PURE__*/React.createElement("div",null,
          /*#__PURE__*/React.createElement("div",{className:"evf-ai-kicker"},"EVOLVEFIT COACH"),
-         /*#__PURE__*/React.createElement("div",{className:"evf-ai-title"},"AI Coach"),
+         /*#__PURE__*/React.createElement("div",{className:"evf-ai-title"},"Coach local"),
          /*#__PURE__*/React.createElement("div",{className:"evf-ai-sub"},"Pergunta sobre os teus registos de corpo, treino e hábitos.")
        ),
-       /*#__PURE__*/React.createElement("span",{className:"evf-ai-badge"},aiShareData?"Gemini Cloud":"Local por defeito")
+       /*#__PURE__*/React.createElement("span",{className:"evf-ai-badge"},"Local · sem Gemini")
      )
    ),
    /*#__PURE__*/React.createElement("div",{className:"evf-ai-body"},
-     /*#__PURE__*/React.createElement("label",{className:"evf-ai-consent"},
-       /*#__PURE__*/React.createElement("input",{type:"checkbox",checked:aiShareData,onChange:e=>{const enabled=e.target.checked;setAiShareData(enabled);update(s=>{s.profile=s.profile||{};s.profile.aiCloudConsent=enabled;});}}),
-       /*#__PURE__*/React.createElement("span",null,"Enviar dados recentes ao Gemini Cloud")
-     ),
-     /*#__PURE__*/React.createElement("div",{className:"evf-ai-privacy",role:"note"},aiShareData?"Ao perguntares, enviamos a pergunta, objetivos e contexto recente: até 6 medições (primeira e mais recentes), até 8 treinos e 7 dias de registos. As fotografias não são enviadas. A escolha fica guardada na tua conta e sincroniza entre dispositivos; podes desligar quando quiseres.":"Por defeito, o Coach responde localmente; nada é enviado à cloud. Podes ativar o envio quando quiseres uma resposta Gemini."),
+     /*#__PURE__*/React.createElement("div",{className:"evf-ai-privacy",role:"note"},"A análise corre neste navegador; a pergunta e o contexto não são enviados ao Gemini. Os teus registos continuam sujeitos à sincronização normal da conta."),
      /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",fontWeight:750,color:"var(--muted)",marginBottom:"8px"}},"Perguntas rápidas"),
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-prompts"},
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha evolução corporal? Analisa peso, gordura corporal e cintura e compara os dados mais recentes com o meu ponto de partida.")},"Corpo"),
@@ -5119,8 +4944,7 @@ function Coach2027({ state, update, onNavigate }) {
      ),
      aiAnswer && /*#__PURE__*/React.createElement("div",{className:"evf-ai-result"},
        /*#__PURE__*/React.createElement("div",{className:"evf-ai-result-head"},
-         /*#__PURE__*/React.createElement("span",null,"Decisão do Coach"),
-         /*#__PURE__*/React.createElement("span",null,aiSource)
+         /*#__PURE__*/React.createElement("span",null,"Decisão do Coach")
        ),
        aiAnswer
      )
