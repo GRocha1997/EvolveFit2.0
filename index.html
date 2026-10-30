@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=19">
+<link rel="stylesheet" href="evolvefit-polish.css?v=20">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -4757,7 +4757,9 @@ function Coach2027({ state, update, onNavigate }) {
  const [aiQuestion,setAiQuestion] = useState("");
  const [aiAnswer,setAiAnswer] = useState("");
  const [aiBusy,setAiBusy] = useState(false);
- const [aiShareData,setAiShareData] = useState(false);
+ const [aiShareData,setAiShareData] = useState(()=>{
+   try{return localStorage.getItem("evolvefit_ai_cloud_consent_v1")==="true";}catch(e){return false;}
+ });
  const [aiSource,setAiSource] = useState("Coach local");
  const [aiStatus,setAiStatus] = useState(() => window.EvolveFitLocalAI?.getStatus?.() || {status:"not_loaded",progress:0,error:""});
  useEffect(() => {
@@ -5099,10 +5101,10 @@ function Coach2027({ state, update, onNavigate }) {
    ),
    /*#__PURE__*/React.createElement("div",{className:"evf-ai-body"},
      /*#__PURE__*/React.createElement("label",{className:"evf-ai-consent"},
-       /*#__PURE__*/React.createElement("input",{type:"checkbox",checked:aiShareData,onChange:e=>setAiShareData(e.target.checked)}),
+       /*#__PURE__*/React.createElement("input",{type:"checkbox",checked:aiShareData,onChange:e=>{const enabled=e.target.checked;setAiShareData(enabled);try{localStorage.setItem("evolvefit_ai_cloud_consent_v1",enabled?"true":"false");}catch(_){}}}),
        /*#__PURE__*/React.createElement("span",null,"Enviar dados recentes ao Gemini Cloud")
      ),
-     /*#__PURE__*/React.createElement("div",{className:"evf-ai-privacy",role:"note"},aiShareData?"Ao perguntares, enviamos a pergunta, objetivos e contexto recente: até 6 medições (primeira e mais recentes), até 8 treinos e 7 dias de registos. As fotografias não são enviadas.":"Por defeito, o Coach responde localmente; nada é enviado à cloud. Podes ativar o envio quando quiseres uma resposta Gemini."),
+     /*#__PURE__*/React.createElement("div",{className:"evf-ai-privacy",role:"note"},aiShareData?"Ao perguntares, enviamos a pergunta, objetivos e contexto recente: até 6 medições (primeira e mais recentes), até 8 treinos e 7 dias de registos. As fotografias não são enviadas. A escolha fica guardada neste dispositivo; podes desligar quando quiseres.":"Por defeito, o Coach responde localmente; nada é enviado à cloud. Podes ativar o envio quando quiseres uma resposta Gemini."),
      /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",fontWeight:750,color:"var(--muted)",marginBottom:"8px"}},"Perguntas rápidas"),
      /*#__PURE__*/React.createElement("div",{className:"evf-ai-prompts"},
        /*#__PURE__*/React.createElement("button",{className:"evf-ai-prompt",onClick:()=>setAiQuestion("Como está a minha evolução corporal? Analisa peso, gordura corporal e cintura e compara os dados mais recentes com o meu ponto de partida.")},"Corpo"),
