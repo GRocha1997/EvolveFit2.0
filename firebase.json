@@ -4,12 +4,8 @@
     "ignore": [
       "firebase.json",
       "**/.*",
-      "**/node_modules/**",
-      "functions/**"
+      "**/node_modules/**"
     ],
     "cleanUrls": false
-  },
-  "functions": {
-    "source": "functions"
   }
 }

@@ -208,7 +208,7 @@ button {
   }
 }
 
-/* First-run setup and AI privacy choices */
+/* First-run setup */
 .evf-onboarding-note {
   border-color: color-mix(in srgb, var(--coral) 22%, var(--border));
   background: var(--surface);
@@ -225,28 +225,6 @@ button {
 .evf-onboarding-note .menu-btn {
   margin-top: 10px;
   min-height: 44px;
-}
-
-.evf-ai-consent {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-height: 48px;
-  padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--surface2);
-  color: var(--text);
-  font-size: 13px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.evf-ai-consent input {
-  width: 20px;
-  height: 20px;
-  flex: 0 0 20px;
-  accent-color: var(--coral);
 }
 
 .evf-ai-privacy,
