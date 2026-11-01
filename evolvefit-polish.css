@@ -951,3 +951,15 @@ button:disabled {
 
 
 /* Workout names are edited from the Plan view. */
+
+.training-completion-btn{display:inline-flex;align-items:center;justify-content:center;min-width:112px;min-height:44px;padding:0 14px;border:1px solid var(--border);border-radius:14px;font:inherit;font-size:14px;font-weight:750;white-space:nowrap;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease;}
+.training-completion-btn.pending{color:var(--bad,#C0392B);background:color-mix(in srgb,var(--bad,#C0392B) 9%,var(--surface));border-color:color-mix(in srgb,var(--bad,#C0392B) 35%,var(--border));}
+.training-completion-btn.done{color:var(--green,#18864B);background:color-mix(in srgb,var(--green,#18864B) 10%,var(--surface));border-color:color-mix(in srgb,var(--green,#18864B) 38%,var(--border));}
+.training-completion-btn.future{color:var(--muted);background:var(--surface2);border-color:var(--border);cursor:not-allowed;opacity:.72;}
+.training-completion-btn:focus-visible{outline:2px solid var(--coral);outline-offset:2px;}
+.training-completion-btn:disabled{cursor:not-allowed;}
+.training-week-nav{display:grid;grid-template-columns:38px minmax(0,1fr) 38px;align-items:center;gap:8px;margin:0 0 9px;}
+.training-week-nav-button{width:38px;height:36px;border:1px solid var(--border);border-radius:11px;background:var(--surface);color:var(--text);font:inherit;font-size:21px;font-weight:700;line-height:1;cursor:pointer;}
+.training-week-nav-button:disabled{color:var(--muted);opacity:.45;cursor:not-allowed;}
+.training-week-nav-button:focus-visible{outline:2px solid var(--coral);outline-offset:2px;}
+.training-week-nav-label{text-align:center;color:var(--muted);font-size:12px;font-weight:700;}
