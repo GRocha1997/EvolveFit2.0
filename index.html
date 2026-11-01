@@ -3613,6 +3613,9 @@ function WorkoutLogger({
  const [draft, setDraft] = useState(exercises.map(initRow));
  const [cardioRows,setCardioRows]=useState(()=>((today&&Array.isArray(today.cardio))?today.cardio:[]).map((c,i)=>({id:"cardio-"+i,name:String(c.name||""),minutes:c.minutes==null?"":String(c.minutes)})));
  const [saveFeedback,setSaveFeedback]=useState("");
+ const autoSaveTimer=useRef(null);
+ const autoSaveDirty=useRef(false);
+ const flushAutoSave=useRef(null);
  const [openIdx, setOpenIdx] = useState(() => firstIncomplete(exercises.map(initRow)));
  const [openNotes, setOpenNotes] = useState(() => {
  const o = {};
@@ -3629,8 +3632,37 @@ function WorkoutLogger({
  }
  }, [exercises.length]);
  const row = (x, i) => draft[i] || initRow(x);
+ const markDraftChanged = () => {
+   autoSaveDirty.current=true;
+   setSaveFeedback(loggedSelected?"A guardar automaticamente…":"");
+ };
+ const saveDraft = (automatic,showFeedback=true) => {
+   if(!canSave)return;
+   try{
+     onSave(exercises.map((x,i)=>row(x,i)),cardioRows.map(c=>({name:c.name,minutes:c.minutes})).filter(c=>parseInt(c.minutes,10)>0));
+     autoSaveDirty.current=false;
+     if(showFeedback)setSaveFeedback(automatic?"Alterações guardadas automaticamente neste dispositivo.":window.EvolveFitLocalStatus?.status==="error"?"Não foi possível confirmar a gravação neste dispositivo.":window.__evfSyncMode==="cloud"?"Sessão guardada neste dispositivo. Consulta «Sincronização» no menu da conta para ver o estado da cloud.":"Sessão guardada neste dispositivo; sincronização cloud não configurada.");
+   }catch(error){
+     console.error("Gravação automática do treino:",error);
+     if(showFeedback)setSaveFeedback("Não foi possível guardar as alterações. Tenta novamente.");
+   }
+ };
+ useEffect(()=>{
+   if(!loggedSelected||!autoSaveDirty.current||!canSave)return;
+   if(autoSaveTimer.current)clearTimeout(autoSaveTimer.current);
+   autoSaveTimer.current=setTimeout(()=>{
+     autoSaveTimer.current=null;
+     if(autoSaveDirty.current)saveDraft(true);
+   },650);
+   return()=>{if(autoSaveTimer.current){clearTimeout(autoSaveTimer.current);autoSaveTimer.current=null;}};
+ },[draft,cardioRows,loggedSelected,canSave]);
+ flushAutoSave.current=()=>{
+   if(autoSaveTimer.current){clearTimeout(autoSaveTimer.current);autoSaveTimer.current=null;}
+   if(autoSaveDirty.current&&loggedSelected&&canSave)saveDraft(true,false);
+ };
+ useEffect(()=>()=>{if(flushAutoSave.current)flushAutoSave.current();},[]);
  const setField = (i, field, val) => {
- setSaveFeedback("");
+ markDraftChanged();
  const d = [...draft];
  d[i] = {
  ...row(exercises[i], i),
@@ -3652,6 +3684,7 @@ function WorkoutLogger({
  };
  const fillOneFromLast = (i, x, prev) => {
  if (!prev) return;
+ markDraftChanged();
  const d = [...draft];
  d[i] = {
  ...row(x, i),
@@ -3664,6 +3697,7 @@ function WorkoutLogger({
  };
  const fillAllFromLast = () => {
  if (!last) return;
+ markDraftChanged();
  const d = exercises.map((x, i) => {
  const prev = last.ex.find(e => e.name === x.name);
  return prev ? {
@@ -3676,8 +3710,8 @@ function WorkoutLogger({
  setOpenIdx(null);
  };
  const addCardio=()=>setCardioRows(rows=>[...rows,{id:"cardio-"+Date.now()+"-"+Math.random().toString(36).slice(2,7),name:"",minutes:""}]);
- const setCardioField=(id,field,value)=>setCardioRows(rows=>rows.map(c=>c.id===id?{...c,[field]:value}:c));
- const removeCardio=id=>setCardioRows(rows=>rows.filter(c=>c.id!==id));
+ const setCardioField=(id,field,value)=>{markDraftChanged();setCardioRows(rows=>rows.map(c=>c.id===id?{...c,[field]:value}:c));};
+ const removeCardio=id=>{markDraftChanged();setCardioRows(rows=>rows.filter(c=>c.id!==id));};
  const doneCount = exercises.filter((x, i) => row(x, i).rir != null).length;
  return /*#__PURE__*/React.createElement("div", null, sessionNote && React.createElement("div",{className:"log-session-note",role:"status"},sessionNote), /*#__PURE__*/React.createElement("div", {
  className: "log-progress"
@@ -3803,18 +3837,14 @@ function WorkoutLogger({
    React.createElement("button",{type:"button",className:"log-cardio-remove",onClick:()=>removeCardio(c.id),"aria-label":"Remover cardio "+(i+1)},React.createElement(I,{name:"trash",size:15}))
   )),
   React.createElement("button",{type:"button",className:"log-cardio-add",onClick:addCardio},React.createElement(I,{name:"plus",size:14})," Adicionar cardio")
- ), !canSave&& /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Esta data ainda é futura. A sessão ficará disponível para guardar no próprio dia."), /*#__PURE__*/React.createElement("button", {
+ ), !canSave&& /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Esta data ainda é futura. A sessão ficará disponível para guardar no próprio dia."), !loggedSelected && /*#__PURE__*/React.createElement("button", {
  className: "big-btn coral log-save",
  disabled: !canSave,
- onClick: () => {
-  if(!canSave)return;
-  onSave(exercises.map((x, i) => row(x, i)),cardioRows.map(c=>({name:c.name,minutes:c.minutes})).filter(c=>parseInt(c.minutes,10)>0));
-  setSaveFeedback(window.EvolveFitLocalStatus?.status==="error"?"Não foi possível confirmar a gravação neste dispositivo.":window.__evfSyncMode==="cloud"?"Sessão guardada neste dispositivo. Consulta «Sincronização» no menu da conta para ver o estado da cloud.":"Sessão guardada neste dispositivo; sincronização cloud não configurada.");
- }
+ onClick: () => saveDraft(false)
  }, /*#__PURE__*/React.createElement(I, {
  name: "check",
  size: 17
- }), " ", loggedSelected ? "Atualizar sessão" : "Guardar sessão"), saveFeedback&& /*#__PURE__*/React.createElement("div",{className:"evf-tools-message log-save-feedback",role:"status"},saveFeedback));
+ }), " Guardar sessão"), saveFeedback&& /*#__PURE__*/React.createElement("div",{className:"evf-tools-message log-save-feedback",role:"status"},saveFeedback));
 }
 
 /* --------------------- temporizador e progressão -------------------- */
