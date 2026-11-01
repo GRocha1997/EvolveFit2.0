@@ -1793,7 +1793,7 @@ function weekFromMonday(days) {
  return out;
 }
 function trainedOn(state, key) {
- return !!(state.trainingCompleted && state.trainingCompleted[key]);
+ return !!(state.trainingCompleted && state.trainingCompleted[key]) || (state.sessions || []).some(session => session && session.date === key);
 }
 function missedTrainingOn(state,key){
  return !!key&&key<todayKey&&!trainedOn(state,key);
@@ -3148,6 +3148,7 @@ function Workouts({
  const selectedDayKey = weekDays[sel] ? weekDays[sel].key : todayKey;
  const selectedSession = state.sessions.find(s => s.date === selectedDayKey && s.dayIdx === sel) || null;
  const loggedSelected = !!selectedSession;
+ const hasSessionOnSelectedDate = state.sessions.some(session => session && session.date === selectedDayKey);
  const trainedSelected = trainedOn(state, selectedDayKey);
  const canMarkSelected = selectedDayKey <= todayKey;
  const canToggleSelected = canMarkSelected || trainedSelected;
@@ -3179,7 +3180,8 @@ function Workouts({
   const cardio=(Array.isArray(cardioEntries)?cardioEntries:[]).map(c=>({name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0);
   const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex,cardio};
   if(i>=0)s.sessions[i]=rec;else s.sessions.push(rec);
-  // O registo do treino é separado da marcação "Treinei" nas estatísticas.
+  s.trainingCompleted=s.trainingCompleted||{};
+  s.trainingCompleted[selectedDayKey]=true;
  });
 
  const setPlanEx = (di, xi, f, val) => update(s => {
@@ -3235,7 +3237,7 @@ function Workouts({
  sub: "Regista o treino e acompanha a evolução da carga"
  }), /*#__PURE__*/React.createElement("div", {
  className: "seg"
- }, [["treino", "Treino"], ["progresso", "Progresso"], ["historico", "Histórico"], ["plano", "Plano"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
+ }, [["treino", "Treinar"], ["plano", "Plano"], ["progresso", "Progresso"], ["historico", "Histórico"]].map(([k, l]) => /*#__PURE__*/React.createElement("button", {
  key: k,
  className: "seg-b" + (view === k ? " on" : ""),
  onClick: () => setView(k)
@@ -3267,23 +3269,23 @@ function Workouts({
  !fridayFallback&&React.createElement("button",{className:"logger-title-edit-btn",type:"button","aria-label":"Editar título do treino",onClick:()=>{setWorkoutTitleDraft(plano[sel]?.name||"");setEditingWorkoutTitle(true);}},React.createElement(I,{name:"edit",size:14}),"Editar")
  ), /*#__PURE__*/React.createElement("div", {
  className: "logger-sub"
- }, plano[sel].day+" · "+selectedWeekday+" "+selectedDateLabel)), trainedSelected && /*#__PURE__*/React.createElement("div", {
+ }, plano[sel].day+" · "+selectedWeekday+" "+selectedDateLabel)), hasSessionOnSelectedDate && trainedSelected && /*#__PURE__*/React.createElement("div", {
  className: "logged-badge"
  }, /*#__PURE__*/React.createElement(I, {
  name: "check",
  size: 12
- }), " Registado")), /*#__PURE__*/React.createElement("button", {
+ }), " Registado · concluído")), !hasSessionOnSelectedDate && /*#__PURE__*/React.createElement("button", {
  className: "menu-btn main",
  style: { width: "100%", margin: "0 0 8px" },
  disabled: !canToggleSelected,
- "aria-label": trainedSelected ? "Desmarcar treino" : canMarkSelected ? "Marcar treino como feito" : "Treino futuro, ainda indisponível",
+ "aria-label": trainedSelected ? "Anular conclusão sem registo" : canMarkSelected ? "Concluir sem registar sessão" : "Treino futuro, ainda indisponível",
  title: !canToggleSelected ? "Disponível no dia do treino" : undefined,
  onClick: () => update(s => {
    s.trainingCompleted = s.trainingCompleted || {};
    if (s.trainingCompleted[selectedDayKey]) delete s.trainingCompleted[selectedDayKey];
    else s.trainingCompleted[selectedDayKey] = true;
  })
- }, trainedSelected ? "Desmarcar treino" : canMarkSelected ? "Treinei" : "Treino futuro"), !canToggleSelected && /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Disponível para marcar como concluído na "+selectedWeekday+"."), /*#__PURE__*/React.createElement("button", { className: "reset-btn", onClick: () => setShowRir(v => !v) }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
+ }, trainedSelected ? "Anular conclusão" : canMarkSelected ? "Concluir sem sessão" : "Treino futuro"), !canToggleSelected && /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Disponível para marcar como concluído na "+selectedWeekday+"."), /*#__PURE__*/React.createElement("button", { className: "reset-btn", onClick: () => setShowRir(v => !v) }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
  className: "rir-help"
  }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
  key: sel + ":" + selectedDayKey,
@@ -3563,7 +3565,7 @@ function TrainingHistory({state,update}) {
   if(!draft||!draft.date||draft.date>todayKey){setMessage("A data da sessão tem de ser hoje ou uma data passada.");return;}
   if(!String(draft.name||"").trim()){setMessage("Indica um nome para a sessão.");return;}
   const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
-  update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0){const old=s.sessions[i];s.sessions[i]=clean;if(old.date!==clean.date&&s.trainingCompleted?.[old.date]){delete s.trainingCompleted[old.date];s.trainingCompleted[clean.date]=true;}}});
+  update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0){const old=s.sessions[i];s.sessions[i]=clean;s.trainingCompleted=s.trainingCompleted||{};if(old.date!==clean.date&&s.trainingCompleted[old.date]&&!s.sessions.some((session,j)=>j!==i&&session.date===old.date))delete s.trainingCompleted[old.date];s.trainingCompleted[clean.date]=true;}});
   setEditingId(null);setDraft(null);setMessage("Sessão atualizada.");
  };
  const del=id=>{if(!window.confirm("Apagar esta sessão do histórico?"))return;update(s=>{const i=s.sessions.findIndex(x=>x.id===id);if(i>=0)s.sessions.splice(i,1);});};
