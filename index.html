@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=23">
+<link rel="stylesheet" href="evolvefit-polish.css?v=24">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -2840,6 +2840,116 @@ function Dashboard({
  }), /*#__PURE__*/React.createElement("span", null, t.label))))));
 }
 
+/* ---------------------- home body-progress snapshot --------------------- */
+function getHomeBodyProgress(state, referenceDate) {
+ const endDate = referenceDate || todayKey;
+ const start = new Date(endDate + "T12:00:00");
+ start.setDate(start.getDate() - 27);
+ const startDate = [start.getFullYear(), String(start.getMonth() + 1).padStart(2, "0"), String(start.getDate()).padStart(2, "0")].join("-");
+ const body = (state && Array.isArray(state.body) ? state.body : [])
+  .filter(record => record && /^\d{4}-\d{2}-\d{2}$/.test(String(record.date || "")) && record.date >= startDate && record.date <= endDate)
+  .sort((a, b) => a.date.localeCompare(b.date));
+ const olderRecords = (state && Array.isArray(state.body) ? state.body : []).some(record => record && /^\d{4}-\d{2}-\d{2}$/.test(String(record.date || "")) && record.date < startDate);
+ const definitions = [
+  {key: "weight", label: "Peso", unit: "kg", threshold: 0.2, favorable: "neutral"},
+  {key: "bodyFat", label: "Gordura corporal", unit: "%", threshold: 0.2, favorable: "down"},
+  {key: "muscle", label: "Massa muscular", unit: "kg", threshold: 0.2, favorable: "up"}
+ ];
+ const metrics = definitions.map(definition => {
+  const samples = body.filter(record => Number.isFinite(Number(record[definition.key])) && Number(record[definition.key]) > 0);
+  if (!samples.length) return null;
+  const first = samples[0];
+  const latest = samples[samples.length - 1];
+  const spanDays = (new Date(latest.date + "T12:00:00") - new Date(first.date + "T12:00:00")) / 86400000;
+  const delta = samples.length > 1 && spanDays >= 7 ? +(Number(latest[definition.key]) - Number(first[definition.key])).toFixed(1) : null;
+  return {...definition, value: Number(latest[definition.key]), date: latest.date, delta, firstDate: delta === null ? null : first.date};
+ }).filter(Boolean);
+ const trend = key => {
+  const metric = metrics.find(item => item.key === key);
+  if (!metric || metric.delta === null || Math.abs(metric.delta) < metric.threshold) return 0;
+  return metric.delta > 0 ? 1 : -1;
+ };
+ const weight = trend("weight"), fat = trend("bodyFat"), muscle = trend("muscle");
+ let tone = "neutral";
+ let message = metrics.length
+  ? "Registos guardados. Continua a medir ao longo das semanas para perceber a tendência."
+  : olderRecords
+   ? "Sem medições recentes. Atualiza os teus registos para acompanhar a evolução das últimas 4 semanas."
+   : "Regista uma medição corporal para começares a acompanhar o peso, a gordura corporal e a massa muscular.";
+ if (metrics.length) {
+  if (fat < 0 && muscle < 0) {
+   tone = "caution";
+   message = "A gordura corporal desceu, mas a massa muscular também. É uma evolução mista; acompanha as próximas medições antes de ajustar o plano.";
+  } else if (fat < 0 && muscle > 0) {
+   tone = "positive";
+   message = weight > 0
+    ? "Mesmo com o peso a subir, as medições apontam para menos gordura e mais massa muscular. Vais no bom caminho."
+    : "Vais no bom caminho: as medições apontam para menos gordura corporal e mais massa muscular.";
+  } else if (fat < 0 && muscle >= 0) {
+   tone = "positive";
+   message = weight > 0
+    ? "O peso subiu, mas a gordura corporal está a descer nas medições. É uma tendência positiva."
+    : "Vais no bom caminho: a gordura corporal está a descer nas medições.";
+  } else if (muscle > 0 && fat <= 0) {
+   tone = "positive";
+   message = weight > 0
+    ? "O peso subiu e a massa muscular registada também. Boa evolução — continua a acompanhar a tendência."
+    : "Boa evolução: a massa muscular registada está a aumentar.";
+  } else if (weight > 0 && fat > 0 && muscle > 0) {
+   tone = "caution";
+   message = "Peso, gordura corporal e massa muscular subiram nas medições. A evolução é mista; acompanha mais algumas semanas antes de tirar conclusões.";
+  } else if (weight > 0 && fat > 0) {
+   tone = "caution";
+   message = "O peso e a gordura corporal subiram nas medições. Uma tendência de 4 semanas é mais útil do que uma pesagem isolada — continua a acompanhar.";
+  } else if (weight > 0) {
+   message = "O peso subiu, mas isso, por si só, não significa que ganhaste gordura. Vamos acompanhar as próximas medições.";
+  } else if (weight < 0 && (fat > 0 || muscle < 0)) {
+   tone = "caution";
+   message = "O peso desceu, mas outras medições apontam noutra direção. Acompanha várias semanas antes de alterar o plano.";
+  } else if (weight < 0 && fat < 0) {
+   tone = "positive";
+   message = "Vais no bom caminho: o peso e a gordura corporal estão a descer nas medições.";
+  } else if (fat > 0 || muscle < 0) {
+   tone = "caution";
+   message = fat > 0
+    ? "A gordura corporal registada subiu. As medições podem oscilar; acompanha a tendência nas próximas semanas."
+    : "A massa muscular registada desceu. Acompanha as próximas medições antes de tirar conclusões.";
+  } else if (weight < 0) {
+   message = "O peso desceu. Observa a tendência ao longo do tempo e compara-a com o teu objetivo.";
+  } else if (weight || fat || muscle) {
+   message = "As medições estão relativamente estáveis. Mantém a consistência e continua a acompanhar.";
+  } else if (metrics.every(metric => metric.delta === null)) {
+   message = "Já tens registos recentes. Adiciona mais medições ao longo do tempo para vermos a tendência.";
+  }
+ }
+ return {metrics, message, tone, hasRecentRecords: body.length > 0};
+}
+function HomeBodyProgress({state, onOpen}) {
+ const summary = getHomeBodyProgress(state);
+ const fmt = value => Number(value).toLocaleString("pt-PT", {minimumFractionDigits: 1, maximumFractionDigits: 1});
+ const shortDate = value => new Date(value + "T12:00:00").toLocaleDateString("pt-PT", {day: "numeric", month: "short"});
+ return React.createElement("section", {className: "card evf-home-progress", "aria-labelledby": "evf-home-progress-title"},
+  React.createElement("div", {className: "evf-home-progress-head"},
+   React.createElement("div", {className: "evf-home-progress-icon", "aria-hidden": true}, React.createElement(I, {name: "activity", size: 18})),
+   React.createElement("div", {className: "evf-home-progress-heading"},
+    React.createElement("h2", {id: "evf-home-progress-title"}, "O teu progresso"),
+    React.createElement("span", null, "Últimas 4 semanas")
+   )
+  ),
+  summary.metrics.length > 0 && React.createElement("div", {className: "evf-home-progress-grid"}, summary.metrics.map(metric => {
+   const favorable = metric.delta === null || metric.delta === 0 ? "flat" : metric.favorable === "neutral" ? "neutral" : (metric.favorable === "down" ? metric.delta < 0 : metric.delta > 0) ? "good" : "watch";
+   const deltaText = metric.delta === null ? "Registado " + shortDate(metric.date) : metric.delta === 0 ? "Sem alteração desde " + shortDate(metric.firstDate) : (metric.delta > 0 ? "+" : "−") + fmt(Math.abs(metric.delta)) + " " + metric.unit + " desde " + shortDate(metric.firstDate);
+   return React.createElement("div", {className: "evf-home-progress-metric", key: metric.key},
+    React.createElement("span", {className: "evf-home-progress-label"}, metric.label),
+    React.createElement("strong", null, fmt(metric.value), React.createElement("i", null, metric.unit)),
+    React.createElement("small", {className: "evf-home-progress-change " + favorable}, deltaText)
+   );
+  })),
+  React.createElement("p", {className: "evf-home-progress-message " + summary.tone}, summary.message),
+  React.createElement("button", {type: "button", className: "evf-home-progress-link", onClick: onOpen}, summary.metrics.length ? "Ver evolução completa" : "Abrir Corpo", React.createElement("span", {"aria-hidden": true}, "→"))
+ );
+}
+
 /* ============================ DAILY CHECKLIST =========================== */
 function Checklist({
  state,
@@ -2863,6 +2973,7 @@ function Checklist({
        /*#__PURE__*/React.createElement("span",{"aria-hidden":true},"→")
      )
    ),
+   /*#__PURE__*/React.createElement(HomeBodyProgress, {state, onOpen:()=>go("body")}),
    !state.profile?.targetsReviewed && /*#__PURE__*/React.createElement("div",{className:"card evf-onboarding-note"},
      /*#__PURE__*/React.createElement("strong",null,"Revê as tuas metas"),
      /*#__PURE__*/React.createElement("div",null,"Alguns objetivos são predefinições de arranque; não são registos pessoais. Personaliza-os quando quiseres."),

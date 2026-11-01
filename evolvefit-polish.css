@@ -950,6 +950,124 @@ button:disabled {
 .hist-cardio strong { color: var(--text); }
 
 
+/* Home body-progress summary */
+#root .evf-home-progress {
+  padding: 14px;
+  border-color: color-mix(in srgb, var(--coral) 14%, var(--border));
+}
+.evf-home-progress-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.evf-home-progress-icon {
+  display: inline-flex;
+  width: 36px;
+  height: 36px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--coral) 10%, var(--surface));
+  color: var(--coral);
+}
+.evf-home-progress-heading { display: grid; gap: 2px; }
+.evf-home-progress-heading h2 {
+  margin: 0;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -.01em;
+}
+.evf-home-progress-heading span {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 650;
+}
+.evf-home-progress-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(92px, 1fr));
+  gap: 7px;
+  margin-top: 13px;
+}
+.evf-home-progress-metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 4px;
+  padding: 9px 8px;
+  border: 1px solid var(--border);
+  border-radius: 11px;
+  background: var(--surface2);
+}
+.evf-home-progress-label {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1.25;
+}
+.evf-home-progress-metric strong {
+  color: var(--text);
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.03em;
+  white-space: nowrap;
+}
+.evf-home-progress-metric strong i {
+  margin-left: 2px;
+  color: var(--muted);
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+.evf-home-progress-change {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+}
+.evf-home-progress-change.good,
+.evf-home-progress-message.positive { color: var(--green); }
+.evf-home-progress-change.watch,
+.evf-home-progress-message.caution { color: var(--amber); }
+.evf-home-progress-change.neutral,
+.evf-home-progress-change.flat { color: var(--muted); }
+.evf-home-progress-message {
+  margin: 11px 0 0;
+  padding: 10px 11px;
+  border-radius: 11px;
+  background: var(--surface2);
+  color: var(--text);
+  font-size: 11px;
+  line-height: 1.45;
+}
+.evf-home-progress-message.positive {
+  background: color-mix(in srgb, var(--green) 8%, var(--surface));
+}
+.evf-home-progress-message.caution {
+  background: color-mix(in srgb, var(--amber) 9%, var(--surface));
+}
+.evf-home-progress-link {
+  display: inline-flex;
+  min-height: 44px;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 0 2px;
+  border: 0;
+  background: transparent;
+  color: var(--coral);
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+}
+.evf-home-progress-link:focus-visible { outline-offset: 1px; }
+@media (max-width: 360px) {
+  .evf-home-progress-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 /* Workout names are edited from the Plan view. */
 
 .training-completion-btn{display:inline-flex;align-items:center;justify-content:center;min-width:112px;min-height:44px;padding:0 14px;border:1px solid var(--border);border-radius:14px;font:inherit;font-size:14px;font-weight:750;white-space:nowrap;cursor:pointer;transition:background .15s ease,color .15s ease,border-color .15s ease;}
