@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=22">
+<link rel="stylesheet" href="evolvefit-polish.css?v=23">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -677,6 +677,11 @@ function normalize(s) {
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
  delete s.profile.aiCloudConsent;
+ s.trainingCompleted = s.trainingCompleted && typeof s.trainingCompleted === "object" && !Array.isArray(s.trainingCompleted) ? s.trainingCompleted : {};
+ if(s.profile.trainingCompletionMode!=="explicit-v1") {
+   (s.sessions||[]).forEach(session=>{if(session&&session.date)delete s.trainingCompleted[session.date];});
+   s.profile.trainingCompletionMode="explicit-v1";
+ }
  if (s.profile.name == null) s.profile.name = "Gonçalo";
  if (s.profile.bfStart == null) s.profile.bfStart = 27.5;
  if (s.profile.bfTarget == null) s.profile.bfTarget = 15;
@@ -1793,7 +1798,7 @@ function weekFromMonday(days) {
  return out;
 }
 function trainedOn(state, key) {
- return !!(state.trainingCompleted && state.trainingCompleted[key]) || (state.sessions || []).some(session => session && session.date === key);
+ return !!(state.trainingCompleted && state.trainingCompleted[key]);
 }
 function missedTrainingOn(state,key){
  return !!key&&key<todayKey&&!trainedOn(state,key);
@@ -3137,27 +3142,27 @@ function Workouts({
  const [view, setView] = useState("treino");
  const [planDay, setPlanDay] = useState(initialDay != null ? initialDay : todayIdx);
  const [showRir, setShowRir] = useState(false);
- const weekDays = weekFromMonday(state.days);
- const treinos = weekDays.filter(w => trainedOn(state, w.key)).length;
- const kcal = weekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
+ const [workoutWeekOffset,setWorkoutWeekOffset]=useState(0);
+ const currentWeekDays = weekFromMonday(state.days);
+ const selectedWeekStart=addDays(new Date(currentWeekDays[0].key+"T12:00:00"),workoutWeekOffset*7);
+ const weekDays=Array.from({length:7},(_,i)=>{const key=iso(addDays(selectedWeekStart,i));return {key,day:state.days[key]};});
+ const weekRangeLabel=new Date(weekDays[0].key+"T12:00:00").toLocaleDateString("pt-PT",{day:"numeric",month:"short"})+" – "+new Date(weekDays[4].key+"T12:00:00").toLocaleDateString("pt-PT",{day:"numeric",month:"short"});
+ const treinos = currentWeekDays.filter(w => trainedOn(state, w.key)).length;
+ const kcal = currentWeekDays.reduce((a, w) => a + (w.day && w.day.tasks.calorias ? w.day.tasks.calorias.value : 0), 0);
  const workoutStats=[];
  if(treinos>0) workoutStats.push(React.createElement(Stat,{key:"treinos",icon:"dumbbell",tint:"coral",v:treinos,l:"treinos esta semana"}));
  if(kcal>0) workoutStats.push(React.createElement(Stat,{key:"kcal",icon:"flame",tint:"amber",v:kcal,l:"kcal do treino"}));
  const selectedDayKey = weekDays[sel] ? weekDays[sel].key : todayKey;
  const selectedSession = state.sessions.find(s => s.date === selectedDayKey && s.dayIdx === sel) || null;
  const loggedSelected = !!selectedSession;
- const hasSessionOnSelectedDate = state.sessions.some(session => session && session.date === selectedDayKey);
  const trainedSelected = trainedOn(state, selectedDayKey);
  const canMarkSelected = selectedDayKey <= todayKey;
- const canToggleSelected = canMarkSelected || trainedSelected;
  const canSaveSelected = selectedDayKey <= todayKey;
  const selectedWeekday = new Date(selectedDayKey + "T12:00:00").toLocaleDateString("pt-PT", {weekday:"long"});
  const selectedDateLabel = new Date(selectedDayKey + "T12:00:00").toLocaleDateString("pt-PT", {day:"numeric",month:"short"});
- const loggedDayIdx = new Set(state.sessions.filter(s => weekDays.some(w => w.key === s.date)).map(s => s.dayIdx));
  const tuesdayKey=weekDays[1]?.key;
- const tuesdayLogged=(state.sessions||[]).some(se=>se.date===tuesdayKey&&Number(se.dayIdx)===1);
- const tuesdayMissed=!!(tuesdayKey&&tuesdayKey<todayKey&&!trainedOn(state,tuesdayKey)&&!tuesdayLogged);
- const fridayFallback=sel===4&&tuesdayMissed&&!selectedSession;
+ const tuesdayMissed=!!(tuesdayKey&&tuesdayKey<todayKey&&!trainedOn(state,tuesdayKey));
+ const fridayFallback=workoutWeekOffset===0&&sel===4&&tuesdayMissed&&!selectedSession;
  // Usa sempre a prescrição atual no registo; uma sessão antiga da semana não deve
  // voltar a mostrar a lista de exercícios do plano anterior. Os seus dados ficam
  // guardados na sessão/histórico e são usados para pré-preencher movimentos compatíveis.
@@ -3178,8 +3183,6 @@ function Workouts({
   const cardio=(Array.isArray(cardioEntries)?cardioEntries:[]).map(c=>({name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0);
   const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex,cardio};
   if(i>=0)s.sessions[i]=rec;else s.sessions.push(rec);
-  s.trainingCompleted=s.trainingCompleted||{};
-  s.trainingCompleted[selectedDayKey]=true;
  });
 
  const setPlanEx = (di, xi, f, val) => update(s => {
@@ -3233,7 +3236,11 @@ function Workouts({
  key: k,
  className: "seg-b" + (view === k ? " on" : ""),
  onClick: () => setView(k)
- }, l))), view === "treino" && React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(RestTimer, null), /*#__PURE__*/React.createElement("div", {
+ }, l))), view === "treino" && React.createElement(React.Fragment, null, /*#__PURE__*/React.createElement(RestTimer, null), /*#__PURE__*/React.createElement("div",{className:"training-week-nav",role:"group","aria-label":"Escolher semana de treino"},
+ /*#__PURE__*/React.createElement("button",{type:"button",className:"training-week-nav-button",onClick:()=>setWorkoutWeekOffset(offset=>offset-1),"aria-label":"Ver semana anterior"},"‹"),
+ /*#__PURE__*/React.createElement("span",{className:"training-week-nav-label"},(workoutWeekOffset===0?"Esta semana · ":"")+weekRangeLabel),
+ /*#__PURE__*/React.createElement("button",{type:"button",className:"training-week-nav-button",disabled:workoutWeekOffset===0,onClick:()=>setWorkoutWeekOffset(offset=>Math.min(0,offset+1)),"aria-label":"Regressar à semana atual"},"›")
+ ), /*#__PURE__*/React.createElement("div", {
  className: "day-picker"
  }, plano.map((d, i) => {
  const dayKey=weekDays[i]?weekDays[i].key:todayKey;
@@ -3245,7 +3252,7 @@ function Workouts({
   "aria-label":d.day+(missed?", treino não marcado":completed?", treino concluído":""),
   title:missed?"Treino previsto não marcado":undefined,
   onClick:()=>{setSel(i)}
- },d.day.slice(0,3),(missed||loggedDayIdx.has(i)||completed)&&React.createElement("span",{
+ },d.day.slice(0,3),(missed||completed)&&React.createElement("span",{
   className:"dp-dot"+(missed?" dp-dot-missed":"")
  }));
  })), /*#__PURE__*/React.createElement("div", {
@@ -3255,23 +3262,19 @@ function Workouts({
  }, /*#__PURE__*/React.createElement("div", null,
  /*#__PURE__*/React.createElement("div", {className: "logger-title"}, fridayFallback ? "Pernas completas (terça-feira em falta)" : plano[sel].name),
  /*#__PURE__*/React.createElement("div", {className: "logger-sub"}, plano[sel].day+" · "+selectedWeekday+" "+selectedDateLabel)
- ), hasSessionOnSelectedDate && trainedSelected && /*#__PURE__*/React.createElement("div", {
- className: "logged-badge"
- }, /*#__PURE__*/React.createElement(I, {
- name: "check",
- size: 12
- }), " Registado · concluído")), !hasSessionOnSelectedDate && /*#__PURE__*/React.createElement("button", {
- className: "menu-btn main",
- style: { width: "100%", margin: "0 0 8px" },
- disabled: !canToggleSelected,
- "aria-label": trainedSelected ? "Anular conclusão sem registo" : canMarkSelected ? "Concluir sem registar sessão" : "Treino futuro, ainda indisponível",
- title: !canToggleSelected ? "Disponível no dia do treino" : undefined,
+ ), /*#__PURE__*/React.createElement("button", {
+ type: "button",
+ className: "training-completion-btn "+(trainedSelected?"done":canMarkSelected?"pending":"future"),
+ disabled: !canMarkSelected,
+ "aria-pressed": trainedSelected,
+ "aria-label": trainedSelected ? "Desmarcar treino concluído" : canMarkSelected ? "Marcar treino como concluído" : "Treino futuro",
+ title: !canMarkSelected ? "Poderás marcar no próprio dia ou num dia seguinte." : undefined,
  onClick: () => update(s => {
-   s.trainingCompleted = s.trainingCompleted || {};
-   if (s.trainingCompleted[selectedDayKey]) delete s.trainingCompleted[selectedDayKey];
-   else s.trainingCompleted[selectedDayKey] = true;
+   s.trainingCompleted=s.trainingCompleted||{};
+   if(s.trainingCompleted[selectedDayKey])delete s.trainingCompleted[selectedDayKey];
+   else s.trainingCompleted[selectedDayKey]=true;
  })
- }, trainedSelected ? "Anular conclusão" : canMarkSelected ? "Concluir sem sessão" : "Treino futuro"), !canToggleSelected && /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Disponível para marcar como concluído na "+selectedWeekday+"."), /*#__PURE__*/React.createElement("button", { className: "reset-btn", onClick: () => setShowRir(v => !v) }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
+ }, trainedSelected ? "Treinei ✓" : canMarkSelected ? "Treinei" : "Futuro")), !canMarkSelected && /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Poderás marcar o treino no próprio dia ou num dia seguinte."), /*#__PURE__*/React.createElement("button", { className: "reset-btn", onClick: () => setShowRir(v => !v) }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
  className: "rir-help"
  }, "RIR = repetições que ainda conseguias fazer no fim da última série. RIR 2 significa parar 2 reps antes da falha; o contorno laranja marca o alvo do exercício."), /*#__PURE__*/React.createElement(WorkoutLogger, {
  key: sel + ":" + selectedDayKey,
@@ -3551,7 +3554,7 @@ function TrainingHistory({state,update}) {
   if(!draft||!draft.date||draft.date>todayKey){setMessage("A data da sessão tem de ser hoje ou uma data passada.");return;}
   if(!String(draft.name||"").trim()){setMessage("Indica um nome para a sessão.");return;}
   const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
-  update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0){const old=s.sessions[i];s.sessions[i]=clean;s.trainingCompleted=s.trainingCompleted||{};if(old.date!==clean.date&&s.trainingCompleted[old.date]&&!s.sessions.some((session,j)=>j!==i&&session.date===old.date))delete s.trainingCompleted[old.date];s.trainingCompleted[clean.date]=true;}});
+  update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0)s.sessions[i]=clean;});
   setEditingId(null);setDraft(null);setMessage("Sessão atualizada.");
  };
  const del=id=>{if(!window.confirm("Apagar esta sessão do histórico?"))return;update(s=>{const i=s.sessions.findIndex(x=>x.id===id);if(i>=0)s.sessions.splice(i,1);});};
@@ -4710,7 +4713,7 @@ function Coach2027({ state, update, onNavigate }) {
  const reviewWaist = latestWaist&&oldWaist28 ? +(latestWaist.cintura-oldWaist28.cintura).toFixed(1) : null;
  const trackedDays28=d28.filter(x=>Object.values(x.d.tasks||{}).some(t=>t&&(t.done||Number(t.value)>0)));
  const adherence28=trackedDays28.length?Math.round(trackedDays28.reduce((a,x)=>a+dayPct(x.d,x.k),0)/trackedDays28.length):null;
- const reviewSessions28=(state.sessions||[]).filter(s=>{const age=(TODAY-new Date(s.date+"T12:00:00"))/86400000;return age>=0&&age<28;}).length;
+ const reviewSessions28=Object.keys(state.trainingCompleted||{}).filter(date=>{const age=(TODAY-new Date(date+"T12:00:00"))/86400000;return age>=0&&age<28;}).length;
 
 
  const hasCoachData=enoughData;
