@@ -677,13 +677,15 @@ function normalize(s) {
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
  delete s.profile.aiCloudConsent;
+ delete s.profile.bfStart;
+ delete s.profile.bfStartReviewed;
+ delete s.profile.coachBaseline;
  s.trainingCompleted = s.trainingCompleted && typeof s.trainingCompleted === "object" && !Array.isArray(s.trainingCompleted) ? s.trainingCompleted : {};
  if(s.profile.trainingCompletionMode!=="explicit-v1") {
    (s.sessions||[]).forEach(session=>{if(session&&session.date)delete s.trainingCompleted[session.date];});
    s.profile.trainingCompletionMode="explicit-v1";
  }
  if (s.profile.name == null) s.profile.name = "Gonçalo";
- if (s.profile.bfStart == null) s.profile.bfStart = 27.5;
  if (s.profile.bfTarget == null) s.profile.bfTarget = 15;
  if (s.profile.targetDate == null) s.profile.targetDate = "2026-11-19";
  if (s.profile.height == null) s.profile.height = 180;
@@ -1745,7 +1747,6 @@ function seedDemo() {
  theme: "light",
  profile: {
  name: "Gonçalo",
- bfStart: 27.5,
  bfTarget: 15,
  targetDate: "2026-11-19",
  summerTargetDate: "2027-06-01",
@@ -2843,13 +2844,9 @@ function Dashboard({
 /* ---------------------- home body-progress snapshot --------------------- */
 function getHomeBodyProgress(state, referenceDate) {
  const endDate = referenceDate || todayKey;
- const start = new Date(endDate + "T12:00:00");
- start.setDate(start.getDate() - 27);
- const startDate = [start.getFullYear(), String(start.getMonth() + 1).padStart(2, "0"), String(start.getDate()).padStart(2, "0")].join("-");
  const body = (state && Array.isArray(state.body) ? state.body : [])
-  .filter(record => record && /^\d{4}-\d{2}-\d{2}$/.test(String(record.date || "")) && record.date >= startDate && record.date <= endDate)
+  .filter(record => record && /^\d{4}-\d{2}-\d{2}$/.test(String(record.date || "")) && record.date <= endDate)
   .sort((a, b) => a.date.localeCompare(b.date));
- const olderRecords = (state && Array.isArray(state.body) ? state.body : []).some(record => record && /^\d{4}-\d{2}-\d{2}$/.test(String(record.date || "")) && record.date < startDate);
  const definitions = [
   {key: "weight", label: "Peso", unit: "kg", threshold: 0.2, favorable: "neutral"},
   {key: "bodyFat", label: "Gordura corporal", unit: "%", threshold: 0.2, favorable: "down"},
@@ -2860,8 +2857,7 @@ function getHomeBodyProgress(state, referenceDate) {
   if (!samples.length) return null;
   const first = samples[0];
   const latest = samples[samples.length - 1];
-  const spanDays = (new Date(latest.date + "T12:00:00") - new Date(first.date + "T12:00:00")) / 86400000;
-  const delta = samples.length > 1 && spanDays >= 7 ? +(Number(latest[definition.key]) - Number(first[definition.key])).toFixed(1) : null;
+  const delta = samples.length > 1 && first.date !== latest.date ? +(Number(latest[definition.key]) - Number(first[definition.key])).toFixed(1) : null;
   return {...definition, value: Number(latest[definition.key]), date: latest.date, delta, firstDate: delta === null ? null : first.date};
  }).filter(Boolean);
  const trend = key => {
@@ -2872,57 +2868,55 @@ function getHomeBodyProgress(state, referenceDate) {
  const weight = trend("weight"), fat = trend("bodyFat"), muscle = trend("muscle");
  let tone = "neutral";
  let message = metrics.length
-  ? "Registos guardados. Continua a medir ao longo das semanas para perceber a tendência."
-  : olderRecords
-   ? "Sem medições recentes. Atualiza os teus registos para acompanhar a evolução das últimas 4 semanas."
-   : "Regista uma medição corporal para começares a acompanhar o peso, a gordura corporal e a massa muscular.";
- if (metrics.length) {
+  ? "Este é o teu ponto de partida. Regista mais medições para acompanhar a tendência."
+  : "Ainda não há medições corporais. Regista a primeira para começares a acompanhar o teu progresso.";
+ if (metrics.length && metrics.every(metric => metric.delta === null)) {
+  message = "Já tens o primeiro registo. Adiciona medições futuras para comparar a tua evolução.";
+ } else if (metrics.length) {
   if (fat < 0 && muscle < 0) {
    tone = "caution";
-   message = "A gordura corporal desceu, mas a massa muscular também. É uma evolução mista; acompanha as próximas medições antes de ajustar o plano.";
+   message = "Desde os primeiros registos, a gordura corporal desceu, mas a massa muscular também. A evolução é mista; continua a acompanhar.";
   } else if (fat < 0 && muscle > 0) {
    tone = "positive";
    message = weight > 0
-    ? "Mesmo com o peso a subir, as medições apontam para menos gordura e mais massa muscular. Vais no bom caminho."
-    : "Vais no bom caminho: as medições apontam para menos gordura corporal e mais massa muscular.";
+    ? "Mesmo com o peso a subir, desde o primeiro registo há menos gordura e mais massa muscular. Vais no bom caminho."
+    : "Vais no bom caminho: desde os primeiros registos, há menos gordura corporal e mais massa muscular.";
   } else if (fat < 0 && muscle >= 0) {
    tone = "positive";
    message = weight > 0
-    ? "O peso subiu, mas a gordura corporal está a descer nas medições. É uma tendência positiva."
-    : "Vais no bom caminho: a gordura corporal está a descer nas medições.";
+    ? "O peso subiu, mas a gordura corporal está abaixo do primeiro registo. É uma tendência positiva."
+    : "Vais no bom caminho: a gordura corporal está abaixo do primeiro registo.";
   } else if (muscle > 0 && fat <= 0) {
    tone = "positive";
    message = weight > 0
-    ? "O peso subiu e a massa muscular registada também. Boa evolução — continua a acompanhar a tendência."
-    : "Boa evolução: a massa muscular registada está a aumentar.";
+    ? "O peso subiu e a massa muscular registada também. Boa evolução desde o ponto de partida."
+    : "Boa evolução: a massa muscular registada aumentou desde o primeiro registo.";
   } else if (weight > 0 && fat > 0 && muscle > 0) {
    tone = "caution";
-   message = "Peso, gordura corporal e massa muscular subiram nas medições. A evolução é mista; acompanha mais algumas semanas antes de tirar conclusões.";
+   message = "Peso, gordura corporal e massa muscular estão acima dos primeiros registos. A evolução é mista; acompanha antes de tirar conclusões.";
   } else if (weight > 0 && fat > 0) {
    tone = "caution";
-   message = "O peso e a gordura corporal subiram nas medições. Uma tendência de 4 semanas é mais útil do que uma pesagem isolada — continua a acompanhar.";
+   message = "O peso e a gordura corporal estão acima dos primeiros registos. Acompanha a tendência antes de alterar o plano.";
   } else if (weight > 0) {
-   message = "O peso subiu, mas isso, por si só, não significa que ganhaste gordura. Vamos acompanhar as próximas medições.";
+   message = "O peso subiu, mas isso, por si só, não significa que ganhaste gordura. Compara também as restantes medições.";
   } else if (weight < 0 && (fat > 0 || muscle < 0)) {
    tone = "caution";
-   message = "O peso desceu, mas outras medições apontam noutra direção. Acompanha várias semanas antes de alterar o plano.";
+   message = "O peso desceu, mas outras medições apontam noutra direção. A evolução é mista; continua a acompanhar.";
   } else if (weight < 0 && fat < 0) {
    tone = "positive";
-   message = "Vais no bom caminho: o peso e a gordura corporal estão a descer nas medições.";
+   message = "Vais no bom caminho: o peso e a gordura corporal estão abaixo dos primeiros registos.";
   } else if (fat > 0 || muscle < 0) {
    tone = "caution";
    message = fat > 0
-    ? "A gordura corporal registada subiu. As medições podem oscilar; acompanha a tendência nas próximas semanas."
-    : "A massa muscular registada desceu. Acompanha as próximas medições antes de tirar conclusões.";
+    ? "A gordura corporal está acima do primeiro registo. Acompanha a tendência antes de ajustar o plano."
+    : "A massa muscular registada está abaixo do primeiro registo. Continua a acompanhar antes de tirar conclusões.";
   } else if (weight < 0) {
-   message = "O peso desceu. Observa a tendência ao longo do tempo e compara-a com o teu objetivo.";
+   message = "O peso está abaixo do primeiro registo. Compara a tendência com o teu objetivo.";
   } else if (weight || fat || muscle) {
-   message = "As medições estão relativamente estáveis. Mantém a consistência e continua a acompanhar.";
-  } else if (metrics.every(metric => metric.delta === null)) {
-   message = "Já tens registos recentes. Adiciona mais medições ao longo do tempo para vermos a tendência.";
+   message = "As medições estão relativamente estáveis face aos primeiros registos. Mantém a consistência.";
   }
  }
- return {metrics, message, tone, hasRecentRecords: body.length > 0};
+ return {metrics, message, tone};
 }
 function HomeBodyProgress({state, onOpen}) {
  const summary = getHomeBodyProgress(state);
@@ -2933,7 +2927,7 @@ function HomeBodyProgress({state, onOpen}) {
    React.createElement("div", {className: "evf-home-progress-icon", "aria-hidden": true}, React.createElement(I, {name: "activity", size: 18})),
    React.createElement("div", {className: "evf-home-progress-heading"},
     React.createElement("h2", {id: "evf-home-progress-title"}, "O teu progresso"),
-    React.createElement("span", null, "Últimas 4 semanas")
+    React.createElement("span", null, "Desde o primeiro registo")
    )
   ),
   summary.metrics.length > 0 && React.createElement("div", {className: "evf-home-progress-grid"}, summary.metrics.map(metric => {
@@ -4124,19 +4118,6 @@ function Body({
  update
 }) {
  const [form, setForm] = useState(false);
- const [editStart, setEditStart] = useState(false);
- const [startVal, setStartVal] = useState(String(state.profile.bfStart));
- useEffect(() => {
- if (!editStart) setStartVal(String(state.profile.bfStart));
- }, [state.profile.bfStart, editStart]);
- const saveStart = () => {
- const v = parseFloat(String(startVal).replace(",", "."));
- if (!isNaN(v) && v > 0) update(s => {
- s.profile.bfStart = v;
- s.profile.bfStartReviewed = true;
- });
- setEditStart(false);
- };
  const [editGoal, setEditGoal] = useState(false);
  const [goalVal, setGoalVal] = useState(String(state.profile.bfTarget));
  useEffect(() => {
@@ -4207,21 +4188,21 @@ function Body({
  const periodList = has ? list.filter(x => x.date >= periodStart) : [];
  const weightAvg7 = has ? rollingAvgAt(list, last.date, "weight", 7) : null;
  const bfList = list.filter(x => x.bodyFat > 0);
- const startingValue=state.profile.bfStartReviewed?state.profile.bfStart:(bfList[0]?.bodyFat??state.profile.bfStart);
- const hasStartingPoint=bfList.length>0||!!state.profile.bfStartReviewed;
+ const startingValue=bfList.length?bfList[0].bodyFat:null;
+ const hasStartingPoint=bfList.length>0;
  const lastBF = bfList.length ? bfList[bfList.length - 1] : null;
  const toGo = lastBF ? +(lastBF.bodyFat - state.profile.bfTarget).toFixed(1) : 0;
  const progressing = bfList.length > 1 ? lastBF.bodyFat < bfList[0].bodyFat : false;
  const status = !lastBF || (bfList.length<2 && toGo>0) ? "" : toGo <= 0 ? "Já atingiste o objetivo de " + state.profile.bfTarget + "%! A manter." : progressing ? "No bom caminho — faltam " + toGo.toFixed(1) + "% de gordura para os " + state.profile.bfTarget + "%. Mantém o défice suave e a proteína alta." : "Ainda a " + toGo.toFixed(1) + "% do objetivo. Foca na consistência de treino e hidratação.";
  const weightRecords=list.filter(x=>x.weight>0);
- const weightBaseline=weightRecords.filter(x=>x.date<=periodStart).pop()||weightRecords[0]||null;
+ const weightBaseline=weightRecords[0]||null;
  const latestWeightRecord=weightRecords[weightRecords.length-1]||null;
  const weightDelta=weightRecords.length>1&&weightBaseline&&latestWeightRecord!==weightBaseline?Math.round((weightBaseline.weight-latestWeightRecord.weight)*1000):null;
  const latestBmi=[...list].reverse().find(x=>x.bmi>0)||null;
  const latestWaist=[...list].reverse().find(x=>x.cintura>0)||null;
  const latestVisceral=[...list].reverse().find(x=>x.visceral>0)||null;
  const bodySummaryItems=[];
- if(weightDelta!=null) bodySummaryItems.push(React.createElement("div",{className:"bsum",key:"weight-delta"},React.createElement("div",{className:"bsum-v"+(weightDelta>0?" pos":"")},weightDelta>0?"−":weightDelta<0?"+":"",Math.abs(weightDelta),"g"),React.createElement("div",{className:"bsum-l"},"peso · "+activePeriod.label.toLowerCase())));
+ if(weightDelta!=null) bodySummaryItems.push(React.createElement("div",{className:"bsum",key:"weight-delta"},React.createElement("div",{className:"bsum-v"+(weightDelta>0?" pos":"")},weightDelta>0?"−":weightDelta<0?"+":"",Math.abs(weightDelta),"g"),React.createElement("div",{className:"bsum-l"},"peso · desde a primeira pesagem")));
  if(weightAvg7!=null) bodySummaryItems.push(React.createElement("div",{className:"bsum",key:"weight-average"},React.createElement("div",{className:"bsum-v"},weightAvg7,"kg"),React.createElement("div",{className:"bsum-l"},"peso ajustado (méd. 7d)")));
  if(lastBF) bodySummaryItems.push(React.createElement("div",{className:"bsum",key:"body-fat"},React.createElement("div",{className:"bsum-v"},lastBF.bodyFat,"%"),React.createElement("div",{className:"bsum-l"},"gordura corporal")));
  if(latestBmi) bodySummaryItems.push(React.createElement("div",{className:"bsum",key:"bmi"},React.createElement("div",{className:"bsum-v"},latestBmi.bmi),React.createElement("div",{className:"bsum-l"},"IMC")));
@@ -4248,8 +4229,6 @@ function Body({
      update(s => {
        const i = s.body.findIndex(x => x.date === rec.date);
        const previous = i >= 0 ? s.body[i] : {};
-       const hasPreviousFat=s.body.some(x=>x.date!==rec.date&&Number(x.bodyFat)>0)||Number(previous.bodyFat)>0;
-       if(rec.bodyFat>0&&!hasPreviousFat&&!s.profile.bfStartReviewed){s.profile.bfStart=rec.bodyFat;s.profile.bfStartReviewed=true;}
        rec.perna = Number.isFinite(Number(previous.perna)) ? Number(previous.perna) : 0;
        rec.rabo = Number.isFinite(Number(previous.rabo)) ? Number(previous.rabo) : 0;
        if (i >= 0) s.body[i] = { ...previous, ...rec };
@@ -4262,10 +4241,14 @@ function Body({
      console.error("Erro ao guardar medição:", e);
    }
  };
- const delBody = date => update(s => {
- const i = s.body.findIndex(x => x.date === date);
- if (i >= 0) s.body.splice(i, 1);
+ const delBody = date => {
+ const readableDate=String(date||"").split("-").reverse().join("/");
+ if(!window.confirm("Apagar a medição de "+readableDate+"? Será removida do histórico e cada estatística será recalculada a partir do registo válido mais antigo que continuar guardado."))return;
+ update(s => {
+  const i = s.body.findIndex(x => x.date === date);
+  if (i >= 0) s.body.splice(i, 1);
  });
+ };
  const editLatest = () => {
    if (!last) return;
    setDate(last.date);
@@ -4287,8 +4270,8 @@ function Body({
  if (!ser.length) return null;
  const per = periodList.filter(x => x[m.k] > 0);
  const cur = ser[ser.length - 1][m.k],
- pr = per.length > 1 ? per[0][m.k] : cur;
- const hasComparison = per.length > 1;
+ pr = ser[0][m.k];
+ const hasComparison = ser.length > 1 && ser[0].date !== ser[ser.length - 1].date;
  const diff = hasComparison ? +(cur - pr).toFixed(1) : null;
  const good = diff !== null && (m.better === "down" ? diff < 0 : diff > 0);
  const ti = diff === null ? null : diff === 0 ? "minus" : diff < 0 ? "trendDown" : "trendUp";
@@ -4308,7 +4291,7 @@ function Body({
  }, /*#__PURE__*/React.createElement(I, {
  name: ti,
  size: 13
- }), " ", diff > 0 ? "+" : "", diff, m.unit, " vs início do período")), chartData.length>1 && /*#__PURE__*/React.createElement("div", {
+ }), " ", diff > 0 ? "+" : "", diff, m.unit, " vs primeiro registo")), chartData.length>1 && /*#__PURE__*/React.createElement("div", {
  className: "metric-r"
  }, /*#__PURE__*/React.createElement(Spark, {
  data: chartData,
@@ -4338,70 +4321,13 @@ function Body({
  key: p.k,
  className: "period-btn" + (period === p.k ? " active" : ""),
  onClick: () => setPeriod(p.k)
- }, p.label))), hasStartingPoint && /*#__PURE__*/React.createElement("div", {
- className: "card",
- style: {
- display: "flex",
- alignItems: "center",
- justifyContent: "space-between"
- }
- }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
- style: {
- fontSize: "12px",
- fontWeight: 650,
- color: "var(--muted)",
- textTransform: "uppercase",
- letterSpacing: ".05em",
- marginBottom: "6px"
- }
- }, "Ponto de partida · gordura corporal"), editStart ? /*#__PURE__*/React.createElement("div", {
- style: {
- display: "flex",
- alignItems: "center",
- gap: "6px"
- }
- }, /*#__PURE__*/React.createElement("input", {
- className: "in",
- inputMode: "decimal",
- autoFocus: true,
- style: {
- width: "76px",
- fontSize: "20px",
- fontWeight: 780,
- padding: "8px 10px"
- },
- value: startVal,
- onChange: e => setStartVal(e.target.value),
- onKeyDown: e => {
- if (e.key === "Enter") saveStart();
- }
- }), /*#__PURE__*/React.createElement("span", {
- style: {
- color: "var(--muted)",
- fontSize: "14px"
- }
- }, "%")) : /*#__PURE__*/React.createElement("div", {
- style: {
- fontSize: "24px",
- fontWeight: 780,
- color: "var(--text)",
- letterSpacing: "-.03em"
- }
- }, startingValue, /*#__PURE__*/React.createElement("i", {
- style: {
- fontSize: "13px",
- fontWeight: 600,
- opacity: .6,
- fontStyle: "normal"
- }
- }, "%"))), /*#__PURE__*/React.createElement("button", {
- className: "theme-toggle",
- "aria-label": editStart ? "Guardar ponto de partida" : "Editar ponto de partida",
- onClick: () => {if(editStart)saveStart();else{setStartVal(fmtNum(startingValue));setEditStart(true);}}
- }, /*#__PURE__*/React.createElement(I, {
- name: editStart ? "check" : "edit",
- size: 17
- }))), /*#__PURE__*/React.createElement("div", {
+ }, p.label))), hasStartingPoint && /*#__PURE__*/React.createElement("div", {className:"card",style:{display:"flex",alignItems:"center",justifyContent:"space-between"}},
+  /*#__PURE__*/React.createElement("div",null,
+   /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",fontWeight:650,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".05em",marginBottom:"6px"}},"Primeiro registo · gordura corporal"),
+   /*#__PURE__*/React.createElement("div",{style:{fontSize:"24px",fontWeight:780,color:"var(--text)",letterSpacing:"-.03em"}},startingValue, /*#__PURE__*/React.createElement("i",{style:{fontSize:"13px",fontWeight:600,opacity:.6,fontStyle:"normal"}},"%")),
+   /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"4px"}},"Registado em ",longDate(new Date(bfList[0].date+"T12:00:00")))
+  )
+ ),  /*#__PURE__*/React.createElement("div", {
  className: "card",
  style: {
  display: "flex",
@@ -4691,57 +4617,6 @@ function Coach2027({ state, update, onNavigate }) {
  s.days[todayKey].tasks[id] = {done:n>0,value:n};
  });
  const body = [...(state.body || [])].filter(x=>["weight","bodyFat","bmi","muscle","skeletal","visceral","cintura","perna","rabo"].some(k=>Number(x[k])>0)).sort((a,b)=>a.date.localeCompare(b.date));
- const latest = body.length ? body[body.length-1] : null;
- const firstBody = body.length ? body[0] : null;
-
- // Ponto de partida do Coach:
- // - nasce automaticamente da primeira pesagem;
- // - pode ser corrigido manualmente;
- // - se surgir uma primeira pesagem diferente (por exemplo, dados antigos
- //   foram corrigidos), a referência é atualizada automaticamente.
- const coachBaseline = state.profile?.coachBaseline || null;
- const [baselineEdit, setBaselineEdit] = useState(false);
- const [baselineForm, setBaselineForm] = useState({weight:"",bodyFat:"",cintura:""});
- useEffect(() => {
-   if (!firstBody) return;
-   const current = state.profile?.coachBaseline;
-   if (!current || current.sourceDate !== firstBody.date) {
-     update(s => {
-       s.profile = s.profile || {};
-       s.profile.coachBaseline = {
-         weight: firstBody.weight ?? "",
-         bodyFat: firstBody.bodyFat ?? "",
-         cintura: firstBody.cintura ?? "",
-         sourceDate: firstBody.date,
-         source: "first-weigh-in"
-       };
-     });
-   }
- }, [firstBody?.date, firstBody?.weight, firstBody?.bodyFat, firstBody?.cintura]);
-
- const openBaselineEditor = () => {
-   const b = state.profile?.coachBaseline || firstBody || {};
-   setBaselineForm({
-     weight: b.weight ?? "",
-     bodyFat: b.bodyFat ?? "",
-     cintura: b.cintura ?? ""
-   });
-   setBaselineEdit(true);
- };
- const saveBaseline = () => {
-   update(s => {
-     s.profile = s.profile || {};
-     s.profile.coachBaseline = {
-       weight: String(baselineForm.weight ?? "").replace(",", "."),
-       bodyFat: String(baselineForm.bodyFat ?? "").replace(",", "."),
-       cintura: String(baselineForm.cintura ?? "").replace(",", "."),
-       sourceDate: firstBody?.date || s.profile.coachBaseline?.sourceDate || "",
-       source: "manual"
-     };
-   });
-   setBaselineEdit(false);
- };
-
  const daysToGoal = Math.max(0, Math.ceil((new Date((prof.summerTargetDate || "2027-06-01")+"T12:00:00") - TODAY) / 86400000));
 
  const lastDays = n => {
