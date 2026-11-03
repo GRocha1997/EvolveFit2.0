@@ -651,15 +651,6 @@ const save = (s, uid) => {
  }
 };
 
-function parseActualRepsBySet(value) {
- const tokens=Array.isArray(value)?value:String(value??"").split(/[,\s;/]+/);
- return tokens.map(token=>{
-  if(String(token??"").trim()==="")return null;
-  const reps=Number(token);
-  return Number.isInteger(reps)&&reps>=0?reps:null;
- }).filter(reps=>reps!==null);
-}
-
 /* Garante que um estado guardado (possivelmente antigo/incompleto) tem todos os campos.
  Isto evita crashes e registos "a zero" quando a estrutura mudou entre versões. */
 function normalize(s) {
@@ -681,12 +672,7 @@ function normalize(s) {
  s.sessions = (Array.isArray(s.sessions) ? s.sessions : []).filter(se=>se&&typeof se==="object").map((se,i)=>({
    ...se,
    id:String(se.id||("legacy-"+String(se.date||"unknown")+"-"+String(se.dayIdx??"x")+"-"+i)),
-   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>{
-    const clean={...e};delete clean.repsS;delete clean.repsB;
-    const setReps=parseActualRepsBySet(clean.actualRepsBySet);
-    if(setReps.length)clean.actualRepsBySet=setReps;else delete clean.actualRepsBySet;
-    return clean;
-   }):[],
+   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>{const clean={...e};delete clean.repsS;delete clean.repsB;return clean;}):[],
    cardio:Array.isArray(se.cardio)?se.cardio.filter(c=>c&&typeof c==="object").map(c=>({...c,name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0):[]
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
@@ -3296,7 +3282,7 @@ function Workouts({
    const allPlanEx=s.plano.flatMap(pd=>pd.ex||[]);
    const planMatch=allPlanEx.find(p=>x.exerciseId&&p.exerciseId===x.exerciseId)||(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
    if(planMatch){planMatch.weight=weight;planMatch.notes=notes;if(planMatch.week1Start==null&&weight>0){planMatch.week1Start=weight;planMatch.week1StartLabel=fmtNum(weight)+" kg";}}
-   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),actualRepsBySet:parseActualRepsBySet(entry.repsBySet),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
+   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
   });
   const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
   const cardio=(Array.isArray(cardioEntries)?cardioEntries:[]).map(c=>({name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0);
@@ -3448,6 +3434,31 @@ const RIR_OPTS = [0, 1, 2, 3, 4];
 const RIR_COLORS = ["#C0392B", "#C98A1B", "#1E9E6A", "#0E8F9E", "#5B6BC0"];
 const rirOf = x => x && x.rir != null ? x.rir : DEFAULT_RIR;
 const rirLabel = v => v >= 4 ? "4+" : String(v);
+function rirAdvice(rir, target) {
+ if (rir == null) return null;
+ const d = rir - target;
+ const head = "RIR " + rirLabel(rir) + " vs alvo " + rirLabel(target) + " — ";
+ if (d >= 2) return {
+ k: "up",
+ t: head + "muita reserva, sobe a carga na próxima."
+ };
+ if (d === 1) return {
+ k: "up",
+ t: head + "ainda há espaço, sobe ligeiramente a carga."
+ };
+ if (d === 0) return {
+ k: "ok",
+ t: head + "no alvo, mantém a carga."
+ };
+ if (d === -1) return {
+ k: "warn",
+ t: head + "mais duro do que o previsto, mantém a carga e consolida."
+ };
+ return {
+ k: "down",
+ t: head + "demasiado perto da falha, baixa um pouco a carga."
+ };
+}
 function RirChips({
  value,
  target,
@@ -3518,13 +3529,13 @@ function arrayMove(arr, from, to) {
 function TrainingCycleGuide(){
  const h=React.createElement;
  const phases=[
-  {title:"SUBIR",text:"Só quando todas as séries chegam ao topo do intervalo e a última série fica a RIR ≥ 2 nas âncoras ou RIR ≥ 1 nos restantes exercícios. A RIR 3–4+, duplica o incremento."},
-  {title:"MANTER",text:"Mantém se ainda não atingiste o topo em todas as séries ou se a última série ficou a RIR 0."},
-  {title:"DESCER 5–10%",text:"Reduz se alguma série ficar abaixo da base do intervalo ou se houver duas sessões seguidas sem progresso."},
-  {title:"Incrementos",text:"Tronco: +2,5 kg · Pernas: +5 kg · Máquinas: +1 placa. A app pede as reps de cada série e o RIR da última para recomendar a ação."}
+  {title:"Semana 1 · calibrar",text:"Nas âncoras, encontra uma carga que permita trabalhar a RIR 3. Se 8 reps forem fáceis, acrescenta 2,5 kg no tronco ou 5 kg nas pernas na série seguinte."},
+  {title:"Semanas 2–4 · construir",text:"Âncoras: +2,5 kg/semana no supino, Smith e pulldown; +5 kg/semana no hack e RDL, desde que atinjas pelo menos 5 reps em todas as séries. Restantes exercícios: dupla progressão."},
+  {title:"Semanas 5–7 · consolidar",text:"Ao completar 8 reps em todas as séries a RIR 2, sobe a carga e regressa a 5–6 reps. Nos isolamentos, leva a última série a RIR 0."},
+  {title:"Semana 8 · deload",text:"Faz metade das séries e, no ciclo seguinte, recomeça com as cargas da semana 7."}
  ];
  return h("section",{className:"card training-cycle","aria-labelledby":"training-cycle-title"},
-  h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Regra de progressão"),h("p",null,"Reps por série + RIR da última série")),h("span",{className:"training-cycle-badge"},"AUTO")),
+  h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Ciclo de treino"),h("p",null,"5 dias · 8 semanas · progressão centrada na carga")),h("span",{className:"training-cycle-badge"},"v5")),
   h("div",{className:"training-cycle-phases"},phases.map((phase,i)=>h("article",{className:"training-cycle-phase",key:i},h("strong",null,phase.title),h("p",null,phase.text)))),
   h("div",{className:"training-cycle-routine"},h("p",null,h("strong",null,"Cardio: "),"30 min à segunda e quarta."),h("p",null,h("strong",null,"Sábado e domingo: "),"descanso e 8–10 mil passos.")),
   h("details",{className:"training-cycle-measures"},h("summary",null,"Medições e regra para ajustar calorias"),h("div",{className:"training-cycle-measure-body"},
@@ -3647,7 +3658,7 @@ function TrainingHistory({state,update}) {
  const saveEdit=()=>{
   if(!draft||!draft.date||draft.date>todayKey){setMessage("A data da sessão tem de ser hoje ou uma data passada.");return;}
   if(!String(draft.name||"").trim()){setMessage("Indica um nome para a sessão.");return;}
-  const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,actualRepsBySet:parseActualRepsBySet(e.actualRepsBySet),weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
+  const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
   update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0)s.sessions[i]=clean;});
   setEditingId(null);setDraft(null);setMessage("Sessão atualizada.");
  };
@@ -3660,7 +3671,6 @@ function TrainingHistory({state,update}) {
     field("Exercício","name",e.name,v=>changeExercise(i,"name",v)),
     field("Séries planeadas","sets",e.sets,v=>changeExercise(i,"sets",v),"number",{min:"0",inputMode:"numeric"}),
     field("Reps planeadas","reps",e.reps,v=>changeExercise(i,"reps",v),"number",{min:"0",inputMode:"numeric"}),
-    field("Reps reais por série","actualRepsBySet",Array.isArray(e.actualRepsBySet)?e.actualRepsBySet.join(", "):"",v=>changeExercise(i,"actualRepsBySet",v),"text",{placeholder:"ex.: 8, 8, 7"}),
     field("Carga (kg)","weight",e.weight??"",v=>changeExercise(i,"weight",v),"number",{min:"0",step:"0.1",inputMode:"decimal"}),
     field("RIR","rir",e.rir??"",v=>changeExercise(i,"rir",v),"number",{min:"0",max:"4",inputMode:"numeric",placeholder:"não registado"})
    ),
@@ -3675,7 +3685,7 @@ function TrainingHistory({state,update}) {
    editing,
    shown.map(session=>h("div",{className:"hist-row",key:session.id},
     h("div",{className:"hist-top"},h("span",{className:"hist-date"},fmt(session.date)),h("span",{className:"hist-name"},session.name),h("button",{className:"hist-edit-btn",onClick:()=>beginEdit(session),"aria-label":"Editar sessão de "+fmt(session.date)},"Editar"),h("button",{className:"hist-del",onClick:()=>del(session.id),"aria-label":"Apagar treino"},h(I,{name:"trash",size:13}))),
-    h("div",{className:"hist-ex"},(session.ex||[]).filter(e=>e.name).map(e=>e.name+(e.actualSets?" · "+e.actualSets+" séries feitas":(e.sets?" · "+e.sets+" séries planeadas":""))+(Array.isArray(e.actualRepsBySet)&&e.actualRepsBySet.length?" · reps/série "+e.actualRepsBySet.join("/"):e.actualReps?" · "+e.actualReps+" reps reais/série":(e.reps?" · meta "+repsLbl(e)+" reps":""))+(e.weight?" · "+fmtNum(e.weight)+"kg":"")+(e.rir!=null?" · RIR "+rirLabel(e.rir):"")).join(" · ")),
+    h("div",{className:"hist-ex"},(session.ex||[]).filter(e=>e.name).map(e=>e.name+(e.actualSets?" · "+e.actualSets+" séries feitas":(e.sets?" · "+e.sets+" séries planeadas":""))+(e.actualReps?" · "+e.actualReps+" reps reais/série":(e.reps?" · meta "+repsLbl(e)+" reps":""))+(e.weight?" · "+fmtNum(e.weight)+"kg":"")+(e.rir!=null?" · RIR "+rirLabel(e.rir):"")).join(" · ")),
     (session.cardio||[]).filter(c=>Number(c.minutes)>0).length>0&&h("div",{className:"hist-cardio"},h("strong",null,"Cardio: "),(session.cardio||[]).filter(c=>Number(c.minutes)>0).map(c=>(c.name||"Cardio")+" · "+c.minutes+" min").join(" · ")),
    (session.ex||[]).filter(e=>e.name&&e.notes).map((e,ni)=>h("div",{className:"hist-note",key:"note-"+ni},h("strong",null,e.name+": "),e.notes))
    )),
@@ -3702,9 +3712,6 @@ function WorkoutLogger({
  weight: fmtNum(t ? t.weight : x.weight),
  notes: t && t.notes != null ? t.notes : (x.notes || ""),
  rir: t && t.rir != null ? t.rir : null,
- actualSets: t && t.actualSets != null ? String(t.actualSets) : undefined,
- actualReps: t && t.actualReps != null ? String(t.actualReps) : undefined,
- repsBySet: t && Array.isArray(t.actualRepsBySet) ? t.actualRepsBySet.join(", ") : "",
  };
  };
  const firstIncomplete = rows => {
@@ -3804,9 +3811,6 @@ function WorkoutLogger({
  return prev ? {
  weight: fmtNum(prev.weight),
  notes: row(x, i).notes,
- actualSets: row(x, i).actualSets,
- actualReps: row(x, i).actualReps,
- repsBySet: row(x, i).repsBySet || "",
  rir: prev.rir != null ? prev.rir : rirOf(x),
  } : row(x, i);
  });
@@ -3831,9 +3835,17 @@ function WorkoutLogger({
  }, doneCount, "/", exercises.length, " concluídos")), exercises.map((x, i) => {
  const r = row(x, i);
  const tgt = rirOf(x);
+ const prev = last && last.ex.find(e => e.name === x.name);
+ const adv = rirAdvice(r.rir, tgt);
+ const parts = [];
+ if (prev && prev.weight) parts.push(fmtNum(prev.weight) + " kg");
+ if (prev && prev.rir != null) parts.push("RIR " + rirLabel(prev.rir));
+ const hint = adv || {
+ k: "",
+ t: "Alvo RIR " + rirLabel(tgt) + (parts.length ? " · última vez " + parts.join(" · ") : "")
+ };
  const done = r.rir != null;
- const sug = progressionTip(history.filter(se => se.date !== sessionDate), x, r, sessionDate);
- const hint = {k:sug.k,t:sug.text};
+ const sug = progressionTip(history.filter(se => se.date !== sessionDate), x.name, parseNum(r.weight), tgt, x.exerciseId);
  const isOpen = openIdx === i;
  return /*#__PURE__*/React.createElement("div", {
  className: "log-entry" + (isOpen ? " open" : ""),
@@ -3898,21 +3910,18 @@ function WorkoutLogger({
  }, /*#__PURE__*/React.createElement(I, {
  name: "note",
  size: 15
- }))), /*#__PURE__*/React.createElement("label", {
- className: "lbl",
- style: {display:"block",margin:"10px 0"}
- }, "Reps por série · ", x.sets, " valores", /*#__PURE__*/React.createElement("input", {
- className: "in",
- type: "text",
-inputMode: "text",
- placeholder: "ex.: 8, 8, 7",
- value: r.repsBySet || "",
- onChange: e => setField(i, "repsBySet", e.target.value)
- })),  /*#__PURE__*/React.createElement("div", {
+ }))), !!sug && /*#__PURE__*/React.createElement("button", {
+ type: "button",
+ className: "log-quickfill",
+ style: {
+ margin: "0 0 8px"
+ },
+ onClick: () => setField(i, "weight", fmtNum(sug.nw))
+ }, "Sobe para " + fmtNum(sug.nw) + " kg (RIR no alvo em 2 treinos)"), /*#__PURE__*/React.createElement("div", {
  className: "rir-row"
  }, /*#__PURE__*/React.createElement("span", {
  className: "rir-lbl"
- }, "RIR final"), /*#__PURE__*/React.createElement(RirChips, {
+ }, "RIR"), /*#__PURE__*/React.createElement(RirChips, {
  value: r.rir,
  target: tgt,
  clearable: true,
@@ -4037,48 +4046,14 @@ function RestTimer() {
  onClick: () => start(sec)
  }, l))));
 }
-function progressionLoadStep(exercise) {
- const name=String(exercise?.name||"");
- if(/\b(machine|cable|rope|pulldown|leg press|hack squat|pec deck|smith|leg curl|leg extension|calf raise|pushdown|chest supported row)\b/i.test(name))return {kind:"plate",amount:1};
- if(/\b(leg|squat|deadlift|rdl|hip thrust|bulgarian|calf)\b/i.test(name))return {kind:"kg",amount:5};
- return {kind:"kg",amount:2.5};
-}
-const progressionTip = (history, exercise, current, sessionDate) => {
- const plannedSets=parseInt(exercise?.sets,10)||0;
- const minReps=parseInt(exercise?.reps,10)||0;
- const maxReps=parseInt(exercise?.repsMax,10)||minReps;
- const currentReps=parseActualRepsBySet(current?.repsBySet);
- const weight=parseNum(current?.weight);
- const rir=current?.rir==null||current.rir===""?null:parseInt(current.rir,10);
- if(!Number.isFinite(weight)||weight<=0)return {action:"need",k:"",text:"Regista a carga usada para receber a recomendação."};
- if(!plannedSets||!minReps||!maxReps)return {action:"need",k:"",text:"Define o intervalo de reps e o número de séries no plano."};
- const reduceLoad=reason=>{const nw5=+(weight*0.95).toFixed(2),nw10=+(weight*0.90).toFixed(2);return {action:"down",k:"down",text:"DESCER 5–10%: "+reason+" Cargas sugeridas: −5% "+fmtNum(nw5)+" kg · −10% "+fmtNum(nw10)+" kg.",nw5,nw10};};
- if(currentReps.length!==plannedSets)return {action:"need",k:"",text:"Regista as reps de cada série ("+plannedSets+" valores, por exemplo 8, 8, 7)."};
- if(currentReps.some(reps=>reps<minReps))return reduceLoad("alguma série ficou abaixo da base de "+minReps+" reps.");
- if(rir==null||!Number.isFinite(rir))return {action:"need",k:"",text:"Regista o RIR da última série para aplicar a regra."};
- const allAtTop=currentReps.every(reps=>reps>=maxReps);
- const requiredRir=exercise.anchor?2:1;
- if(allAtTop&&rir>=requiredRir){
-  const step=progressionLoadStep(exercise),multiplier=rir>=3?2:1;
-  if(step.kind==="plate")return {action:"up",k:"up",text:"SUBIR: todas as séries chegaram ao topo e a última ficou em RIR "+rirLabel(rir)+". Aumenta "+(step.amount*multiplier)+" placa"+(step.amount*multiplier===1?"":"s")+" na próxima sessão; regista a carga total em kg."};
-  const increase=step.amount*multiplier,nextWeight=+(weight+increase).toFixed(2);
-  return {action:"up",k:"up",text:"SUBIR: todas as séries chegaram ao topo e a última ficou em RIR "+rirLabel(rir)+". Próxima carga: "+fmtNum(nextWeight)+" kg ("+(rir>=3?"incremento duplicado":"+"+fmtNum(increase)+" kg")+").",nextWeight,increase};
- }
- if(rir===0)return {action:"keep",k:"warn",text:"MANTER: a última série ficou em RIR 0. Não subas a carga."};
- const findPerformance=session=>{
-  const entry=(session.ex||[]).find(item=>exercise.exerciseId&&item.exerciseId?item.exerciseId===exercise.exerciseId:item.name===exercise.name);
-  if(!entry)return null;
-  const reps=parseActualRepsBySet(entry.actualRepsBySet),pastWeight=parseNum(entry.weight);
-  if(reps.length!==plannedSets||!Number.isFinite(pastWeight)||pastWeight<=0)return null;
-  return {weight:pastWeight,reps,total:reps.reduce((sum,value)=>sum+value,0)};
+const progressionTip = (history, name, curW, tgt, exerciseId) => {
+ const rec = [...history].sort((a, b) => a.date.localeCompare(b.date)).map(se => (se.ex || []).find(e => exerciseId&&e.exerciseId ? e.exerciseId===exerciseId : e.name === name)).filter(e => e && e.weight > 0 && e.rir != null).slice(-2);
+ if (rec.length < 2 || rec[0].weight !== rec[1].weight || rec[1].weight !== curW) return null;
+ if (!rec.every(e => e.rir >= (e.rirAlvo != null ? e.rirAlvo : tgt))) return null;
+ const inc = curW < 20 ? 1 : curW < 60 ? 2.5 : 5;
+ return {
+ nw: curW + inc
  };
- const past=(history||[]).filter(session=>String(session.date||"")<String(sessionDate||"")).sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))).map(findPerformance).filter(Boolean);
- const currentPerformance={weight,reps:currentReps,total:currentReps.reduce((sum,value)=>sum+value,0)};
- const recent=[...past.slice(-2),currentPerformance];
- const progressed=(a,b)=>b.weight>a.weight+0.001||(Math.abs(b.weight-a.weight)<=0.001&&b.total>a.total);
- if(recent.length===3&&!progressed(recent[0],recent[1])&&!progressed(recent[1],recent[2]))return reduceLoad("são duas sessões seguidas sem progresso.");
- if(!allAtTop)return {action:"keep",k:"",text:"MANTER: ainda não chegaste ao topo do intervalo em todas as séries."};
- return {action:"keep",k:"warn",text:"MANTER: topo atingido, mas a última série precisa de RIR ≥ "+requiredRir+(exercise.anchor?" (âncora)":"")+" para subir."};
 };
 /* ============================ PROGRESSO CORPO =========================== */
 const BODY_METRICS = [{
