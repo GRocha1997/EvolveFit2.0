@@ -651,6 +651,15 @@ const save = (s, uid) => {
  }
 };
 
+function parseActualRepsBySet(value) {
+ const tokens=Array.isArray(value)?value:String(value??"").split(/[,\s;/]+/);
+ return tokens.map(token=>{
+  if(String(token??"").trim()==="")return null;
+  const reps=Number(token);
+  return Number.isInteger(reps)&&reps>=0?reps:null;
+ }).filter(reps=>reps!==null);
+}
+
 /* Garante que um estado guardado (possivelmente antigo/incompleto) tem todos os campos.
  Isto evita crashes e registos "a zero" quando a estrutura mudou entre versões. */
 function normalize(s) {
@@ -672,7 +681,12 @@ function normalize(s) {
  s.sessions = (Array.isArray(s.sessions) ? s.sessions : []).filter(se=>se&&typeof se==="object").map((se,i)=>({
    ...se,
    id:String(se.id||("legacy-"+String(se.date||"unknown")+"-"+String(se.dayIdx??"x")+"-"+i)),
-   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>{const clean={...e};delete clean.repsS;delete clean.repsB;return clean;}):[],
+   ex:Array.isArray(se.ex)?se.ex.filter(e=>e&&typeof e==="object").map(e=>{
+    const clean={...e};delete clean.repsS;delete clean.repsB;
+    const setReps=parseActualRepsBySet(clean.actualRepsBySet);
+    if(setReps.length)clean.actualRepsBySet=setReps;else delete clean.actualRepsBySet;
+    return clean;
+   }):[],
    cardio:Array.isArray(se.cardio)?se.cardio.filter(c=>c&&typeof c==="object").map(c=>({...c,name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0):[]
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
@@ -1574,7 +1588,7 @@ const PLAN = [{
   {exerciseId:"v5-tue-hack-squat",name:"Hack Squat",sets:3,reps:5,repsMax:8,weight:0,week1Start:null,week8Target:"+20 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:5},
   {exerciseId:"v5-tue-leg-press",name:"Leg Press",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+20–30 kg",rir:2,rirDisplay:"2",rest:"2 min"},
   {exerciseId:"v5-tue-seated-curl",name:"Seated Leg Curl",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+2 placas",rir:1,rirDisplay:"1",rest:"90 s"},
-  {exerciseId:"v5-tue-leg-extension",name:"Leg Extension",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1–2 placas",rir:1,rirDisplay:"0–1",rest:"75 s",notes:"Pausa no topo."},
+  {exerciseId:"v5-tue-leg-extension",name:"Leg Extension",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1–2 placas",plateStepKg:10,rir:1,rirDisplay:"0–1",rest:"75 s",notes:"Pausa no topo."},
   {exerciseId:"v5-tue-standing-calf",name:"Standing Calf Raise",sets:3,reps:8,repsMax:12,weight:0,week1Start:null,week8Target:"+10–15 kg",rir:1,rirDisplay:"1",rest:"75 s",notes:"Pausa em baixo."},
   {exerciseId:"v5-tue-cable-crunch",name:"Cable Crunch",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1 placa",rir:1,rirDisplay:"1",rest:"60 s"}
  ]
@@ -1797,6 +1811,29 @@ function weekFromMonday(days) {
    out.push({ key, day: days[key] });
  }
  return out;
+}
+function progressionWeekNumber(startKey,dateKey) {
+ if(!startKey||!dateKey)return null;
+ const monday=key=>{
+  const d=new Date(String(key)+"T12:00:00"),day=d.getDay();
+  return iso(addDays(d,day===0?-6:1-day));
+ };
+ const start=monday(startKey),target=monday(dateKey);
+ const toUtc=key=>{const [y,m,d]=key.split("-").map(Number);return Date.UTC(y,m-1,d);};
+ const weeks=Math.floor((toUtc(target)-toUtc(start))/604800000);
+ return weeks<0?null:(weeks%8)+1;
+}
+function progressionCycleStartFor(startKey,dateKey) {
+ if(!startKey||!dateKey)return null;
+ const monday=key=>{
+  const d=new Date(String(key)+"T12:00:00"),day=d.getDay();
+  return iso(addDays(d,day===0?-6:1-day));
+ };
+ const start=monday(startKey),target=monday(dateKey);
+ const toUtc=key=>{const [y,m,d]=key.split("-").map(Number);return Date.UTC(y,m-1,d);};
+ const weeks=Math.floor((toUtc(target)-toUtc(start))/604800000);
+ if(weeks<0)return null;
+ return iso(addDays(new Date(start+"T12:00:00"),Math.floor(weeks/8)*56));
 }
 function trainedOn(state, key) {
  return !!(state.trainingCompleted && state.trainingCompleted[key]);
@@ -3258,6 +3295,8 @@ function Workouts({
  if(treinos>0) workoutStats.push(React.createElement(Stat,{key:"treinos",icon:"dumbbell",tint:"coral",v:treinos,l:"treinos esta semana"}));
  if(kcal>0) workoutStats.push(React.createElement(Stat,{key:"kcal",icon:"flame",tint:"amber",v:kcal,l:"kcal do treino"}));
  const selectedDayKey = weekDays[sel] ? weekDays[sel].key : todayKey;
+ const progressionCycleStart=state.profile?.progressionCycleStart||currentWeekDays[0].key;
+ const cycleWeek=state.profile?.progressionCycleStart?progressionWeekNumber(progressionCycleStart,selectedDayKey):1;
  const selectedSession = state.sessions.find(s => s.date === selectedDayKey && s.dayIdx === sel) || null;
  const loggedSelected = !!selectedSession;
  const trainedSelected = trainedOn(state, selectedDayKey);
@@ -3276,23 +3315,26 @@ function Workouts({
   ...(plano[4]?.ex||[]).filter(x=>/romanian deadlift|hip thrust|leg curl|calf raise/i.test(x.name||""))
  ] : (plano[sel]?.ex||[]);
  const saveSession = (entries,cardioEntries=[]) => update(s => {
+  s.profile=s.profile&&typeof s.profile==="object"?s.profile:{};
+  if(!s.profile.progressionCycleStart)s.profile.progressionCycleStart=currentWeekDays[0].key;
+  const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
   const ex=loggerExercises.map((x,i)=>{
    const entry=entries[i]||{};
    const weight=parseNum(entry.weight), notes=entry.notes||"";
    const allPlanEx=s.plano.flatMap(pd=>pd.ex||[]);
    const planMatch=allPlanEx.find(p=>x.exerciseId&&p.exerciseId===x.exerciseId)||(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
    if(planMatch){planMatch.weight=weight;planMatch.notes=notes;if(planMatch.week1Start==null&&weight>0){planMatch.week1Start=weight;planMatch.week1StartLabel=fmtNum(weight)+" kg";}}
-   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
+   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),actualRepsBySet:parseActualRepsBySet(entry.repsBySet),rirAlvo:x.rirAlvo!=null?x.rirAlvo:rirOf(x)};
   });
-  const i=s.sessions.findIndex(se=>se.date===selectedDayKey&&se.dayIdx===sel),old=i>=0?s.sessions[i]:null;
+  const preserved=(old?.ex||[]).filter(previous=>!ex.some(current=>current.exerciseId&&previous.exerciseId?current.exerciseId===previous.exerciseId:current.name===previous.name));
   const cardio=(Array.isArray(cardioEntries)?cardioEntries:[]).map(c=>({name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0);
-  const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex,cardio};
+  const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,ex:[...ex,...preserved],cardio};
   if(i>=0)s.sessions[i]=rec;else s.sessions.push(rec);
  });
 
  const setPlanEx = (di, xi, f, val) => update(s => {
  const ex=s.plano[di].ex[xi];
- ex[f] = f === "name" || f === "notes" ? val : f === "weight" ? parseNum(val) : parseInt(val, 10) || 0;
+ ex[f] = f === "name" || f === "notes" ? val : f === "weight" || f === "plateStepKg" ? parseNum(val) : parseInt(val, 10) || 0;
  if(f==="weight"&&Number(ex.weight)>0&&ex.week1Start==null){ex.week1Start=Number(ex.weight);ex.week1StartLabel=fmtNum(ex.weight)+" kg";}
  });
  const setPlanName = (di, val) => update(s => {
@@ -3392,7 +3434,9 @@ function Workouts({
  sessionDate: selectedDayKey,
  canSave: canSaveSelected,
  today: todaySession,
- last: lastSession
+ last: lastSession,
+ cycleWeek,
+ cycleStart: progressionCycleStart
  }))), view === "progresso" && React.createElement(React.Fragment,null,
  React.createElement("div",{className:"progress-exercise-filter"},
    React.createElement("div",{className:"progress-exercise-filter-label"},"Escolhe o treino"),
@@ -3420,7 +3464,8 @@ function Workouts({
  onEditField: setPlanEx,
  onAdd: addPlanEx,
  onDelete: delPlanEx,
- onReorder: reorderPlanEx
+ onReorder: reorderPlanEx,
+ cycleWeek
  })), /*#__PURE__*/React.createElement("div", {
  className: "pad"
  }));
@@ -3434,31 +3479,6 @@ const RIR_OPTS = [0, 1, 2, 3, 4];
 const RIR_COLORS = ["#C0392B", "#C98A1B", "#1E9E6A", "#0E8F9E", "#5B6BC0"];
 const rirOf = x => x && x.rir != null ? x.rir : DEFAULT_RIR;
 const rirLabel = v => v >= 4 ? "4+" : String(v);
-function rirAdvice(rir, target) {
- if (rir == null) return null;
- const d = rir - target;
- const head = "RIR " + rirLabel(rir) + " vs alvo " + rirLabel(target) + " — ";
- if (d >= 2) return {
- k: "up",
- t: head + "muita reserva, sobe a carga na próxima."
- };
- if (d === 1) return {
- k: "up",
- t: head + "ainda há espaço, sobe ligeiramente a carga."
- };
- if (d === 0) return {
- k: "ok",
- t: head + "no alvo, mantém a carga."
- };
- if (d === -1) return {
- k: "warn",
- t: head + "mais duro do que o previsto, mantém a carga e consolida."
- };
- return {
- k: "down",
- t: head + "demasiado perto da falha, baixa um pouco a carga."
- };
-}
 function RirChips({
  value,
  target,
@@ -3529,13 +3549,14 @@ function arrayMove(arr, from, to) {
 function TrainingCycleGuide(){
  const h=React.createElement;
  const phases=[
-  {title:"Semana 1 · calibrar",text:"Nas âncoras, encontra uma carga que permita trabalhar a RIR 3. Se 8 reps forem fáceis, acrescenta 2,5 kg no tronco ou 5 kg nas pernas na série seguinte."},
-  {title:"Semanas 2–4 · construir",text:"Âncoras: +2,5 kg/semana no supino, Smith e pulldown; +5 kg/semana no hack e RDL, desde que atinjas pelo menos 5 reps em todas as séries. Restantes exercícios: dupla progressão."},
-  {title:"Semanas 5–7 · consolidar",text:"Ao completar 8 reps em todas as séries a RIR 2, sobe a carga e regressa a 5–6 reps. Nos isolamentos, leva a última série a RIR 0."},
-  {title:"Semana 8 · deload",text:"Faz metade das séries e, no ciclo seguinte, recomeça com as cargas da semana 7."}
+  {title:"SUBIR",text:"Todas as séries no topo + RIR final ≥ 2 nas âncoras ou ≥ 1 nos restantes. Incremento normal: tronco +2,5 kg · pernas +5 kg · máquinas: passo definido no plano (normalmente +1 placa)."},
+  {title:"SUBIR ×2",text:"Alguma série ultrapassou o topo, ou todas no topo com RIR final ≥ 4 nas âncoras / ≥ 3 nos restantes. Duplica o incremento, salvo a regra de placa grande."},
+  {title:"MANTER",text:"Se nenhuma série ultrapassou o topo e o topo não foi atingido em todas; também se o RIR final for 0 nos restantes ou 0–1 nas âncoras."},
+  {title:"DESCER",text:"Alguma série abaixo da base: desce 5–10%. Duas sessões no mesmo peso sem ganhar reps totais, ou duas descidas seguidas: desce 10% e reconstrói."},
+  {title:"Exceções",text:"Semana 1: RIR alvo 3 em tudo, sem recomendações. Semana 8: deload, só registar. Se 1 placa for >10% da carga (ex.: Leg Extension 60→70 kg), mantém a carga e soma 1 rep por série até todas chegarem ao topo +1; depois sobe só 1 placa. O passo da placa é ajustável no Plano (padrão 5 kg; Leg Extension 10 kg). O ciclo começa na semana atual, ao guardar a primeira sessão, e repete-se a cada 8 semanas."}
  ];
  return h("section",{className:"card training-cycle","aria-labelledby":"training-cycle-title"},
-  h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Ciclo de treino"),h("p",null,"5 dias · 8 semanas · progressão centrada na carga")),h("span",{className:"training-cycle-badge"},"v5")),
+  h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Progressão dos treinos"),h("p",null,"Recomendação automática por exercício para a próxima sessão")),h("span",{className:"training-cycle-badge"},"AUTO")),
   h("div",{className:"training-cycle-phases"},phases.map((phase,i)=>h("article",{className:"training-cycle-phase",key:i},h("strong",null,phase.title),h("p",null,phase.text)))),
   h("div",{className:"training-cycle-routine"},h("p",null,h("strong",null,"Cardio: "),"30 min à segunda e quarta."),h("p",null,h("strong",null,"Sábado e domingo: "),"descanso e 8–10 mil passos.")),
   h("details",{className:"training-cycle-measures"},h("summary",null,"Medições e regra para ajustar calorias"),h("div",{className:"training-cycle-measure-body"},
@@ -3547,6 +3568,7 @@ function TrainingCycleGuide(){
 function PlanDayCard({
  d,
  di,
+ cycleWeek=1,
  onEditName,
  onEditField,
  onAdd,
@@ -3619,7 +3641,7 @@ function PlanDayCard({
  placeholder: "",
  value: x.weight,
  onCommit: n => onEditField(di, i, "weight", n)
- }))), h("div", {
+ })),progressionLoadStep(x).kind==="plate"&&h("div",{className:"pl-f"},h("label",null,"Passo placa (kg)"),h(DecInput,{className:"in",value:x.plateStepKg||x.progressionStep||(/\bleg extension\b/i.test(x.name||"")?10:5),onCommit:n=>onEditField(di,i,"plateStepKg",n)}))), h("div", {
  className: "pex-rir",
  style: {
  paddingLeft: 0,
@@ -3629,6 +3651,7 @@ function PlanDayCard({
  className: "rir-lbl"
  }, "RIR alvo"), h(RirChips, {
  value: rirOf(x),
+ target: cycleWeek===1?3:rirOf(x),
  small: true,
  onChange: v => onEditField(di, i, "rir", v)
  })), h("input", {
@@ -3658,7 +3681,7 @@ function TrainingHistory({state,update}) {
  const saveEdit=()=>{
   if(!draft||!draft.date||draft.date>todayKey){setMessage("A data da sessão tem de ser hoje ou uma data passada.");return;}
   if(!String(draft.name||"").trim()){setMessage("Indica um nome para a sessão.");return;}
-  const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
+  const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,actualRepsBySet:parseActualRepsBySet(e.actualRepsBySet),weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
   update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0)s.sessions[i]=clean;});
   setEditingId(null);setDraft(null);setMessage("Sessão atualizada.");
  };
@@ -3671,6 +3694,7 @@ function TrainingHistory({state,update}) {
     field("Exercício","name",e.name,v=>changeExercise(i,"name",v)),
     field("Séries planeadas","sets",e.sets,v=>changeExercise(i,"sets",v),"number",{min:"0",inputMode:"numeric"}),
     field("Reps planeadas","reps",e.reps,v=>changeExercise(i,"reps",v),"number",{min:"0",inputMode:"numeric"}),
+    field("Reps reais por série","actualRepsBySet",Array.isArray(e.actualRepsBySet)?e.actualRepsBySet.join(", "):"",v=>changeExercise(i,"actualRepsBySet",v),"text",{placeholder:"ex.: 8, 8, 7"}),
     field("Carga (kg)","weight",e.weight??"",v=>changeExercise(i,"weight",v),"number",{min:"0",step:"0.1",inputMode:"decimal"}),
     field("RIR","rir",e.rir??"",v=>changeExercise(i,"rir",v),"number",{min:"0",max:"4",inputMode:"numeric",placeholder:"não registado"})
    ),
@@ -3685,7 +3709,7 @@ function TrainingHistory({state,update}) {
    editing,
    shown.map(session=>h("div",{className:"hist-row",key:session.id},
     h("div",{className:"hist-top"},h("span",{className:"hist-date"},fmt(session.date)),h("span",{className:"hist-name"},session.name),h("button",{className:"hist-edit-btn",onClick:()=>beginEdit(session),"aria-label":"Editar sessão de "+fmt(session.date)},"Editar"),h("button",{className:"hist-del",onClick:()=>del(session.id),"aria-label":"Apagar treino"},h(I,{name:"trash",size:13}))),
-    h("div",{className:"hist-ex"},(session.ex||[]).filter(e=>e.name).map(e=>e.name+(e.actualSets?" · "+e.actualSets+" séries feitas":(e.sets?" · "+e.sets+" séries planeadas":""))+(e.actualReps?" · "+e.actualReps+" reps reais/série":(e.reps?" · meta "+repsLbl(e)+" reps":""))+(e.weight?" · "+fmtNum(e.weight)+"kg":"")+(e.rir!=null?" · RIR "+rirLabel(e.rir):"")).join(" · ")),
+    h("div",{className:"hist-ex"},(session.ex||[]).filter(e=>e.name).map(e=>e.name+(e.actualSets?" · "+e.actualSets+" séries feitas":(e.sets?" · "+e.sets+" séries planeadas":""))+(Array.isArray(e.actualRepsBySet)&&e.actualRepsBySet.length?" · reps/série "+e.actualRepsBySet.join("/"):e.actualReps?" · "+e.actualReps+" reps reais/série":(e.reps?" · meta "+repsLbl(e)+" reps":""))+(e.weight?" · "+fmtNum(e.weight)+"kg":"")+(e.rir!=null?" · RIR "+rirLabel(e.rir):"")).join(" · ")),
     (session.cardio||[]).filter(c=>Number(c.minutes)>0).length>0&&h("div",{className:"hist-cardio"},h("strong",null,"Cardio: "),(session.cardio||[]).filter(c=>Number(c.minutes)>0).map(c=>(c.name||"Cardio")+" · "+c.minutes+" min").join(" · ")),
    (session.ex||[]).filter(e=>e.name&&e.notes).map((e,ni)=>h("div",{className:"hist-note",key:"note-"+ni},h("strong",null,e.name+": "),e.notes))
    )),
@@ -3704,14 +3728,19 @@ function WorkoutLogger({
  today,
  last,
  cardioTarget=0,
- sessionNote=""
+ sessionNote="",
+ cycleWeek=1,
+ cycleStart=null
 }) {
  const initRow = x => {
- const t = today && today.ex.find(e => e.name === x.name);
+ const t = today && (today.ex||[]).find(e=>x.exerciseId&&e.exerciseId?e.exerciseId===x.exerciseId:e.name===x.name);
  return {
  weight: fmtNum(t ? t.weight : x.weight),
  notes: t && t.notes != null ? t.notes : (x.notes || ""),
  rir: t && t.rir != null ? t.rir : null,
+ actualSets: t && t.actualSets != null ? String(t.actualSets) : undefined,
+ actualReps: t && t.actualReps != null ? String(t.actualReps) : undefined,
+ repsBySet: t && Array.isArray(t.actualRepsBySet) ? t.actualRepsBySet.join(", ") : "",
  };
  };
  const firstIncomplete = rows => {
@@ -3811,6 +3840,9 @@ function WorkoutLogger({
  return prev ? {
  weight: fmtNum(prev.weight),
  notes: row(x, i).notes,
+ actualSets: row(x, i).actualSets,
+ actualReps: row(x, i).actualReps,
+ repsBySet: row(x, i).repsBySet || "",
  rir: prev.rir != null ? prev.rir : rirOf(x),
  } : row(x, i);
  });
@@ -3834,18 +3866,16 @@ function WorkoutLogger({
  className: "log-progress-l"
  }, doneCount, "/", exercises.length, " concluídos")), exercises.map((x, i) => {
  const r = row(x, i);
- const tgt = rirOf(x);
- const prev = last && last.ex.find(e => e.name === x.name);
- const adv = rirAdvice(r.rir, tgt);
- const parts = [];
- if (prev && prev.weight) parts.push(fmtNum(prev.weight) + " kg");
- if (prev && prev.rir != null) parts.push("RIR " + rirLabel(prev.rir));
- const hint = adv || {
- k: "",
- t: "Alvo RIR " + rirLabel(tgt) + (parts.length ? " · última vez " + parts.join(" · ") : "")
- };
+ const tgt = cycleWeek===1?3:rirOf(x);
+ const matchExercise=se=>(se?.ex||[]).find(e=>x.exerciseId&&e.exerciseId?e.exerciseId===x.exerciseId:e.name===x.name);
+ const prev = last && matchExercise(last);
+ const hasCurrentReps=parseActualRepsBySet(r.repsBySet).length>0;
+ const usingPreviousPerformance=!hasCurrentReps&&!!prev;
+ const currentPerf=hasCurrentReps?{...r,date:sessionDate}:prev?{...prev,repsBySet:Array.isArray(prev.actualRepsBySet)?prev.actualRepsBySet.join(", "):"",date:last.date}:{...r,date:sessionDate};
+ const recommendationWeek=cycleWeek===1||cycleWeek===8?cycleWeek:usingPreviousPerformance?progressionWeekNumber(cycleStart,last.date):cycleWeek;
+ const recommendationLabel=usingPreviousPerformance?"Carga desta sessão · ":"Próximo treino · ";
  const done = r.rir != null;
- const sug = progressionTip(history.filter(se => se.date !== sessionDate), x.name, parseNum(r.weight), tgt, x.exerciseId);
+ const sug = progressionTip(history, x, currentPerf, sessionDate, recommendationWeek, cycleStart);
  const isOpen = openIdx === i;
  return /*#__PURE__*/React.createElement("div", {
  className: "log-entry" + (isOpen ? " open" : ""),
@@ -3883,7 +3913,10 @@ function WorkoutLogger({
  name: "chevron",
  size: 14,
  className: "log-chev" + (isOpen ? " open" : "")
- })), isOpen && /*#__PURE__*/React.createElement("div", {
+ })), /*#__PURE__*/React.createElement("div",{
+ className:"rir-hint "+sug.k,
+ style:{margin:"0 12px 8px",padding:"8px 10px",borderRadius:"10px",background:"var(--surface2)"}
+ },React.createElement("strong",null,recommendationLabel),sug.text), isOpen && /*#__PURE__*/React.createElement("div", {
  className: "log-panel"
  }, (x.anchor||x.superset||x.rest||x.week8Target) && React.createElement("div",{className:"log-plan-meta"},
   x.anchor&&React.createElement("span",{className:"plan-meta-anchor"},"Âncora pesada"),
@@ -3910,25 +3943,26 @@ function WorkoutLogger({
  }, /*#__PURE__*/React.createElement(I, {
  name: "note",
  size: 15
- }))), !!sug && /*#__PURE__*/React.createElement("button", {
- type: "button",
- className: "log-quickfill",
- style: {
- margin: "0 0 8px"
- },
- onClick: () => setField(i, "weight", fmtNum(sug.nw))
- }, "Sobe para " + fmtNum(sug.nw) + " kg (RIR no alvo em 2 treinos)"), /*#__PURE__*/React.createElement("div", {
+ }))), /*#__PURE__*/React.createElement("label", {
+ className:"lbl",
+ style:{display:"block",margin:"10px 0"}
+ },"Reps por série · ",x.sets," valores", /*#__PURE__*/React.createElement("input",{
+ className:"in",
+ type:"text",
+ inputMode:"text",
+ placeholder:"ex.: 8, 8, 7",
+ value:r.repsBySet||"",
+ onChange:e=>setField(i,"repsBySet",e.target.value)
+ })), /*#__PURE__*/React.createElement("div", {
  className: "rir-row"
  }, /*#__PURE__*/React.createElement("span", {
  className: "rir-lbl"
- }, "RIR"), /*#__PURE__*/React.createElement(RirChips, {
+ }, "RIR final"), /*#__PURE__*/React.createElement(RirChips, {
  value: r.rir,
  target: tgt,
  clearable: true,
  onChange: v => setField(i, "rir", v)
- })), /*#__PURE__*/React.createElement("div", {
- className: "rir-hint " + hint.k
- }, hint.t), openNotes[i] && /*#__PURE__*/React.createElement("input", {
+ })), openNotes[i] && /*#__PURE__*/React.createElement("input", {
  className: "log-note",
  placeholder: "Nota (ex: técnica, sensação, próxima carga...)",
  value: r.notes,
@@ -4046,14 +4080,102 @@ function RestTimer() {
  onClick: () => start(sec)
  }, l))));
 }
-const progressionTip = (history, name, curW, tgt, exerciseId) => {
- const rec = [...history].sort((a, b) => a.date.localeCompare(b.date)).map(se => (se.ex || []).find(e => exerciseId&&e.exerciseId ? e.exerciseId===exerciseId : e.name === name)).filter(e => e && e.weight > 0 && e.rir != null).slice(-2);
- if (rec.length < 2 || rec[0].weight !== rec[1].weight || rec[1].weight !== curW) return null;
- if (!rec.every(e => e.rir >= (e.rirAlvo != null ? e.rirAlvo : tgt))) return null;
- const inc = curW < 20 ? 1 : curW < 60 ? 2.5 : 5;
- return {
- nw: curW + inc
+function progressionLoadStep(exercise) {
+ const name=String(exercise?.name||"");
+ const configured=parseNum(exercise?.plateStepKg);
+ if(configured>0)return {kind:"plate",amount:configured};
+ const explicit=parseNum(exercise?.progressionStep);
+ const machine=/\b(machine|cable|rope|pulldown|leg press|hack squat|pec deck|leg curl|leg extension|calf raise|pushdown|chest supported row)\b/i.test(name);
+ if(machine)return {kind:"plate",amount:explicit>0?explicit:/\bleg extension\b/i.test(name)?10:5};
+ if(explicit>0)return {kind:"kg",amount:explicit};
+ if(/\b(leg|squat|deadlift|rdl|hip thrust|bulgarian|calf)\b/i.test(name))return {kind:"kg",amount:5};
+ return {kind:"kg",amount:2.5};
+}
+const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycleStart) => {
+ if(cycleWeek===1)return {action:"skip",k:"",text:"Semana 1 · RIR alvo 3 em tudo; só registar, sem recomendações."};
+ if(cycleWeek===8)return {action:"skip",k:"",text:"Semana 8 · deload; só registar, sem recomendações."};
+ if(!cycleWeek)return {action:"skip",k:"",text:"Ainda não há semana de ciclo definida; regista uma sessão para iniciar o ciclo."};
+ const plannedSets=parseInt(exercise?.sets,10)||0;
+ const minReps=parseInt(exercise?.reps,10)||0;
+ const maxReps=parseInt(exercise?.repsMax,10)||minReps;
+ const reps=parseActualRepsBySet(current?.repsBySet??current?.actualRepsBySet);
+ const weight=parseNum(current?.weight);
+ const hasWeight=current?.weight!=null&&String(current.weight).trim()!==""&&Number.isFinite(weight);
+ const rir=current?.rir==null||current.rir===""?null:parseInt(current.rir,10);
+ const step=progressionLoadStep(exercise);
+ const requiredRir=exercise.anchor?2:1;
+ const doubleRir=exercise.anchor?4:3;
+ const formatDown=(reason,ten=false)=>{
+  const next5=weight>0?fmtNum(+(weight*.95).toFixed(2)):null;
+  const next10=weight>0?fmtNum(+(weight*.9).toFixed(2)):null;
+  if(ten)return {action:"down10",k:"down",text:"DESCER 10% e reconstruir: "+reason+(next10?" Nova carga: "+next10+" kg.":" Reduz 10% da carga usada.")};
+  return {action:"down5",k:"down",text:"DESCER 5–10%: "+reason+(next5?" Cargas possíveis: −5% "+next5+" kg · −10% "+next10+" kg.":" Escolhe uma redução entre 5% e 10% da carga usada.")};
  };
+ if(!plannedSets||!minReps||!maxReps)return {action:"need",k:"",text:"Define o intervalo de reps e o número de séries no plano."};
+ if(!reps.length)return {action:"need",k:"",text:"Regista as reps de cada série e o RIR final para calcular a próxima sessão."};
+ const belowBase=reps.some(n=>n<minReps);
+ if(!belowBase&&reps.length!==plannedSets)return {action:"need",k:"",text:"Regista as reps de todas as "+plannedSets+" séries (por exemplo 8, 8, 7)."};
+ if(!belowBase&&step.kind==="plate"&&(!hasWeight||weight<=0))return {action:"need",k:"",text:"Regista a carga atual da máquina para avaliar o tamanho da placa."};
+ const currentDate=String(current?.date||sessionDate||"");
+ const activeCycleStart=progressionCycleStartFor(cycleStart,currentDate)||cycleStart;
+ const matchEntry=session=>(session.ex||[]).find(item=>exercise.exerciseId&&item.exerciseId?item.exerciseId===exercise.exerciseId:item.name===exercise.name);
+ const historyRecords=(history||[]).filter(session=>String(session.date||"")>=String(activeCycleStart||"")&&String(session.date||"")<currentDate).slice().sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))).map(session=>{
+  const entry=matchEntry(session);
+  if(!entry)return null;
+  const pastReps=parseActualRepsBySet(entry.actualRepsBySet);
+  const pastWeight=parseNum(entry.weight);
+  const valid=pastReps.length===plannedSets&&Number.isFinite(pastWeight)&&pastWeight>=0&&(step.kind!=="plate"||pastWeight>0);
+  const pastRir=entry.rir==null||entry.rir===""?null:parseInt(entry.rir,10);
+  return {date:String(session.date||""),weight:pastWeight,reps:pastReps,total:pastReps.reduce((sum,n)=>sum+n,0),rir:Number.isFinite(pastRir)?pastRir:null,valid};
+ }).filter(Boolean);
+ const record={date:currentDate,weight,reps,total:reps.reduce((sum,n)=>sum+n,0),rir:Number.isFinite(rir)?rir:null,valid:reps.length===plannedSets&&Number.isFinite(weight)&&weight>=0&&(step.kind!=="plate"||weight>0)};
+ const noProgress=(earlier,now)=>earlier.valid&&now.valid&&Math.abs(earlier.weight-now.weight)<=.001&&now.total<=earlier.total;
+ const classify=(entry,earlier,previousAction,targetWeek)=>{
+  if(!targetWeek||targetWeek===1||targetWeek===8)return "skip";
+  if(entry.reps.some(n=>n<minReps))return previousAction==="down5"?"down10":"down5";
+  if(entry.reps.length!==plannedSets||entry.valid===false)return "skip";
+  const passedTop=entry.reps.some(n=>n>maxReps);
+  const allAtTop=entry.reps.every(n=>n>=maxReps);
+  if(passedTop)return "up2";
+  if(allAtTop&&entry.rir!=null&&entry.rir>=doubleRir)return "up2";
+  if(allAtTop&&entry.rir!=null&&entry.rir>=requiredRir)return "up";
+  const recent=[...earlier.slice(-1),entry];
+  if(recent.length===2&&noProgress(recent[0],recent[1]))return "down10";
+  return "keep";
+ };
+ let previousAction=null;
+ historyRecords.forEach((entry,index)=>{
+  const recordWeek=progressionWeekNumber(cycleStart,entry.date);
+  previousAction=classify(entry,historyRecords.slice(0,index),previousAction,recordWeek);
+ });
+ if(belowBase)return formatDown("alguma série ficou abaixo da base de "+minReps+" reps.",previousAction==="down5");
+ if(reps.length!==plannedSets)return {action:"need",k:"",text:"Regista as reps de todas as "+plannedSets+" séries (por exemplo 8, 8, 7)."};
+ if(step.kind==="plate"&&(!hasWeight||weight<=0))return {action:"need",k:"",text:"Regista a carga atual da máquina para avaliar o tamanho da placa."};
+ const action=classify(record,historyRecords,previousAction,cycleWeek);
+ const largePlate=step.kind==="plate"&&weight>0&&step.amount/weight>.10;
+ const allAtTop=reps.every(n=>n>=maxReps);
+ const allTopPlusOne=reps.every(n=>n>=maxReps+1);
+ if(action==="down5")return formatDown("alguma série ficou abaixo da base de "+minReps+" reps.",previousAction==="down5");
+ if(action==="down10")return formatDown("duas sessões seguidas sem ganhar reps totais ao mesmo peso, ou duas descidas seguidas.",true);
+ if(action==="up2"||action==="up"){
+  const doubled=action==="up2";
+  const nextMultiplier=doubled?2:1;
+  if(largePlate){
+   if(allTopPlusOne)return {action:"up",k:"up",text:"SUBIR: todas as séries chegaram ao topo +1. Agora sobe só 1 placa ("+fmtNum(step.amount)+" kg)."};
+   return {action:doubled?"up2":"up",k:"up",text:(doubled?"SUBIR ×2":"SUBIR")+": como 1 placa ("+fmtNum(step.amount)+" kg) excede 10% da carga, mantém "+fmtNum(weight)+" kg e soma +1 rep por série até todas chegarem a "+(maxReps+1)+"; depois sobe só 1 placa."};
+  }
+  if(step.kind==="plate"){
+   const plates=nextMultiplier;
+   return {action,k:"up",text:(doubled?"SUBIR ×2":"SUBIR")+": próxima sessão +"+plates+" placa"+(plates===1?"":"s")+" (incremento de "+fmtNum(step.amount)+" kg/placa)."};
+  }
+  const increase=step.amount*nextMultiplier;
+  const nextWeight=weight>0?+(weight+increase).toFixed(2):null;
+  return {action,k:"up",text:(doubled?"SUBIR ×2":"SUBIR")+": "+(nextWeight?"próxima carga "+fmtNum(nextWeight)+" kg":"acrescenta +"+fmtNum(increase)+" kg")+" (+"+fmtNum(increase)+" kg)."};
+ }
+ if(reps.some(n=>n>maxReps))return {action:"need",k:"",text:"Regista a carga atual para calcular a progressão."};
+ if(!allAtTop)return {action:"keep",k:"",text:"MANTER: o topo ainda não foi atingido em todas as séries."};
+ if(rir==null)return {action:"need",k:"",text:"Regista o RIR final para decidir se deves subir ou manter."};
+ return {action:"keep",k:"warn",text:"MANTER: RIR final "+rirLabel(rir)+" abaixo do limiar de subida (≥ "+requiredRir+(exercise.anchor?" nas âncoras":" nos restantes")+")."};
 };
 /* ============================ PROGRESSO CORPO =========================== */
 const BODY_METRICS = [{
