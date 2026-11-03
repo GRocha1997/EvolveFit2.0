@@ -771,6 +771,11 @@ function normalize(s) {
    return {...e,exerciseId:match?match.exerciseId:"legacy-"+String(se.dayIdx??"x").replace(/[^0-9]/g,"")+"-"+encodeURIComponent(exKey(e.name))};
   });
  });
+ // Migra apenas a apresentação dos antigos incrementos em placas para kg, sem alterar o plano do utilizador.
+ const oldLoadTargets=[["+1–2 placas","+10–20 kg"],["+1 placa/lado","+5 kg/lado"],["+2 placas","+10 kg"],["+1 placa","+5 kg"]];
+ s.plano.forEach(pd=>Array.isArray(pd.ex)&&pd.ex.forEach(x=>{
+  if(typeof x.week8Target==="string")oldLoadTargets.forEach(([oldValue,newValue])=>{x.week8Target=x.week8Target.replace(oldValue,newValue);});
+ }));
  // Garante que os pesos guardados são números (aceita decimais, ex: 15,5).
  s.plano.forEach(pd => Array.isArray(pd.ex) && pd.ex.forEach(x => {
  x.weight = parseNum(x.weight);
@@ -1587,10 +1592,10 @@ const PLAN = [{
  ex: [
   {exerciseId:"v5-tue-hack-squat",name:"Hack Squat",sets:3,reps:5,repsMax:8,weight:0,week1Start:null,week8Target:"+20 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:5},
   {exerciseId:"v5-tue-leg-press",name:"Leg Press",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+20–30 kg",rir:2,rirDisplay:"2",rest:"2 min"},
-  {exerciseId:"v5-tue-seated-curl",name:"Seated Leg Curl",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+2 placas",rir:1,rirDisplay:"1",rest:"90 s"},
-  {exerciseId:"v5-tue-leg-extension",name:"Leg Extension",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1–2 placas",plateStepKg:10,rir:1,rirDisplay:"0–1",rest:"75 s",notes:"Pausa no topo."},
+  {exerciseId:"v5-tue-seated-curl",name:"Seated Leg Curl",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+10 kg",rir:1,rirDisplay:"1",rest:"90 s"},
+  {exerciseId:"v5-tue-leg-extension",name:"Leg Extension",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+10–20 kg",machineStepKg:10,rir:1,rirDisplay:"0–1",rest:"75 s",notes:"Pausa no topo."},
   {exerciseId:"v5-tue-standing-calf",name:"Standing Calf Raise",sets:3,reps:8,repsMax:12,weight:0,week1Start:null,week8Target:"+10–15 kg",rir:1,rirDisplay:"1",rest:"75 s",notes:"Pausa em baixo."},
-  {exerciseId:"v5-tue-cable-crunch",name:"Cable Crunch",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1 placa",rir:1,rirDisplay:"1",rest:"60 s"}
+  {exerciseId:"v5-tue-cable-crunch",name:"Cable Crunch",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+5 kg",rir:1,rirDisplay:"1",rest:"60 s"}
  ]
 }, {
  day: "Quarta",
@@ -1611,9 +1616,9 @@ const PLAN = [{
   {exerciseId:"v5-thu-smith-incline",name:"Incline Smith Press",sets:3,reps:6,repsMax:8,weight:45,week1Start:45,week1StartLabel:"45 kg",week8Target:"60 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:2.5,notes:"Âncora. Semana 1: calibrar a RIR 3; depois, alvo RIR 2."},
   {exerciseId:"v5-thu-flat-machine",name:"Flat Machine Chest Press",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+15 kg",rir:2,rirDisplay:"1–2",rest:"90 s"},
   {exerciseId:"v5-thu-machine-shoulder",name:"Machine Shoulder Press",sets:3,reps:8,repsMax:10,weight:0,week1Start:null,week8Target:"+10 kg",rir:2,rirDisplay:"2",rest:"2 min"},
-  {exerciseId:"v5-thu-cable-fly",name:"Cable Fly",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1 placa/lado",rir:1,rirDisplay:"0–1",rest:"60 s"},
-  {exerciseId:"v5-thu-cable-lateral",name:"Cable Lateral Raise (unilateral)",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+1 placa",rir:1,rirDisplay:"0–1",rest:"60 s"},
-  {exerciseId:"v5-thu-overhead-rope",name:"Overhead Rope Extension",sets:2,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+1 placa",rir:1,rirDisplay:"1",rest:"75 s"},
+  {exerciseId:"v5-thu-cable-fly",name:"Cable Fly",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+5 kg/lado",rir:1,rirDisplay:"0–1",rest:"60 s"},
+  {exerciseId:"v5-thu-cable-lateral",name:"Cable Lateral Raise (unilateral)",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+5 kg",rir:1,rirDisplay:"0–1",rest:"60 s"},
+  {exerciseId:"v5-thu-overhead-rope",name:"Overhead Rope Extension",sets:2,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+5 kg",rir:1,rirDisplay:"1",rest:"75 s"},
   {exerciseId:"v5-thu-rope-pushdown",name:"Rope Pushdown",sets:2,reps:12,repsMax:15,weight:40,week1Start:40,week1StartLabel:"40 kg",week8Target:"50 kg",rir:0,rirDisplay:"0",rest:"60 s"}
  ]
 }, {
@@ -1623,7 +1628,7 @@ const PLAN = [{
   {exerciseId:"v5-fri-rdl",name:"Barbell Romanian Deadlift",sets:3,reps:6,repsMax:8,weight:60,week1Start:60,week1StartLabel:"60 kg",week8Target:"85–90 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:5,notes:"Âncora. Semana 1: calibrar a RIR 3; depois, alvo RIR 2."},
   {exerciseId:"v5-fri-hip-thrust",name:"Hip Thrust",sets:3,reps:8,repsMax:10,weight:0,week1Start:null,week8Target:"+20–30 kg",rir:2,rirDisplay:"2",rest:"2 min"},
   {exerciseId:"v5-fri-bulgarian",name:"Bulgarian Split Squat (DB)",sets:3,reps:8,repsMax:10,weight:12,week1Start:12,week1StartLabel:"12–14 kg/mão",week8Target:"18 kg/mão",rir:2,rirDisplay:"2",rest:"90 s",notes:"Por perna."},
-  {exerciseId:"v5-fri-lying-curl",name:"Lying Leg Curl",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+2 placas",rir:1,rirDisplay:"0–1",rest:"75 s"},
+  {exerciseId:"v5-fri-lying-curl",name:"Lying Leg Curl",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+10 kg",rir:1,rirDisplay:"0–1",rest:"75 s"},
   {exerciseId:"v5-fri-seated-calf",name:"Seated Calf Raise",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+10 kg",rir:1,rirDisplay:"1",rest:"60 s",notes:"Pausa em baixo."},
   {exerciseId:"v5-fri-hanging-raise",name:"Hanging Leg Raise",sets:3,reps:10,repsMax:15,weight:0,week1Start:null,week8Target:"15 × 3 limpas",rir:1,rirDisplay:"1",rest:"60 s"}
  ]
@@ -3334,7 +3339,7 @@ function Workouts({
 
  const setPlanEx = (di, xi, f, val) => update(s => {
  const ex=s.plano[di].ex[xi];
- ex[f] = f === "name" || f === "notes" ? val : f === "weight" || f === "plateStepKg" ? parseNum(val) : parseInt(val, 10) || 0;
+ ex[f] = f === "name" || f === "notes" ? val : f === "weight" || f === "plateStepKg" || f === "machineStepKg" ? parseNum(val) : parseInt(val, 10) || 0;
  if(f==="weight"&&Number(ex.weight)>0&&ex.week1Start==null){ex.week1Start=Number(ex.weight);ex.week1StartLabel=fmtNum(ex.weight)+" kg";}
  });
  const setPlanName = (di, val) => update(s => {
@@ -3549,11 +3554,11 @@ function arrayMove(arr, from, to) {
 function TrainingCycleGuide(){
  const h=React.createElement;
  const phases=[
-  {title:"SUBIR",text:"Todas as séries no topo + RIR final ≥ 2 nas âncoras ou ≥ 1 nos restantes. Incremento normal: tronco +2,5 kg · pernas +5 kg · máquinas: passo definido no plano (normalmente +1 placa)."},
-  {title:"SUBIR ×2",text:"Alguma série ultrapassou o topo, ou todas no topo com RIR final ≥ 4 nas âncoras / ≥ 3 nos restantes. Duplica o incremento, salvo a regra de placa grande."},
+  {title:"SUBIR",text:"Todas as séries no topo + RIR final ≥ 2 nas âncoras ou ≥ 1 nos restantes. Incremento normal: tronco +2,5 kg · pernas +5 kg · máquinas: incremento em kg definido no plano."},
+  {title:"SUBIR ×2",text:"Alguma série ultrapassou o topo, ou todas no topo com RIR final ≥ 4 nas âncoras / ≥ 3 nos restantes. Duplica o incremento de carga."},
   {title:"MANTER",text:"Se nenhuma série ultrapassou o topo e o topo não foi atingido em todas; também se o RIR final for 0 nos restantes ou 0–1 nas âncoras."},
   {title:"DESCER",text:"Alguma série abaixo da base: desce 5–10%. Duas sessões no mesmo peso sem ganhar reps totais, ou duas descidas seguidas: desce 10% e reconstrói."},
-  {title:"Exceções",text:"Semana 1: RIR alvo 3 em tudo, sem recomendações. Semana 8: deload, só registar. Se 1 placa for >10% da carga (ex.: Leg Extension 60→70 kg), mantém a carga e soma 1 rep por série até todas chegarem ao topo +1; depois sobe só 1 placa. O passo da placa é ajustável no Plano (padrão 5 kg; Leg Extension 10 kg). O ciclo começa na semana atual, ao guardar a primeira sessão, e repete-se a cada 8 semanas."}
+  {title:"Semanas específicas",text:"Semana 1: RIR alvo 3 em tudo, sem recomendações. Semana 8: deload, só registar. O incremento de carga das máquinas pode ser ajustado no Plano, em kg. O ciclo começa na semana atual, ao guardar a primeira sessão, e repete-se a cada 8 semanas."}
  ];
  return h("section",{className:"card training-cycle","aria-labelledby":"training-cycle-title"},
   h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Progressão dos treinos"),h("p",null,"Recomendação automática por exercício para a próxima sessão")),h("span",{className:"training-cycle-badge"},"AUTO")),
@@ -3641,7 +3646,7 @@ function PlanDayCard({
  placeholder: "",
  value: x.weight,
  onCommit: n => onEditField(di, i, "weight", n)
- })),progressionLoadStep(x).kind==="plate"&&h("div",{className:"pl-f"},h("label",null,"Passo placa (kg)"),h(DecInput,{className:"in",value:x.plateStepKg||x.progressionStep||(/\bleg extension\b/i.test(x.name||"")?10:5),onCommit:n=>onEditField(di,i,"plateStepKg",n)}))), h("div", {
+ })),isMachineExercise(x)&&h("div",{className:"pl-f"},h("label",null,"Incremento da máquina (kg)"),h(DecInput,{className:"in",value:x.machineStepKg||x.plateStepKg||x.progressionStep||(/\bleg extension\b/i.test(x.name||"")?10:5),onCommit:n=>onEditField(di,i,"machineStepKg",n)}))), h("div", {
  className: "pex-rir",
  style: {
  paddingLeft: 0,
@@ -4080,14 +4085,16 @@ function RestTimer() {
  onClick: () => start(sec)
  }, l))));
 }
+function isMachineExercise(exercise) {
+ return /\b(machine|cable|rope|pulldown|leg press|hack squat|pec deck|smith|leg curl|leg extension|calf raise|pushdown|chest supported row)\b/i.test(String(exercise?.name||""));
+}
 function progressionLoadStep(exercise) {
  const name=String(exercise?.name||"");
- const configured=parseNum(exercise?.plateStepKg);
- if(configured>0)return {kind:"plate",amount:configured};
+ const configured=parseNum(exercise?.machineStepKg||exercise?.plateStepKg);
+ if(configured>0)return {kind:"kg",amount:configured};
  const explicit=parseNum(exercise?.progressionStep);
- const machine=/\b(machine|cable|rope|pulldown|leg press|hack squat|pec deck|leg curl|leg extension|calf raise|pushdown|chest supported row)\b/i.test(name);
- if(machine)return {kind:"plate",amount:explicit>0?explicit:/\bleg extension\b/i.test(name)?10:5};
  if(explicit>0)return {kind:"kg",amount:explicit};
+ if(isMachineExercise(exercise))return {kind:"kg",amount:/\bleg extension\b/i.test(name)?10:5};
  if(/\b(leg|squat|deadlift|rdl|hip thrust|bulgarian|calf)\b/i.test(name))return {kind:"kg",amount:5};
  return {kind:"kg",amount:2.5};
 }
@@ -4115,7 +4122,7 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
  if(!reps.length)return {action:"need",k:"",text:"Regista as reps de cada série e o RIR final para calcular a próxima sessão."};
  const belowBase=reps.some(n=>n<minReps);
  if(!belowBase&&reps.length!==plannedSets)return {action:"need",k:"",text:"Regista as reps de todas as "+plannedSets+" séries (por exemplo 8, 8, 7)."};
- if(!belowBase&&step.kind==="plate"&&(!hasWeight||weight<=0))return {action:"need",k:"",text:"Regista a carga atual da máquina para avaliar o tamanho da placa."};
+ if(!belowBase&&isMachineExercise(exercise)&&(!hasWeight||weight<=0))return {action:"need",k:"",text:"Regista a carga atual da máquina para calcular o próximo peso."};
  const currentDate=String(current?.date||sessionDate||"");
  const activeCycleStart=progressionCycleStartFor(cycleStart,currentDate)||cycleStart;
  const matchEntry=session=>(session.ex||[]).find(item=>exercise.exerciseId&&item.exerciseId?item.exerciseId===exercise.exerciseId:item.name===exercise.name);
@@ -4124,11 +4131,11 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
   if(!entry)return null;
   const pastReps=parseActualRepsBySet(entry.actualRepsBySet);
   const pastWeight=parseNum(entry.weight);
-  const valid=pastReps.length===plannedSets&&Number.isFinite(pastWeight)&&pastWeight>=0&&(step.kind!=="plate"||pastWeight>0);
+  const valid=pastReps.length===plannedSets&&Number.isFinite(pastWeight)&&pastWeight>=0&&(!isMachineExercise(exercise)||pastWeight>0);
   const pastRir=entry.rir==null||entry.rir===""?null:parseInt(entry.rir,10);
   return {date:String(session.date||""),weight:pastWeight,reps:pastReps,total:pastReps.reduce((sum,n)=>sum+n,0),rir:Number.isFinite(pastRir)?pastRir:null,valid};
  }).filter(Boolean);
- const record={date:currentDate,weight,reps,total:reps.reduce((sum,n)=>sum+n,0),rir:Number.isFinite(rir)?rir:null,valid:reps.length===plannedSets&&Number.isFinite(weight)&&weight>=0&&(step.kind!=="plate"||weight>0)};
+ const record={date:currentDate,weight,reps,total:reps.reduce((sum,n)=>sum+n,0),rir:Number.isFinite(rir)?rir:null,valid:reps.length===plannedSets&&Number.isFinite(weight)&&weight>=0&&(!isMachineExercise(exercise)||weight>0)};
  const noProgress=(earlier,now)=>earlier.valid&&now.valid&&Math.abs(earlier.weight-now.weight)<=.001&&now.total<=earlier.total;
  const classify=(entry,earlier,previousAction,targetWeek)=>{
   if(!targetWeek||targetWeek===1||targetWeek===8)return "skip";
@@ -4150,24 +4157,14 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
  });
  if(belowBase)return formatDown("alguma série ficou abaixo da base de "+minReps+" reps.",previousAction==="down5");
  if(reps.length!==plannedSets)return {action:"need",k:"",text:"Regista as reps de todas as "+plannedSets+" séries (por exemplo 8, 8, 7)."};
- if(step.kind==="plate"&&(!hasWeight||weight<=0))return {action:"need",k:"",text:"Regista a carga atual da máquina para avaliar o tamanho da placa."};
+ if(isMachineExercise(exercise)&&(!hasWeight||weight<=0))return {action:"need",k:"",text:"Regista a carga atual da máquina para calcular o próximo peso."};
  const action=classify(record,historyRecords,previousAction,cycleWeek);
- const largePlate=step.kind==="plate"&&weight>0&&step.amount/weight>.10;
  const allAtTop=reps.every(n=>n>=maxReps);
- const allTopPlusOne=reps.every(n=>n>=maxReps+1);
  if(action==="down5")return formatDown("alguma série ficou abaixo da base de "+minReps+" reps.",previousAction==="down5");
  if(action==="down10")return formatDown("duas sessões seguidas sem ganhar reps totais ao mesmo peso, ou duas descidas seguidas.",true);
  if(action==="up2"||action==="up"){
   const doubled=action==="up2";
   const nextMultiplier=doubled?2:1;
-  if(largePlate){
-   if(allTopPlusOne)return {action:"up",k:"up",text:"SUBIR: todas as séries chegaram ao topo +1. Agora sobe só 1 placa ("+fmtNum(step.amount)+" kg)."};
-   return {action:doubled?"up2":"up",k:"up",text:(doubled?"SUBIR ×2":"SUBIR")+": como 1 placa ("+fmtNum(step.amount)+" kg) excede 10% da carga, mantém "+fmtNum(weight)+" kg e soma +1 rep por série até todas chegarem a "+(maxReps+1)+"; depois sobe só 1 placa."};
-  }
-  if(step.kind==="plate"){
-   const plates=nextMultiplier;
-   return {action,k:"up",text:(doubled?"SUBIR ×2":"SUBIR")+": próxima sessão +"+plates+" placa"+(plates===1?"":"s")+" (incremento de "+fmtNum(step.amount)+" kg/placa)."};
-  }
   const increase=step.amount*nextMultiplier;
   const nextWeight=weight>0?+(weight+increase).toFixed(2):null;
   return {action,k:"up",text:(doubled?"SUBIR ×2":"SUBIR")+": "+(nextWeight?"próxima carga "+fmtNum(nextWeight)+" kg":"acrescenta +"+fmtNum(increase)+" kg")+" (+"+fmtNum(increase)+" kg)."};
