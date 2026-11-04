@@ -707,7 +707,11 @@ function normalize(s) {
  if (s.profile.kcalTarget == null) s.profile.kcalTarget = 2350;
  if (s.profile.proteinTarget == null) s.profile.proteinTarget = 170;
  if (s.profile.fatTarget == null) s.profile.fatTarget = 70;
- if (s.profile.stepsTarget == null) s.profile.stepsTarget = 9000;
+ if (s.profile.stepsTarget == null) s.profile.stepsTarget = 10000;
+ if (!s.profile.stepsTarget10kApplied) {
+  if (Number(s.profile.stepsTarget) === 9000) s.profile.stepsTarget = 10000;
+  s.profile.stepsTarget10kApplied = true;
+ }
  if (s.profile.waterTarget == null) s.profile.waterTarget = 3;
  if (s.profile.cardioTarget == null) s.profile.cardioTarget = 90;
  if (s.profile.ritmoAlvoKgSemana == null) s.profile.ritmoAlvoKgSemana = "0,6 a 0,8";
@@ -756,6 +760,12 @@ function normalize(s) {
  });
  s.planoVersion=PLAN_VERSION;
  }
+ // Mantém cardio planeado 3x/semana sem reconstruir nem sobrescrever o plano guardado.
+ const cardioPlanDays=new Set(["Segunda","Quarta","Quinta"]);
+ s.plano.forEach(pd=>{
+  if(cardioPlanDays.has(pd.day)&&!(Number(pd.cardioMinutes)>0))pd.cardioMinutes=30;
+  if(pd.day==="Quinta"&&pd.name==="PUSH")pd.name="PUSH (+ cardio 30 min)";
+ });
  // As migrações antigas do plano foram substituídas pela versão fixa de 5 dias.
  s.migVerao27=true;
  s.migVerao27b=true;
@@ -1430,12 +1440,12 @@ const SECTIONS = [{
  qty: false
  }, {
  id: "cardio",
- label: "Cardio",
+ label: "Cardio (30 min nos dias planeados)",
  qty: true,
  unit: "min"
  }, {
  id: "passos",
- label: "Passos (8–10k)",
+ label: "Passos (10 000/dia)",
  qty: true,
  unit: "",
  goal: "passos"
@@ -1529,7 +1539,7 @@ const GOALS = [{
 }, {
  id: "cardiomin",
  cat: "Corpo",
- label: "Cardio",
+ label: "Cardio · 3 × 30 min",
  target: 90,
  unit: "min",
  type: "minutesweek",
@@ -1611,7 +1621,8 @@ const PLAN = [{
  ]
 }, {
  day: "Quinta",
- name: "PUSH",
+ name: "PUSH (+ cardio 30 min)",
+ cardioMinutes: 30,
  ex: [
   {exerciseId:"v5-thu-smith-incline",name:"Incline Smith Press",sets:3,reps:6,repsMax:8,weight:45,week1Start:45,week1StartLabel:"45 kg",week8Target:"60 kg",rir:2,rirDisplay:"2",rest:"3 min",anchor:true,progressionStep:2.5,notes:"Âncora. Semana 1: calibrar a RIR 3; depois, alvo RIR 2."},
   {exerciseId:"v5-thu-flat-machine",name:"Flat Machine Chest Press",sets:3,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+15 kg",rir:2,rirDisplay:"1–2",rest:"90 s"},
@@ -1772,7 +1783,7 @@ function seedDemo() {
  kcalTarget: 2350,
  proteinTarget: 170,
  fatTarget: 70,
- stepsTarget: 9000,
+ stepsTarget: 10000,
  waterTarget: 3,
  cardioTarget: 90,
  height: 180
@@ -3563,7 +3574,7 @@ function TrainingCycleGuide(){
  return h("section",{className:"card training-cycle","aria-labelledby":"training-cycle-title"},
   h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Progressão dos treinos"),h("p",null,"Recomendação automática por exercício para a próxima sessão")),h("span",{className:"training-cycle-badge"},"AUTO")),
   h("div",{className:"training-cycle-phases"},phases.map((phase,i)=>h("article",{className:"training-cycle-phase",key:i},h("strong",null,phase.title),h("p",null,phase.text)))),
-  h("div",{className:"training-cycle-routine"},h("p",null,h("strong",null,"Cardio: "),"30 min à segunda e quarta."),h("p",null,h("strong",null,"Sábado e domingo: "),"descanso e 8–10 mil passos.")),
+  h("div",{className:"training-cycle-routine"},h("p",null,h("strong",null,"Cardio: "),"30 min à segunda, quarta e quinta (3 sessões/semana)."),h("p",null,h("strong",null,"Sábado e domingo: "),"descanso da força; mantém a meta diária de 10 000 passos.")),
   h("details",{className:"training-cycle-measures"},h("summary",null,"Medições e regra para ajustar calorias"),h("div",{className:"training-cycle-measure-body"},
    h("p",null,"Regista o peso diariamente e acompanha a média de 7 dias; mede a cintura ao domingo, guarda as cargas de todas as sessões e tira fotos de 15 em 15 dias."),
    h("p",null,"Só ajusta as calorias após 3 semanas de dados: perda de 0,4–0,7 kg/semana, mantém; abaixo de 0,2 kg/semana com cintura parada, −150 kcal; acima de 1 kg/semana ou fome constante, +150 kcal.")
@@ -4849,7 +4860,7 @@ function Coach2027({ state, update, onNavigate }) {
    if(avgKcal) lines.push("Calorias: média registada de "+Math.round(avgKcal)+" kcal/dia.");
    if(avgSleep && avgSleep < 7) lines.push("Sono: média de "+avgSleep.toFixed(1)+" h em "+d7.filter(x=>Number(x.d.tasks?.sono?.value)>0).length+" dias registados; recuperação deve ser protegida.");
    if(wkSessions > 0 && wkSessions < 4) lines.push("Treino: a frequência registada esta semana está abaixo de 4 sessões.");
-   if(avgSteps && avgSteps < (prof.stepsTarget||9000)*.8) lines.push("Passos: média de "+Math.round(avgSteps).toLocaleString("pt-PT")+" em "+d7.filter(x=>Number(x.d.tasks?.passos?.value)>0).length+" dias registados; abaixo de 80% do objetivo médio.");
+   if(avgSteps && avgSteps < (prof.stepsTarget||10000)*.8) lines.push("Passos: média de "+Math.round(avgSteps).toLocaleString("pt-PT")+" em "+d7.filter(x=>Number(x.d.tasks?.passos?.value)>0).length+" dias registados; abaixo de 80% do objetivo médio.");
    if(q.includes("peso") || q.includes("gordura") || q.includes("cintura")) {
      lines.push("Para composição corporal, usa peso médio semanal + cintura + desempenho no treino, e não uma única pesagem.");
    }
