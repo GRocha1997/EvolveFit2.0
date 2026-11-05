@@ -1302,3 +1302,264 @@ button:disabled {
 #root .evf-maintenance-row{display:grid;grid-template-columns:minmax(0,1.3fr) repeat(3,minmax(0,.8fr));gap:8px;padding:12px 0;border-top:1px solid var(--border)}
 #root .evf-maintenance-row .in,#root .evf-maintenance-date .in{width:100%;min-width:0;box-sizing:border-box;color:var(--text)}
 @media(max-width:640px){#root .evf-maintenance-row{grid-template-columns:repeat(2,minmax(0,1fr))}#root .evf-maintenance-row label:first-child{grid-column:1/-1}}
+
+/* Transição para o segundo bloco: decisão visível, nunca automática. */
+#root .evf-block2-banner{padding:15px 17px;border-left:3px solid var(--coral);background:var(--surface);color:var(--text)}
+#root .evf-block2-banner strong{display:block;font-size:14px;font-weight:750}
+#root .evf-block2-banner p{margin:7px 0;font-size:11.5px;line-height:1.5;color:var(--muted)}
+#root .evf-block2-banner small{display:block;margin-top:6px;font-size:11px;line-height:1.45;color:var(--muted)}
+#root .evf-block2-banner .menu-btn{margin:6px 0 4px;max-width:100%;white-space:normal}
+#root .evf-block2-session-meta{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:9px;align-items:center;margin:8px 0 12px}
+#root .evf-block2-session-meta>label:first-child{display:flex;flex-direction:column;gap:5px;font-size:11px;font-weight:650;color:var(--muted)}
+#root .evf-block2-session-meta .in{max-width:125px;min-width:0;color:var(--text)}
+#root .evf-block2-session-meta .evf-check-option{margin:0;align-self:end}
+@media(max-width:380px){#root .evf-block2-session-meta{grid-template-columns:1fr}#root .evf-block2-session-meta .evf-check-option{align-self:auto}}
+#root .hist-edit-field input[type="checkbox"]{width:18px;height:18px;min-height:18px;flex:none;accent-color:var(--coral);margin:5px 0}
+
+/* Leitura: decisões de revisão distinguem motivo, escolha e estado sem diminuir texto útil. */
+#root .evf-block2-banner p { font-size: 12.5px; line-height: 1.55; color: var(--text); }
+#root .evf-block2-banner small { font-size: 11.5px; line-height: 1.5; }
+#root .evf-review-item { padding: 9px 0; border-top: 1px solid var(--border); }
+#root .evf-review-item p { margin: 0 0 9px; }
+#root .evf-review-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#root .evf-review-actions .menu-btn { min-height: 42px; white-space: normal; text-align: left; }
+#root .evf-review-actions .menu-btn:focus-visible { outline: 2px solid var(--coral); outline-offset: 2px; }
+
+/* Apoio legível em mobile, ainda abaixo dos títulos, decisões e valores. */
+#root .evf-home-progress-message { font-size: 12.5px; line-height: 1.5; }
+#root .evf-home-progress-change { font-size: 11.5px; line-height: 1.4; }
+#root .evf-home-progress-label { font-size: 11px; }
+#root .evf-home-progress-heading span { font-size: 11.5px; line-height: 1.4; }
+#root .evf-review-item small { display: block; padding: 4px 0; }
+
+/* Color language v3 · calm surfaces, high-contrast supporting text, semantic states.
+   The existing size hierarchy stays intact: color does not replace labels or wording. */
+:root {
+  --bg: #F2F5F9;
+  --surface: #FFFFFF;
+  --surface2: #F6F8FB;
+  --text: #17273A;
+  --muted: #526276;
+  --border: #CED8E4;
+  --coral: #2459B3;
+  --green: #176942;
+  --good: #176942;
+  --amber: #77500A;
+  --bad: #A42F3B;
+  --ef-bg: var(--bg);
+  --ef-surface: var(--surface);
+  --ef-surface-soft: var(--surface2);
+  --ef-text: var(--text);
+  --ef-muted: var(--muted);
+  --ef-border: var(--border);
+  --ef-focus: #2459B3;
+  --ef-navy: #244662;
+  --ef-navy-2: #315772;
+  --water: #2459B3;
+  --ef-home-card: var(--surface);
+  --ef-home-card-muted: var(--surface2);
+  --ef-info: #265A9E;
+  --ef-info-bg: #EDF4FF;
+  --ef-info-border: #AEC7ED;
+  --ef-success: #176942;
+  --ef-success-bg: #E9F5EE;
+  --ef-success-border: #A8D6BA;
+  --ef-warning: #77500A;
+  --ef-warning-bg: #FFF4DB;
+  --ef-warning-border: #E6C889;
+  --ef-danger: #A42F3B;
+  --ef-danger-bg: #FFF0F0;
+  --ef-danger-border: #EBB8BB;
+  --ef-neutral-bg: #F2F5F9;
+  --ef-neutral-border: #CED8E4;
+  --ef-action: #2459B3;
+  --ef-success-fill: #176942;
+  --ef-danger-fill: #963942;
+}
+
+[data-theme="dark"] {
+  --bg: #0F1622;
+  --surface: #182332;
+  --surface2: #202D3D;
+  --text: #F1F5FA;
+  --muted: #BAC7D6;
+  --border: #405165;
+  --coral: #B4CEFF;
+  --green: #8BE0B6;
+  --good: #8BE0B6;
+  --amber: #FFD48C;
+  --bad: #FFB4B5;
+  --ef-bg: var(--bg);
+  --ef-surface: var(--surface);
+  --ef-surface-soft: var(--surface2);
+  --ef-text: var(--text);
+  --ef-muted: var(--muted);
+  --ef-border: var(--border);
+  --ef-focus: #B4CEFF;
+  --ef-navy: #3467B5;
+  --ef-navy-2: #24559B;
+  --water: #3467B5;
+  --ef-home-card: var(--surface);
+  --ef-home-card-muted: var(--surface2);
+  --ef-info: #B4CEFF;
+  --ef-info-bg: #1B304D;
+  --ef-info-border: #385B88;
+  --ef-success: #8BE0B6;
+  --ef-success-bg: #12372D;
+  --ef-success-border: #34745C;
+  --ef-warning: #FFD48C;
+  --ef-warning-bg: #403118;
+  --ef-warning-border: #84642D;
+  --ef-danger: #FFB4B5;
+  --ef-danger-bg: #42252A;
+  --ef-danger-border: #98555C;
+  --ef-neutral-bg: #202D3D;
+  --ef-neutral-border: #405165;
+  --ef-action: #3467B5;
+  --ef-success-fill: #176744;
+  --ef-danger-fill: #963942;
+}
+
+/* Secondary labels have actual contrast, rather than faded opacity. */
+#root .log-reps-sub,
+#root .evf-home-tile-sub,
+#root .evf-home-progress-change,
+#root .training-week-nav-label { color: var(--muted); opacity: 1; }
+#root .evf-home-kicker { opacity: .92; }
+#root .evf-home-date { opacity: .95; }
+
+/* Coach alerts: left rule + icon + label/text. No reliance on color alone. */
+#root .coach27-alert {
+  color: var(--text);
+  text-align: left;
+  border-width: 1px 1px 1px 3px;
+  border-style: solid;
+  border-radius: 12px;
+  line-height: 1.5;
+  min-height: 44px;
+}
+#root .coach27-alert-positive {
+  background: var(--ef-success-bg);
+  border-color: var(--ef-success-border);
+  border-left-color: var(--ef-success);
+}
+#root .coach27-alert-negative {
+  background: var(--ef-danger-bg);
+  border-color: var(--ef-danger-border);
+  border-left-color: var(--ef-danger);
+}
+#root .coach27-alert-neutral {
+  background: var(--ef-neutral-bg);
+  border-color: var(--ef-neutral-border);
+  border-left-color: var(--ef-info);
+}
+#root .coach-alert-positive { background: var(--ef-success-bg); color: var(--ef-success); }
+#root .coach-alert-negative { background: var(--ef-danger-bg); color: var(--ef-danger); }
+#root .coach-alert-neutral { background: var(--ef-info-bg); color: var(--ef-info); }
+#root .coach27-alert:focus-visible { outline: 3px solid var(--ef-focus); outline-offset: 2px; }
+
+/* Recommendations remain readable sentences: a colored rule and lead word signal the state. */
+#root .log-rec-box {
+  color: var(--text) !important;
+  background: var(--ef-neutral-bg);
+  border-left: 3px solid var(--ef-neutral-border);
+  line-height: 1.5;
+}
+#root .log-rec-box.up { background: var(--ef-success-bg); border-left-color: var(--ef-success); }
+#root .log-rec-box.warn { background: var(--ef-warning-bg); border-left-color: var(--ef-warning); }
+#root .log-rec-box.down { background: var(--ef-danger-bg); border-left-color: var(--ef-danger); }
+#root .log-rec-box.up strong { color: var(--ef-success); }
+#root .log-rec-box.warn strong { color: var(--ef-warning); }
+#root .log-rec-box.down strong { color: var(--ef-danger); }
+#root .log-rec-box.ok strong { color: var(--text); }
+
+/* Information (blue) is distinct from the time-sensitive check-in (amber). */
+#root .evf-travel-banner,
+#root .evf-block2-banner[role="note"] {
+  background: var(--ef-info-bg);
+  border-color: var(--ef-info-border);
+  border-left: 3px solid var(--ef-info);
+}
+#root .evf-block2-banner[role="alert"] {
+  background: var(--ef-warning-bg);
+  border-color: var(--ef-warning-border);
+  border-left: 3px solid var(--ef-warning);
+}
+#root .evf-block2-banner p,
+#root .evf-travel-banner p { color: var(--text); }
+#root .evf-block2-banner small,
+#root .evf-travel-banner small { color: var(--muted); }
+#root .evf-review-item { border-top-color: var(--ef-info-border); }
+
+#root .evf-home-progress-message.positive {
+  color: var(--text);
+  background: var(--ef-success-bg);
+  border-left: 3px solid var(--ef-success);
+}
+#root .evf-home-progress-message.caution {
+  color: var(--text);
+  background: var(--ef-warning-bg);
+  border-left: 3px solid var(--ef-warning);
+}
+#root .evf-home-progress-change.good { color: var(--ef-success); }
+#root .evf-home-progress-change.watch { color: var(--ef-warning); }
+
+/* A pending "Treinei" is an action, not an error. Reserve red for actual misses. */
+#root .training-completion-btn.pending {
+  color: var(--ef-info);
+  background: var(--ef-info-bg);
+  border-color: var(--ef-info-border);
+}
+#root .training-completion-btn.done {
+  color: var(--ef-success);
+  background: var(--ef-success-bg);
+  border-color: var(--ef-success-border);
+}
+#root .training-completion-btn.future { color: var(--muted); opacity: 1; }
+#root .dp.missed { color: var(--ef-danger); background: var(--ef-danger-bg); border-color: var(--ef-danger-border); }
+#root .dp.missed.on { color: #fff; background: var(--ef-danger-fill); border-color: var(--ef-danger-fill); }
+
+/* On dark surfaces, accent-colored text stays light while filled controls stay dark enough for white text. */
+[data-theme="dark"] #root .today-pill,
+[data-theme="dark"] #root .seg-b.on,
+[data-theme="dark"] #root .dp.on,
+[data-theme="dark"] #root .period-btn.active,
+[data-theme="dark"] #root .rir-chip.on,
+[data-theme="dark"] #root .checkbox.on,
+[data-theme="dark"] #root .ef-pro-btn.primary {
+  color: #fff !important;
+  background: var(--ef-action) !important;
+  border-color: var(--ef-action) !important;
+}
+[data-theme="dark"] #root .menu-btn.main,
+[data-theme="dark"] #root .menu-tab.on,
+[data-theme="dark"] #root .ef-pro-btn.good,
+[data-theme="dark"] #root .log-check.on {
+  color: #fff !important;
+  background: var(--ef-success-fill) !important;
+  border-color: var(--ef-success-fill) !important;
+}
+[data-theme="dark"] #root .dp.missed.on {
+  color: #fff !important;
+  background: var(--ef-danger-fill) !important;
+  border-color: var(--ef-danger-fill) !important;
+}
+
+/* The later card rule has an important border; preserve semantic rules on banners. */
+#root .card.evf-travel-banner,
+#root .card.evf-block2-banner[role="note"] {
+  border: 1px solid var(--ef-info-border) !important;
+  border-left: 3px solid var(--ef-info) !important;
+  background: var(--ef-info-bg);
+}
+#root .card.evf-block2-banner[role="alert"] {
+  border: 1px solid var(--ef-warning-border) !important;
+  border-left: 3px solid var(--ef-warning) !important;
+  background: var(--ef-warning-bg);
+}
+
+/* Keep white labels legible at both ends of the original gradient. */
+#root .btn-solid.coral {
+  background: linear-gradient(135deg, var(--ef-action), var(--ef-navy-2)) !important;
+  color: #fff !important;
+}
