@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=24">
+<link rel="stylesheet" href="evolvefit-polish.css?v=25">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -215,7 +215,7 @@ document.addEventListener("visibilitychange",async()=>{
 
 <style id="evolvefit-no-ios-input-zoom">
 @media (max-width: 900px) {
-  input, select, textarea, button {
+  input:not([type="checkbox"]):not([type="radio"]), select, textarea {
     font-size: 16px !important;
   }
 }
@@ -3675,7 +3675,7 @@ function ExerciseProgressChart({exercise}) {
  const previousAtSameWeight=sameWeight.length>1?sameWeight[sameWeight.length-2]:null;
  const repLoadLabel=latestRep&&Number(latestRep.weight)>0?fmtNum(latestRep.weight)+" kg":"peso corporal";
  const repSummary=latestRep?"Último registo: "+latestRep.totalReps+" reps no total · melhor série "+repLoadLabel+" × "+latestRep.bestSetReps+" reps. "+(previousAtSameWeight?(repLoadLabel+": "+(latestRep.totalReps-previousAtSameWeight.totalReps>=0?"+":"")+(latestRep.totalReps-previousAtSameWeight.totalReps)+" reps vs sessão anterior com o mesmo número de séries."):"Primeiro registo completo neste peso/número de séries."):"Ainda sem reps completas por série."
- if(!samples.length)return h("div",{className:"exercise-progress-item"},h("div",{className:"exercise-progress-name"},exercise.name),h("div",{className:"exercise-progress-reps",style:{fontSize:12,lineHeight:1.4,color:"var(--muted)",marginTop:7}},repSummary));
+ if(!samples.length)return h("div",{className:"exercise-progress-item"},h("div",{className:"exercise-progress-name"},exercise.name),h("div",{className:"exercise-progress-reps"},repSummary));
  const weights=samples.map(x=>Number(x.weight)),min=Math.min(...weights),max=Math.max(...weights);
  const pad=(max-min)*.18||Math.max(max*.06,.5),low=Math.max(0,min-pad),high=max+pad;
  const width=320,height=150,left=48,right=12,top=12,bottom=29,plotW=width-left-right,plotH=height-top-bottom;
@@ -3698,7 +3698,7 @@ function ExerciseProgressChart({exercise}) {
    h("text",{x:left,y:height-5,textAnchor:"start",className:"exercise-chart-label"},dateLabel(samples[0].date)),
    samples.length>1&&h("text",{x:width-right,y:height-5,textAnchor:"end",className:"exercise-chart-label"},dateLabel(samples[samples.length-1].date))
   ),
-  h("div",{className:"exercise-progress-reps",style:{fontSize:12,lineHeight:1.4,color:"var(--muted)",marginTop:7}},repSummary),
+  h("div",{className:"exercise-progress-reps"},repSummary),
   samples.length===1&&h("div",{className:"exercise-progress-hint"},"Mais um registo permite comparar a tendência.")
  );
 }
@@ -3821,12 +3821,8 @@ function PlanDayCard({
  placeholder: "",
  value: x.weight,
  onCommit: n => onEditField(di, i, "weight", n)
- })),h("div",{className:"pl-f"},h("label",null,"Incremento ("+(x.progressionStepKind==="reps"?"reps/série":x.progressionStepUnit||"kg")+")"),h(DecInput,{className:"in",value:x.progressionStepKg||defaultProgressionStep(x).amount,onCommit:n=>onEditField(di,i,"progressionStepKg",n)}))), isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&h("label",{style:{display:"flex",alignItems:"flex-start",gap:8,margin:"9px 0",fontSize:12,lineHeight:1.4}},h("input",{type:"checkbox",checked:!!cycleStart&&x.optionalExtraSetCycleStart===cycleStart,style:{marginTop:2,accentColor:"var(--navy)"},onChange:e=>onEditField(di,i,"optionalExtraSetCycleStart",e.target.checked?cycleStart:"")}),h("span",null,"+1 série opcional (se recuperas bem e o treino cabe em 60 min).")), h("label",{style:{display:"flex",alignItems:"center",gap:8,margin:"7px 0",fontSize:12}},h("input",{type:"checkbox",checked:!!x.techniqueDegraded,style:{accentColor:"var(--navy)"},onChange:e=>onEditField(di,i,"techniqueDegraded",e.target.checked)}),h("span",null,"Técnica degradada · bloquear subidas")), h("div", {
- className: "pex-rir",
- style: {
- paddingLeft: 0,
- marginBottom: 10
- }
+ })),h("div",{className:"pl-f"},h("label",null,"Incremento ("+(x.progressionStepKind==="reps"?"reps/série":x.progressionStepUnit||"kg")+")"),h(DecInput,{className:"in",value:x.progressionStepKg||defaultProgressionStep(x).amount,onCommit:n=>onEditField(di,i,"progressionStepKg",n)}))), isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&h("label",{className:"evf-check-option"},h("input",{type:"checkbox",checked:!!cycleStart&&x.optionalExtraSetCycleStart===cycleStart,onChange:e=>onEditField(di,i,"optionalExtraSetCycleStart",e.target.checked?cycleStart:"")}),h("span",null,"+1 série opcional (se recuperas bem e o treino cabe em 60 min).")), h("label",{className:"evf-check-option"},h("input",{type:"checkbox",checked:!!x.techniqueDegraded,onChange:e=>onEditField(di,i,"techniqueDegraded",e.target.checked)}),h("span",null,"Técnica degradada · bloquear subidas")), h("div", {
+ className: "pex-rir"
  }, h("span", {
  className: "rir-lbl"
  }, "RIR última série"), h(RirChips, {
@@ -4060,9 +4056,9 @@ function WorkoutLogger({
  const setCardioField=(id,field,value)=>{markDraftChanged();setCardioRows(rows=>rows.map(c=>c.id===id?{...c,[field]:value}:c));};
  const removeCardio=id=>{markDraftChanged();setCardioRows(rows=>rows.filter(c=>c.id!==id));};
  const doneCount = exercises.filter((x, i) => {const r=row(x,i);return r.rir!=null||r.cutForTime||isDecisionExcludedExercise(x)&&parseActualRepsBySet(r.repsBySet).length>0;}).length;
- return /*#__PURE__*/React.createElement("div", null, sessionNote && React.createElement("div",{className:"log-session-note",role:"status"},sessionNote), React.createElement("div",{className:"log-policy-controls",style:{display:"grid",gap:8,margin:"0 0 12px",fontSize:12}},
- React.createElement("label",{style:{display:"flex",alignItems:"flex-start",gap:8}},React.createElement("input",{type:"checkbox",checked:sleepRecoveryMode,disabled:!canSave,onChange:e=>changeSleepRecovery(e.target.checked)}),React.createElement("span",null,"3+ noites com menos de 6 h: nesta sessão treina a RIR 3 e corta o último acessório. Não altera sessões futuras.")),
- React.createElement("label",{style:{display:"flex",alignItems:"flex-start",gap:8}},React.createElement("input",{type:"checkbox",checked:skipCardioForDriving,disabled:!canSave,onChange:e=>changeCardioDrivingSkip(e.target.checked)}),React.createElement("span",null,"Nesta sessão, se dormiste menos de 6 h e vais conduzir 7 h: salta o cardio, não os pesos. Não altera sessões futuras."))
+ return /*#__PURE__*/React.createElement("div", null, sessionNote && React.createElement("div",{className:"log-session-note",role:"status"},sessionNote), React.createElement("div",{className:"log-policy-controls"},
+ React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:sleepRecoveryMode,disabled:!canSave,onChange:e=>changeSleepRecovery(e.target.checked)}),React.createElement("span",null,"3+ noites com menos de 6 h: nesta sessão treina a RIR 3 e corta o último acessório. Não altera sessões futuras.")),
+ React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:skipCardioForDriving,disabled:!canSave,onChange:e=>changeCardioDrivingSkip(e.target.checked)}),React.createElement("span",null,"Nesta sessão, se dormiste menos de 6 h e vais conduzir 7 h: salta o cardio, não os pesos. Não altera sessões futuras."))
  ), /*#__PURE__*/React.createElement("div", {
  className: "log-progress"
  }, /*#__PURE__*/React.createElement("div", {
@@ -4128,8 +4124,7 @@ function WorkoutLogger({
  size: 14,
  className: "log-chev" + (isOpen ? " open" : "")
  })), /*#__PURE__*/React.createElement("div",{
- className:"rir-hint "+sug.k,
- style:{margin:"0 12px 8px",padding:"8px 10px",borderRadius:"10px",background:"var(--surface2)"}
+ className:"rir-hint log-rec-box "+sug.k
  },React.createElement("strong",null,recommendationLabel),recommendationEvidence?recommendationEvidence+" → ":"",sug.text), isOpen && /*#__PURE__*/React.createElement("div", {
  className: "log-panel"
  }, (x.anchor||x.superset||x.rest||x.week8Target||(isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&x.optionalExtraSetCycleStart===extraSetCycleStart)) && React.createElement("div",{className:"log-plan-meta"},
@@ -4139,7 +4134,7 @@ function WorkoutLogger({
   x.rest&&React.createElement("span",null,"Descanso "+x.rest),
   x.week8Target&&React.createElement("span",null,"Alvo sem. 8: "+x.week8Target),
   isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&x.optionalExtraSetCycleStart===extraSetCycleStart&&React.createElement("span",null,"Série extra ativa: +1")
- ), isTimeCutCandidate(x,dayIdx)&&React.createElement("label",{style:{display:"flex",alignItems:"flex-start",gap:8,margin:"8px 0",fontSize:12}},React.createElement("input",{type:"checkbox",checked:!!r.cutForTime,disabled:!canSave,onChange:e=>toggleTimeCut(i,e.target.checked,sleepRecoveryMode?"sleep":"time")}),React.createElement("span",null,r.cutForTime?"Cortado por limite de 60 min · sem recomendação":"Cortar só se necessário para respeitar 60 min; fica excluído de recomendações.")), isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Aquecimento, ativação e cardio não geram reps/RIR nem recomendação."), isDecisionExcludedExercise(x)&&!isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Série auxiliar: sem decisão; usa a carga do movimento principal."), !r.cutForTime&&!isNoLogExercise(x)&& /*#__PURE__*/React.createElement("div", {
+ ), isTimeCutCandidate(x,dayIdx)&&React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:!!r.cutForTime,disabled:!canSave,onChange:e=>toggleTimeCut(i,e.target.checked,sleepRecoveryMode?"sleep":"time")}),React.createElement("span",null,r.cutForTime?"Cortado por limite de 60 min · sem recomendação":"Cortar só se necessário para respeitar 60 min; fica excluído de recomendações.")), isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Aquecimento, ativação e cardio não geram reps/RIR nem recomendação."), isDecisionExcludedExercise(x)&&!isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Série auxiliar: sem decisão; usa a carga do movimento principal."), !r.cutForTime&&!isNoLogExercise(x)&& /*#__PURE__*/React.createElement("div", {
  className: "log-panel-row"
  }, /*#__PURE__*/React.createElement("input", {
  className: "log-w",
@@ -4161,9 +4156,8 @@ function WorkoutLogger({
  name: "note",
  size: 15
  }))), !r.cutForTime&&!isNoLogExercise(x)&& /*#__PURE__*/React.createElement("label", {
- className:"lbl",
- style:{display:"block",margin:"10px 0"}
- },"Reps por série · ",isUnilateralExercise(x)?"lado direito · ":"",x.sets," valores", isUnilateralExercise(x)&&React.createElement("small",{style:{display:"block",fontWeight:400,color:"var(--muted)"}},"Esquerda iguala; não faz mais reps."), /*#__PURE__*/React.createElement("input",{
+ className:"lbl log-reps-field"
+ },React.createElement("span",{className:"log-reps-title"},"Reps por série · ",isUnilateralExercise(x)?"lado direito · ":"",x.sets," valores"), isUnilateralExercise(x)&&React.createElement("small",{className:"log-reps-sub"},"Esquerda iguala; não faz mais reps."), /*#__PURE__*/React.createElement("input",{
  className:"in",
  type:"text",
  inputMode:"text",
@@ -4179,7 +4173,7 @@ function WorkoutLogger({
  target: rirTargetRange,
  clearable: true,
  onChange: v => setField(i, "rir", v)
- })), /*#__PURE__*/React.createElement("div",{className:"rir-target-note",style:{fontSize:12,lineHeight:1.4,color:"var(--muted)",marginTop:-4,marginBottom:9}},rirInstruction(x,cycleWeek,sleepRecoveryMode))), openNotes[i] && /*#__PURE__*/React.createElement("input", {
+ })), /*#__PURE__*/React.createElement("div",{className:"rir-target-note"},rirInstruction(x,cycleWeek,sleepRecoveryMode))), openNotes[i] && /*#__PURE__*/React.createElement("input", {
  className: "log-note",
  placeholder: "Nota (ex: técnica, sensação, próxima carga...)",
  value: r.notes,
@@ -4255,11 +4249,11 @@ function RestTimer() {
  };
  const mmss = n => Math.floor(n / 60) + ":" + String(n % 60).padStart(2, "0");
  return h("div", {
- className: "card rt-card"
+ className: "card rt-card" + (end ? " running" : "")
  }, h("div", {
  className: "water-top",
  style: {
- marginBottom: 8
+ marginBottom: 10
  }
  }, h("div", {
  className: "water-title"
@@ -4275,10 +4269,7 @@ function RestTimer() {
  width: Math.max(0, left / total * 100) + "%"
  }
  })), h("div", {
- className: "menu-actions",
- style: {
- justifyContent: "flex-start"
- }
+ className: "menu-actions rt-running-actions"
  }, h("button", {
  className: "menu-btn",
  onClick: add
@@ -4286,11 +4277,7 @@ function RestTimer() {
  className: "menu-btn",
  onClick: () => setEnd(null)
  }, "Parar"))) : h("div", {
- className: "menu-actions",
- style: {
- justifyContent: "flex-start",
- marginTop: 0
- }
+ className: "menu-actions rt-presets"
  }, [[60, "60 s"], [90, "90 s"], [120, "2 min"], [180, "3 min"]].map(([sec, l]) => h("button", {
  key: sec,
  className: "menu-btn",
@@ -4687,7 +4674,6 @@ function Body({
  sub: "Dados inseridos manualmente",
  right: /*#__PURE__*/React.createElement("button", {
  className: "theme-toggle",
- style: { marginRight: 48 },
  "aria-label": "Nova medição",
  onClick: () => setForm(f => {
  if (!f) setDate(todayKey);
@@ -4703,18 +4689,19 @@ function Body({
  key: p.k,
  className: "period-btn" + (period === p.k ? " active" : ""),
  onClick: () => setPeriod(p.k)
- }, p.label))), hasStartingPoint && /*#__PURE__*/React.createElement("div", {className:"card",style:{display:"flex",alignItems:"center",justifyContent:"space-between"}},
+ }, p.label))), hasStartingPoint && /*#__PURE__*/React.createElement("div", {className:"card",style:{display:"flex",alignItems:"center",justifyContent:"space-between",gap:"12px"}},
   /*#__PURE__*/React.createElement("div",null,
    /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",fontWeight:650,color:"var(--muted)",textTransform:"uppercase",letterSpacing:".05em",marginBottom:"6px"}},"Primeiro registo · gordura corporal"),
    /*#__PURE__*/React.createElement("div",{style:{fontSize:"24px",fontWeight:780,color:"var(--text)",letterSpacing:"-.03em"}},startingValue, /*#__PURE__*/React.createElement("i",{style:{fontSize:"13px",fontWeight:600,opacity:.6,fontStyle:"normal"}},"%")),
-   /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",color:"var(--muted)",marginTop:"4px"}},"Registado em ",longDate(new Date(bfList[0].date+"T12:00:00")))
+   /*#__PURE__*/React.createElement("div",{style:{fontSize:"12.5px",color:"var(--muted)",marginTop:"4px"}},"Registado em ",longDate(new Date(bfList[0].date+"T12:00:00")))
   )
  ),  /*#__PURE__*/React.createElement("div", {
  className: "card",
  style: {
  display: "flex",
  alignItems: "center",
- justifyContent: "space-between"
+ justifyContent: "space-between",
+ gap: "12px"
  }
  }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
  style: {
@@ -4736,7 +4723,7 @@ function Body({
  inputMode: "decimal",
  autoFocus: true,
  style: {
- width: "76px",
+ width: "84px",
  fontSize: "20px",
  fontWeight: 780,
  padding: "8px 10px"
@@ -4777,9 +4764,10 @@ function Body({
  style: {
  display: "flex",
  alignItems: "center",
- justifyContent: "space-between"
+ justifyContent: "space-between",
+ gap: "12px"
  }
- }, /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement("div", {
+ }, /*#__PURE__*/React.createElement("div", {style:{minWidth:0}}, /*#__PURE__*/React.createElement("div", {
  style: {
  fontSize: "12px",
  fontWeight: 650,
@@ -5510,59 +5498,82 @@ ReactDOM.createRoot(document.getElementById("root")).render(
 </script>
 
 <style id="evolvefit-typography-final">
-/* ===== EvolveFit — escala tipográfica final (mobile-first) =====
-   Escala: 12 (legendas) · 13 (secundário) · 15 (corpo) · 16 (títulos de cartão)
-           · 20–24 (números) · 26–28 (títulos de página). Tab bar: 11.
-   Só os campos de texto ficam a 16px (evita zoom automático no iPhone). */
-:root{--t-xs:12px;--t-sm:13px;--t-base:15px;--t-md:16px;--t-xl:22px;--t-2xl:28px;}
+/* ===== EvolveFit — escala tipográfica e espaçamento final (mobile-first) =====
+   Escala: 12 (legendas/etiquetas) · 13 (secundário/regras/compactos) · 14 (botões)
+           · 15 (corpo/exercícios) · 16 (títulos de cartão) · 20–26 (números) · 26–28 (títulos).
+   Apenas campos editáveis ficam a 16px no mobile (evita zoom automático no iPhone). */
+:root{--t-xs:12px;--t-sm:13px;--t-base:15px;--t-md:16px;--t-xl:22px;--t-2xl:27px;}
 html{-webkit-text-size-adjust:100%;text-size-adjust:100%;}
-body{line-height:1.4;-webkit-font-smoothing:antialiased;}
+body{line-height:1.45;-webkit-font-smoothing:antialiased;}
 button,input,select,textarea{font-family:inherit;}
 @media (max-width:900px){
-  #root button{font-size:14px!important;}
-  #root input,#root select,#root textarea{font-size:16px!important;}
+  #root input:not([type="checkbox"]):not([type="radio"]),#root select,#root textarea{font-size:16px!important;}
 }
 
-/* Títulos de página */
-#root .tabhead h1{font-size:28px!important;line-height:1.1!important;letter-spacing:-.03em!important;}
-#root .tabhead p{font-size:14px!important;line-height:1.4!important;}
+/* Alinhamento consistente do topo e do botão de menu da conta */
+#root .evf-menu-btn{
+  top:calc(20px + env(safe-area-inset-top));
+  right:16px;
+  width:42px;
+  height:42px;
+  border-radius:13px;
+}
+#root .tabhead{
+  align-items:flex-start;
+  gap:10px;
+  padding-right:52px;
+  margin:0 0 16px;
+}
+#root .tabhead > div{min-width:0;flex:1;}
+#root .tabhead h1{font-size:26px!important;line-height:1.14!important;letter-spacing:-.035em!important;}
+#root .tabhead p{font-size:13.5px!important;line-height:1.42!important;margin-top:4px!important;}
+#root .theme-toggle{width:42px;height:42px;min-height:42px;flex-shrink:0;}
 #root .greet{font-size:26px!important;line-height:1.15!important;letter-spacing:-.03em!important;}
 #root .subdate{font-size:14px!important;}
 
 /* Títulos de cartão / secção */
 #root .section-title,#root .water-title,#root .logger-title,#root .pc-title,#root .form-title,
-#root .ef-pro-title,#root .chart-title,#root .checkin-head,#root .cardio-week-title{font-size:16px!important;font-weight:700!important;letter-spacing:-.01em!important;line-height:1.25!important;}
-#root .cat-head{font-size:15px!important;}
-#root .list-head,#root .gitcal-title{font-size:13px!important;}
+#root .ef-pro-title,#root .chart-title,#root .checkin-head,#root .cardio-week-title{font-size:16px!important;font-weight:700!important;letter-spacing:-.015em!important;line-height:1.28!important;}
+#root .card > .pc-title{margin-bottom:10px;}
+#root .pc-head > .pc-title{margin-bottom:0;}
+#root .cat-head{font-size:15px!important;margin:18px 2px 10px;}
+#root .list-head,#root .gitcal-title{font-size:12.5px!important;letter-spacing:.05em;}
 
 /* Texto corrente */
 #root .task-label,#root .goal-label,#root .menu-m,#root .log-name,#root .prog-name,
-#root .qty-task>span:first-child,#root .qty-task>label,#root .ci-row,#root .ci-q,#root .cardio-day-label{font-size:15px!important;line-height:1.3!important;}
-#root .log-name{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;font-weight:650!important;}
+#root .qty-task>span:first-child,#root .qty-task>label,#root .ci-row,#root .ci-q,#root .cardio-day-label{font-size:15px!important;line-height:1.34!important;}
+#root .log-name{white-space:normal!important;overflow:visible!important;text-overflow:clip!important;font-weight:700!important;}
 #root .subgroup{font-size:12px!important;}
 
-/* Secundário */
+/* Texto secundário e blocos informativos (13px legível) */
 #root .menu-c,#root .menu-sub,#root .kcal-note,#root .water-goal,#root .metric-label,#root .pc-empty,
 #root .slp-date,#root .ef-pro-k,#root .ef-pro-v,#root .ef-corr,#root .evf-ai-sub,#root .evf-ai-insight,
-#root .bsum-status,#root .hist-name,#root .hist-ex,#root .hist-note,#root .goal-val,#root .coach27-status,
-#root .coach27-alert,#root .rir-help,#root .rir-hint,#root .disclaimer,#root .coach27-photo-meta{font-size:13px!important;line-height:1.45!important;}
+#root .bsum-status,#root .hist-name,#root .hist-ex,#root .hist-note,#root .hist-cardio,#root .goal-val,#root .coach27-status,
+#root .coach27-alert,#root .rir-help,#root .rir-hint,#root .disclaimer,#root .coach27-photo-meta,
+#root .log-session-note,#root .future-workout-note,#root .evf-check-option,#root .log-reps-title,
+#root .exercise-progress-reps{font-size:13px!important;line-height:1.48!important;}
 #root .home-streak{font-size:13px!important;}
 
-/* Legendas (mínimo 12px) */
+/* Legendas e etiquetas (mínimo 12px) */
 #root .bsum-l,#root .coach27-mini-l,#root .coach27-lbl,#root .coach27-badge,#root .evf-ai-kicker,
 #root .evf-ai-badge,#root .evf-ai-use,#root .log-progress-l,#root .logged-badge,#root .pc-badge,
 #root .metric-avg,#root .streak-l,#root .ef-pro-status,#root .section-count,#root .log-sr,
 #root .log-summary,#root .logger-sub,#root .water-pct,#root .qty-unit,#root .prog-vals,#root .rir-lbl,
-#root .coach-tag,#root .stat-l,#root .today-label,#root .workout-meta span,#root .ef-pro-note,#root .lbl,#root .circ-label{font-size:12px!important;line-height:1.35!important;}
+#root .coach-tag,#root .stat-l,#root .today-label,#root .workout-meta span,#root .ef-pro-note,#root .lbl,
+#root .circ-label,#root .rir-target-note,#root .log-reps-sub,#root .plan-meta span,#root .log-plan-meta span,
+#root .training-week-nav-label,#root .log-cardio-head span{font-size:12px!important;line-height:1.38!important;}
+#root .coach27-mini-l{line-height:1.42!important;margin-top:5px!important;}
 #root .evf-ai-kicker,#root .evf-ai-badge,#root .bsum-l{letter-spacing:.04em!important;}
 #root .ring-pct i{font-size:11px!important;}
 
-/* Botões */
-#root .chip,#root .dp,#root .seg-b,#root .period-btn,#root .menu-tab,#root .menu-btn,#root .btn-ghost,
-#root .btn-solid,#root .coach27-link,#root .ef-pro-btn,#root .evf-ai-btn,#root .evf-ai-prompt,
-#root .collapse-btn,#root .add-ex{font-size:14px!important;font-weight:650!important;line-height:1.25!important;}
-#root .big-btn{font-size:15px!important;font-weight:650!important;}
-#root .reset-btn{font-size:13px!important;}
+/* Botões dimensionados por função (sem forçar todos a 14/16px) */
+#root .big-btn,#root .evf-home-cta{font-size:15px!important;font-weight:700!important;line-height:1.25!important;}
+#root .menu-btn,#root .btn-ghost,#root .btn-solid,#root .coach27-link,#root .ef-pro-btn,#root .evf-ai-btn,
+#root .collapse-btn,#root .add-ex,#root .training-completion-btn{font-size:14px!important;font-weight:650!important;line-height:1.25!important;}
+#root .seg-b,#root .dp,#root .period-btn,#root .menu-tab,#root .chip,#root .rir-chip,#root .evf-ai-prompt,
+#root .reset-btn,#root .log-cardio-add,#root .evf-home-progress-link{font-size:13px!important;font-weight:650!important;line-height:1.25!important;}
+#root .rir-chips.sm .rir-chip,#root .hist-edit-btn{font-size:12.5px!important;font-weight:700!important;line-height:1.2!important;}
+#root .training-week-nav-button{font-size:20px!important;font-weight:700!important;line-height:1!important;}
 #root .log-fillall{font-size:12px!important;white-space:normal!important;max-width:100%;text-align:center;}
 #root .log-progress{flex-wrap:wrap;}
 #root .evf-ai-prompt{text-align:left;}
@@ -5578,44 +5589,43 @@ button,input,select,textarea{font-family:inherit;}
 #root .ring-pct,#root .water-val,#root .stat-v,#root .metric-val,#root .bsum-v,#root .coach27-mini-v,
 #root .qty-input input,#root .log-w,#root .rt-time{font-variant-numeric:tabular-nums;}
 
-/* Resumo corporal: 2×2 em vez de 4 colunas (não corta no telemóvel) */
-#root .bsum-grid{display:grid!important;grid-template-columns:1fr 1fr!important;gap:14px 10px!important;}
+/* Grelhas adaptativas e resumo corporal */
+#root .stat-grid{grid-template-columns:repeat(auto-fit,minmax(148px,1fr))!important;gap:10px!important;margin-bottom:14px!important;}
+#root .bsum-grid{display:grid!important;grid-template-columns:1fr 1fr!important;gap:14px 12px!important;}
 #root .body-summary .bsum:not(:last-child)::after{display:none!important;}
 #root .bsum{min-width:0;text-align:left!important;}
 #root .bsum-l{text-transform:none!important;}
 
-/* Barra de separadores */
-#root .tab span{font-size:11px!important;font-weight:600!important;letter-spacing:0!important;}
+/* Barra de separadores e detalhes de histórico */
+#root .tab span{font-size:11.5px!important;font-weight:650!important;letter-spacing:0!important;}
+#root .slp-nums{gap:6px 12px!important;line-height:1.45!important;margin-top:2px;}
 #root .slp-nums,#root .slp-nums span,#root .gitcal-legend,#root .gitcal-legend span,#root .ef-lib-sub,#root .evf-ai-result-head{font-size:12px!important;}
 #root .subdate,#root .cardio-day-label,#root .logger-sub,#root .hist-date{text-transform:none!important;}
 #root .water-top{gap:4px 12px;flex-wrap:wrap;}
-#root .logger-head{gap:12px;}
+#root .logger-head{gap:12px;margin-bottom:12px;}
 #root .log-progress-bar{flex:1 1 90px;min-width:90px;}
 #root .log-fillall{flex:1 1 100%!important;}
 #root .evf-ai-card{padding:0!important;}
 #root .evf-ai-sub{max-width:none!important;}
 
-.evf-home-premium{padding:0 0 22px}
-.evf-home-hero{position:relative;overflow:hidden;border-radius:26px;padding:26px 24px 25px;background:linear-gradient(145deg,#172b3d 0%,#29465c 58%,#3f6f8b 100%);color:#fff;min-height:325px;display:flex;flex-direction:column;justify-content:flex-end;box-shadow:0 16px 38px rgba(24,48,67,.16)}
-.evf-home-hero:before,.evf-home-hero:after{content:"";position:absolute;border-radius:999px;border:1px solid rgba(255,255,255,.12)}
-.evf-home-hero:before{width:205px;height:205px;right:-78px;top:-68px}
-.evf-home-hero:after{width:130px;height:130px;right:-18px;top:-32px}
-.evf-home-kicker{position:absolute;top:22px;left:24px;font-size:11px;font-weight:800;letter-spacing:3px;opacity:.65}
-.evf-home-greeting{font-size:29px;font-weight:800;letter-spacing:-.8px;position:relative;z-index:1}
-.evf-home-date{font-size:13px;opacity:.68;margin-top:5px;position:relative;z-index:1}
-.evf-home-section-title{font-size:14px;font-weight:800;margin:18px 4px 10px;letter-spacing:.1px}
-.evf-home-grid{display:grid;grid-template-columns:1fr;gap:11px}
+/* Home: espaçamento consistente e compatível com modo escuro */
+.evf-home-premium{padding:0 0 22px;}
+.evf-home-hero{position:relative;overflow:hidden;border-radius:24px;padding:24px 22px 22px;margin-bottom:14px;background:linear-gradient(145deg,#172b3d 0%,#29465c 58%,#3f6f8b 100%);color:#fff;min-height:236px;display:flex;flex-direction:column;justify-content:flex-end;box-shadow:0 14px 30px rgba(24,48,67,.14);}
+.evf-home-hero:before,.evf-home-hero:after{content:"";position:absolute;border-radius:999px;border:1px solid rgba(255,255,255,.12);}
+.evf-home-hero:before{width:205px;height:205px;right:-78px;top:-68px;}
+.evf-home-hero:after{width:130px;height:130px;right:-18px;top:-32px;}
+.evf-home-kicker{position:relative;inset:auto;margin-bottom:auto;padding-right:48px;font-size:11px;font-weight:800;letter-spacing:2px;opacity:.72;}
+.evf-home-greeting{max-width:16ch;font-size:28px;font-weight:800;letter-spacing:-.04em;line-height:1.12;position:relative;z-index:1;}
+.evf-home-date{font-size:14px;opacity:.76;margin-top:6px;position:relative;z-index:1;}
+.evf-home-section-title{font-size:12px;font-weight:750;margin:18px 4px 10px;letter-spacing:.08em;text-transform:uppercase;color:var(--muted);}
 .evf-home-tile{
-  position:relative;text-align:left;border:1px solid #e3e8ec;background:#fff;border-radius:20px;
-  padding:18px 50px 18px 18px;min-height:105px;box-shadow:0 7px 22px rgba(20,40,55,.055);
-  color:inherit;cursor:pointer
+  position:relative;text-align:left;border:1px solid var(--ef-border);background:var(--ef-home-card,var(--surface));border-radius:18px;
+  padding:14px 36px 14px 14px;min-height:88px;box-shadow:0 3px 12px rgba(20,40,55,.045);
+  color:inherit;cursor:pointer;
 }
-.evf-home-tile-icon{width:43px;height:43px;border-radius:13px;background:#e9eff3;display:flex;align-items:center;justify-content:center;color:#35566d;margin-bottom:12px}
-.evf-home-tile-title{font-size:17px;font-weight:800}
-.evf-home-tile-sub{font-size:12px;color:var(--muted);margin-top:4px}
-.evf-home-arrow{position:absolute;right:18px;top:50%;transform:translateY(-50%);font-size:23px;color:#7d8b96}
+.evf-home-arrow{position:absolute;right:12px;top:50%;transform:translateY(-50%);font-size:18px;color:var(--coral);}
 
-/* ===== Professional design system v2: consistent, calm and mobile-first ===== */
+/* ===== Sistema visual v2: cartões, controlos e organização ===== */
 :root{--ef-radius-card:20px;--ef-radius-control:14px;--ef-shadow-card:0 4px 16px rgba(23,33,43,.055);}
 [data-theme="dark"]{--ef-shadow-card:0 4px 18px rgba(0,0,0,.24);}
 #root .card,#root .stat,#root .progress-card,#root .chart-card,#root .metric,#root .body-summary,#root .coach27-mini{
@@ -5623,15 +5633,14 @@ button,input,select,textarea{font-family:inherit;}
   border-radius:var(--ef-radius-card)!important;
   box-shadow:var(--ef-shadow-card)!important;
 }
+#root .card{padding:17px!important;margin-bottom:14px!important;}
 #root .card .card{border-radius:15px!important;box-shadow:none!important;}
-#root .tabhead{align-items:center;margin:5px 0 17px;}
-#root .tabhead h1{font-size:27px!important;letter-spacing:-.04em!important;}
-#root .tabhead p{margin-top:5px!important;}
 #root .menu-btn,#root .theme-toggle,#root .btn-primary,#root .btn-ghost,#root .btn-solid,#root .big-btn,#root .period-btn,#root .menu-tab,#root .chip,#root .seg-b,#root .evf-home-tile{
   border-radius:var(--ef-radius-control)!important;
   transition:transform 150ms ease,background-color 150ms ease,border-color 150ms ease,color 150ms ease,box-shadow 150ms ease;
 }
-#root .menu-btn,#root .theme-toggle,#root .btn-primary,#root .btn-ghost,#root .btn-solid,#root .period-btn,#root .menu-tab,#root .chip,#root .seg-b{min-height:44px;}
+#root .menu-btn,#root .btn-primary,#root .btn-ghost,#root .btn-solid,#root .period-btn,#root .menu-tab,#root .chip{min-height:44px;}
+#root .seg-b{min-height:40px;padding:8px 6px;}
 #root .menu-btn:hover,#root .theme-toggle:hover,#root .btn-primary:hover,#root .btn-ghost:hover,#root .btn-solid:hover,#root .big-btn:hover,#root .period-btn:hover,#root .menu-tab:hover,#root .chip:hover{border-color:color-mix(in srgb,var(--coral) 35%,var(--border));}
 #root button:active{transform:translateY(1px);}
 #root input:not([type="checkbox"]):not([type="radio"]),#root select,#root textarea{
@@ -5645,15 +5654,16 @@ button,input,select,textarea{font-family:inherit;}
   outline:none!important;
 }
 #root .evf-home-hero{
-  min-height:248px!important;
+  min-height:236px!important;
   padding:24px 22px 22px!important;
+  margin-bottom:14px!important;
   border-radius:24px!important;
   box-shadow:0 14px 30px rgba(24,48,67,.14)!important;
 }
-#root .evf-home-greeting{max-width:15ch;font-size:28px!important;letter-spacing:-.045em!important;line-height:1.12!important;}
+#root .evf-home-greeting{max-width:16ch;font-size:28px!important;letter-spacing:-.04em!important;line-height:1.12!important;}
 #root .evf-home-date{font-size:14px!important;}
-#root .evf-home-section-title{margin:10px 3px 0!important;font-size:12px!important;letter-spacing:.08em!important;}
-#root .evf-home-tile{min-height:88px!important;box-shadow:0 3px 12px rgba(20,40,55,.045)!important;}
+#root .evf-home-section-title{margin:18px 4px 10px!important;font-size:12px!important;letter-spacing:.08em!important;}
+#root .evf-home-tile{min-height:88px!important;background:var(--ef-home-card,var(--surface))!important;border-color:var(--ef-border)!important;box-shadow:0 3px 12px rgba(20,40,55,.045)!important;}
 #root .tabbar{
   z-index:15;
   padding:7px 10px calc(7px + env(safe-area-inset-bottom))!important;
@@ -5673,7 +5683,7 @@ button,input,select,textarea{font-family:inherit;}
   color:var(--coral)!important;
 }
 #root .tab[aria-current="page"] svg{transform:translateY(-1px);}
-#root .tab span{font-size:11px!important;font-weight:650!important;}
+#root .tab span{font-size:11.5px!important;font-weight:650!important;}
 [data-theme="dark"] #root .tabbar{box-shadow:0 -8px 24px rgba(0,0,0,.24)!important;}
 @media (min-width:560px){
   #root .app-wrap{align-items:center;padding:20px;background:radial-gradient(ellipse at 50% 8%,#E8EEF2 0%,var(--ef-bg) 62%);}
@@ -5682,8 +5692,10 @@ button,input,select,textarea{font-family:inherit;}
 }
 @media (max-width:380px){
   #root .scroll{padding-left:14px!important;padding-right:14px!important;}
-  #root .evf-home-hero{min-height:230px!important;padding:22px 18px 19px!important;}
-  #root .evf-home-greeting{font-size:26px!important;}
+  #root .evf-menu-btn{right:14px;}
+  #root .evf-home-hero{min-height:224px!important;padding:22px 18px 19px!important;}
+  #root .evf-home-greeting{font-size:25px!important;}
+  #root .tabhead h1{font-size:24px!important;}
   #root .tabbar{padding-left:5px!important;padding-right:5px!important;}
 }
 @media (prefers-reduced-motion:reduce){
