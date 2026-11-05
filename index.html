@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=31">
+<link rel="stylesheet" href="evolvefit-polish.css?v=32">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -4279,13 +4279,7 @@ function WorkoutLogger({
  const autoSaveDirty=useRef(false);
  const flushAutoSave=useRef(null);
  const [openIdx, setOpenIdx] = useState(() => firstIncomplete(exercises.map(initRow)));
- const [openNotes, setOpenNotes] = useState(() => {
- const o = {};
- exercises.forEach((x, i) => {
- if (x.notes) o[i] = true;
- });
- return o;
- });
+ const [openNotes, setOpenNotes] = useState({});
  useEffect(() => {
  if (draft.length !== exercises.length) {
  const next = exercises.map((x, i) => draft[i] || initRow(x));
