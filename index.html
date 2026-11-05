@@ -557,6 +557,17 @@ const normDecInput = s => {
 };
 const OLD_SHARED_KEY = "lifeos_v4_goncalo"; // chave usada antes desta correção
 const DEVICE_BACKUP_KEY = BASE_KEY + "_device_backup";
+const DEVICE_BACKUP_OWNER_KEY = BASE_KEY + "_device_backup_owner";
+const backupOwner = uid => uid ? "uid:" + uid : "local";
+const backupKeyFor = uid => DEVICE_BACKUP_KEY + "_" + encodeURIComponent(backupOwner(uid));
+const hasOtherAccountCache = uid => {
+ for(let i=0;i<localStorage.length;i++){
+  const key=localStorage.key(i);
+  if(key&&((key.startsWith(BASE_KEY+"_u_")&&key!==keyFor(uid))||
+    (key.startsWith(DEVICE_BACKUP_KEY+"_uid%3A")&&key!==backupKeyFor(uid))))return true;
+ }
+ return false;
+};
 
 const load = uid => {
  try {
@@ -571,26 +582,17 @@ const load = uid => {
    };
 
    add(localStorage.getItem(keyFor(uid)), "account");
-   if (!candidates.length) add(localStorage.getItem(OLD_SHARED_KEY), "old");
-   add(localStorage.getItem(DEVICE_BACKUP_KEY), "device");
-
-   if (!candidates.length) {
-     let best = null, bestLen = 0;
-     for (let i = 0; i < localStorage.length; i++) {
-       const kk = localStorage.key(i);
-       if (kk && kk.indexOf(BASE_KEY) === 0 &&
-           kk !== keyFor(uid) && kk !== OLD_SHARED_KEY &&
-           kk !== DEVICE_BACKUP_KEY) {
-         const raw = localStorage.getItem(kk);
-         if (raw && raw.length > bestLen) {
-           try {
-             const o = JSON.parse(raw);
-             if (o && o.sessions) { best = raw; bestLen = raw.length; }
-           } catch (e) {}
-         }
-       }
-     }
-     add(best, "legacy");
+   const owner=localStorage.getItem(DEVICE_BACKUP_OWNER_KEY);
+   const otherAccount=hasOtherAccountCache(uid);
+   add(localStorage.getItem(backupKeyFor(uid)), "privateBackup");
+   // Uma cópia partilhada só é segura quando tem dono identificado.
+   // Cópias anteriores sem dono só servem para a primeira migração local,
+   // nunca para substituir uma conta existente nem para saltar entre contas.
+   if(owner===backupOwner(uid)||(!owner&&!candidates.length&&!otherAccount))
+     add(localStorage.getItem(DEVICE_BACKUP_KEY), "legacyDevice");
+   if(!candidates.length&&!otherAccount) {
+     if(uid) add(localStorage.getItem(keyFor(null)), "local");
+     if(!candidates.length) add(localStorage.getItem(OLD_SHARED_KEY), "old");
    }
 
    if (!candidates.length) return null;
@@ -599,7 +601,7 @@ const load = uid => {
    const payload = JSON.stringify(winner);
    try {
      localStorage.setItem(keyFor(uid), payload);
-     localStorage.setItem(DEVICE_BACKUP_KEY, payload);
+     localStorage.setItem(backupKeyFor(uid), payload);
    } catch (e) {}
    return winner;
  } catch (e) {
@@ -640,7 +642,7 @@ const save = (s, uid) => {
  try {
    const payload = JSON.stringify(s);
    localStorage.setItem(keyFor(uid), payload);
-   localStorage.setItem(DEVICE_BACKUP_KEY, payload);
+   localStorage.setItem(backupKeyFor(uid), payload);
    if (s && ((s.body && s.body.length) || (s.sessions && s.sessions.length) || Object.keys(s.days||{}).length)) snapshotDaily(payload,uid);
    setLocalSaveStatus(null);
    return true;
@@ -863,7 +865,7 @@ async function evolveFitMergeDeviceStateIntoAccount(uid,deviceState){
   tx.set(ref,toCloud(merged));
  });
  save(merged,uid);
- cloudQueueClear();
+ cloudQueueClear(uid);
  return merged;
 }
 
@@ -890,7 +892,11 @@ async function evolveFitAccountAuth(mode,email,password){
   const user=(credential&&credential.user)||fbAuth.currentUser;
   if(!user)throw new Error("O Firebase não devolveu uma sessão autenticada.");
   let mergeWarning="";
-  if(deviceState&&(!previous||previous.uid!==user.uid)){
+  // Só o modo local/anónimo é migrado. Trocar entre contas autenticadas
+  // não importa automaticamente os registos privados da conta anterior.
+  const localOrigin=!previous&&window.__evfCurrentUid==null;
+  const anonymousOrigin=previous?.isAnonymous&&window.__evfCurrentUid===previous.uid;
+  if(deviceState&&(localOrigin||anonymousOrigin)&&previous?.uid!==user.uid){
    try{await evolveFitMergeDeviceStateIntoAccount(user.uid,deviceState);}
    catch(error){
     mergeWarning=String(error?.message||error);
@@ -915,15 +921,26 @@ async function evolveFitAccountAuth(mode,email,password){
  match /users/{uid} { allow read, write: if request.auth.uid == uid; } */
 const EVOLVEFIT_CLOUD_QUEUE_KEY = "evolvefit_cloud_pending_v1";
 
-function cloudQueueRead(){
-  try { return JSON.parse(localStorage.getItem(EVOLVEFIT_CLOUD_QUEUE_KEY) || "null"); }
-  catch(e){ return null; }
+const cloudQueueKey = uid => EVOLVEFIT_CLOUD_QUEUE_KEY + "_" + encodeURIComponent(uid);
+function cloudQueueRead(uid){
+  if(!uid)return null;
+  try {
+    const current=localStorage.getItem(cloudQueueKey(uid));
+    const pending=JSON.parse(current||localStorage.getItem(EVOLVEFIT_CLOUD_QUEUE_KEY)||"null");
+    return pending?.uid===uid?pending:null;
+  } catch(e){ return null; }
 }
 function cloudQueueWrite(payload){
-  try { localStorage.setItem(EVOLVEFIT_CLOUD_QUEUE_KEY, JSON.stringify(payload)); } catch(e){}
+  if(!payload?.uid)return;
+  try { localStorage.setItem(cloudQueueKey(payload.uid), JSON.stringify(payload)); } catch(e){}
 }
-function cloudQueueClear(){
-  try { localStorage.removeItem(EVOLVEFIT_CLOUD_QUEUE_KEY); } catch(e){}
+function cloudQueueClear(uid){
+  if(!uid)return;
+  try {
+    localStorage.removeItem(cloudQueueKey(uid));
+    const legacy=JSON.parse(localStorage.getItem(EVOLVEFIT_CLOUD_QUEUE_KEY)||"null");
+    if(legacy?.uid===uid)localStorage.removeItem(EVOLVEFIT_CLOUD_QUEUE_KEY);
+  } catch(e){}
 }
 
 /* ---- Sincronização segura entre dispositivos ------------------------------
@@ -973,7 +990,7 @@ function evfUnflatten(flat, tmpl){
 function evfFlatEqual(a, b){
   const ka = Object.keys(a || {}), kb = Object.keys(b || {});
   if(ka.length !== kb.length) return false;
-  for(let i = 0; i < ka.length; i++){ if(a[ka[i]] !== b[ka[i]]) return false; }
+  for(const key of ka){ if(!Object.prototype.hasOwnProperty.call(b,key) || a[key] !== b[key]) return false; }
   return true;
 }
 function evfMerge3(baseFlat, localS, remoteS){
@@ -1011,7 +1028,7 @@ async function evolveFitCloudSave(uid, state){
   // localmente e na fila; é enviada logo a seguir à primeira leitura.
   if(!window.__evfRemoteSeen) return false;
   // Junta alterações seguidas (ex.: a escrever um número) numa só escrita ~0,6 s depois.
-  window.__evfPending = {uid, payload, state};
+  window.__evfPending = {uid, payload, state, base: window.__evfBase};
   clearTimeout(window.__evfTimer);
   window.__evfTimer = setTimeout(evolveFitCloudWriteNow, 600);
   return true;
@@ -1038,7 +1055,7 @@ async function evolveFitCloudWriteNow(){
         if(remote){
           const R = evfFlatten(remote);
           if(!evfFlatEqual(R, evfFlatten(st))){
-            const B = window.__evfBase || null;
+            const B = pend.base || null;
             // Se outro dispositivo escreveu entretanto, junta as duas versões.
             if(!B || !evfFlatEqual(R, B)) st = normalize(evfMerge3(B, st, remote));
           }
@@ -1047,23 +1064,26 @@ async function evolveFitCloudWriteNow(){
       finalState = st;
       tx.set(ref, toCloud(st));
     });
-    window.__evfRetry = 0;
-    window.__evfBase = evfFlatten(finalState);
-    window.__evfBaseAt = Number(finalState._updatedAt) || 0;
-    window.__evfBaseConfirmed = true;
-    if(finalState !== pend.state){
-      // Chegaram dados de outro dispositivo: trazê-los para o ecrã.
-      try{ window.dispatchEvent(new CustomEvent("evolvefit-merged", {detail: {pre: pend.state, merged: finalState}})); }catch(e){}
-    }
-    if(!window.__evfPending){
-      cloudQueueClear();
-      window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
+    const queued=cloudQueueRead(pend.uid);
+    if(queued?.payload?._json===pend.payload?._json)cloudQueueClear(pend.uid);
+    if(fbAuth?.currentUser?.uid===pend.uid){
+      window.__evfRetry = 0;
+      window.__evfBase = evfFlatten(finalState);
+      window.__evfBaseAt = Number(finalState._updatedAt) || 0;
+      window.__evfBaseConfirmed = true;
+      if(finalState !== pend.state){
+        // Só a conta que iniciou a escrita pode receber esta fusão.
+        try{ window.dispatchEvent(new CustomEvent("evolvefit-merged", {detail: {uid:pend.uid,pre:pend.state,merged:finalState}})); }catch(e){}
+      }
+      if(!window.__evfPending)window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
     }
     return true;
   }catch(e){
-    window.__evfLastCloudError = ((e && (e.code || e.name)) || "erro") + ": " + ((e && e.message) || "");
-    const off = !navigator.onLine || (e && e.code === "unavailable");
-    window.evfSetCloudStatus && window.evfSetCloudStatus(off ? "offline" : "error");
+    if(fbAuth?.currentUser?.uid===pend.uid){
+      window.__evfLastCloudError = ((e && (e.code || e.name)) || "erro") + ": " + ((e && e.message) || "");
+      const off = !navigator.onLine || (e && e.code === "unavailable");
+      window.evfSetCloudStatus && window.evfSetCloudStatus(off ? "offline" : "error");
+    }
     console.error("Erro ao guardar na nuvem:", e);
     // A cópia continua guardada na fila local: tenta de novo daqui a pouco.
     window.__evfRetry = (window.__evfRetry || 0) + 1;
@@ -1075,7 +1095,8 @@ document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==
 window.addEventListener("pagehide",()=>{ evolveFitCloudWriteNow(); });
 
 async function evolveFitFlushCloudQueue(){
-  const q = cloudQueueRead();
+  const currentUid=fbAuth?.currentUser?.uid;
+  const q = cloudQueueRead(currentUid);
   if(!q || !navigator.onLine || !fbDb || !q.uid || !q.payload) return;
   if(!window.__evfRemoteSeen || window.__evfPending) return;
   const cu = fbAuth && fbAuth.currentUser;
@@ -2522,7 +2543,7 @@ function AccountAuthTools({user}){
  );
  return h("div",{className:"evf-account-card evf-auth-tools"},
   h("div",{className:"evf-account-label"},"Sincronizar PC e telemóvel"),
-  h("p",{className:"evf-tools-note"},user&&!user.isAnonymous?"Entra com a conta que queres usar nos dois dispositivos. Ao mudar de conta, os registos deste dispositivo serão unidos à conta escolhida.":"Cria uma conta com email e palavra-passe neste dispositivo; depois entra com ela nos restantes."),
+  h("p",{className:"evf-tools-note"},user&&!user.isAnonymous?"Entra com a conta que queres usar nos dois dispositivos. Ao mudar de conta, os registos de cada conta continuam separados.":"Cria uma conta com email e palavra-passe neste dispositivo; depois entra com ela nos restantes."),
   h("div",{className:"evf-auth-mode-tabs",role:"group","aria-label":"Ação da conta"},
    h("button",{type:"button",className:"menu-btn evf-tool-button"+(mode==="create"?" main":""),"aria-pressed":mode==="create",onClick:()=>{setMode("create");setMessage("");}},"Criar conta"),
    h("button",{type:"button",className:"menu-btn evf-tool-button"+(mode==="signin"?" main":""),"aria-pressed":mode==="signin",onClick:()=>{setMode("signin");setMessage("");}},"Entrar")
@@ -2754,7 +2775,7 @@ function Dashboard({
  }
  window.__evfRemoteSeen = false;
  window.__evfRemoteUpdatedAt = 0;
- const q = cloudQueueRead();
+ const q = cloudQueueRead(uid);
  const cur = stateRef.current || {};
  // Fila vazia = o que está aqui já foi enviado (base = estado local). Fila com
  // alterações por enviar = base desconhecida (junta tudo na primeira leitura).
@@ -2766,7 +2787,7 @@ function Dashboard({
  useEffect(() => {
  const onMerged = e => {
  const d = e.detail;
- if (!d || !d.pre || !d.merged) return;
+ if (!d || d.uid!==uid || !d.pre || !d.merged) return;
  try {
  const cur = stateRef.current || d.pre;
  const res = normalize(evfMerge3(evfFlatten(d.pre), cur, d.merged));
@@ -2794,6 +2815,7 @@ function Dashboard({
  if (!uid || !fbDb) return;
  const ref = fbDb.collection("users").doc(uid);
  const unsub = ref.onSnapshot(snap => {
+ if(fbAuth?.currentUser?.uid!==uid)return;
  if (snap.metadata.hasPendingWrites) {
    window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
    return;
@@ -2812,7 +2834,7 @@ function Dashboard({
    window.__evfBase = evfFlatten(local);
    window.__evfBaseAt = lAt;
    window.__evfBaseConfirmed = true;
-   cloudQueueClear();
+   cloudQueueClear(uid);
    window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
  }).catch(e => console.error(e));
  return;
@@ -2839,7 +2861,7 @@ function Dashboard({
  if (evfFlatEqual(L, R)) { // já está tudo igual
    window.__evfBase = R;
    window.__evfBaseAt = rAt;
-   cloudQueueClear();
+   cloudQueueClear(uid);
    window.evfSetCloudStatus && window.evfSetCloudStatus("saved");
    return;
  }
@@ -2862,7 +2884,7 @@ function Dashboard({
    window.__evfCurrentState=remote;
    window.evfSetCloudStatus && window.evfSetCloudStatus("remote");
    setState(remote);
-   cloudQueueClear();
+   cloudQueueClear(uid);
    return;
  }
  if (!remoteChanged) {
@@ -2881,8 +2903,9 @@ function Dashboard({
  window.evfSetCloudStatus && window.evfSetCloudStatus("saving");
  setState(merged);
  if (!evfFlatEqual(evfFlatten(merged), R)) evolveFitCloudSave(uid, JSON.parse(JSON.stringify(merged)));
- else cloudQueueClear();
+ else cloudQueueClear(uid);
  }, err => {
+ if(fbAuth?.currentUser?.uid!==uid)return;
  setCloudReady(true);
  window.__evfLastCloudError = ((err && (err.code || err.name)) || "erro") + ": " + ((err && err.message) || "");
  window.evfSetCloudStatus && window.evfSetCloudStatus("error");
@@ -5847,6 +5870,7 @@ function App() {
  }
  }, "A carregar…")));
  return /*#__PURE__*/React.createElement(Dashboard, {
+ key: user?.uid || "local",
  user: user || null
  });
 }
