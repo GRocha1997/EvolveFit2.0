@@ -2785,6 +2785,14 @@ function Dashboard({
    return p;
  }
 });
+ useEffect(()=>{
+  const needsPlanMetadata=(state.plano||[]).some(day=>(day.ex||[]).some(ex=>!["anchor","secondary","isolation"].includes(ex.progressionCategory)||typeof ex.optionalExtraSetCycleStart!=="string"));
+  if(!needsPlanMetadata)return;
+  update(s=>(s.plano||[]).forEach(day=>(day.ex||[]).forEach(ex=>{
+   if(!["anchor","secondary","isolation"].includes(ex.progressionCategory))ex.progressionCategory=progressionCategory(ex);
+   if(typeof ex.optionalExtraSetCycleStart!=="string")ex.optionalExtraSetCycleStart="";
+  })));
+ },[state.plano]);
  const onNavigate = id => {
    setWDay(null);
    setTab(id);
@@ -3312,6 +3320,7 @@ function Workouts({
  if(kcal>0) workoutStats.push(React.createElement(Stat,{key:"kcal",icon:"flame",tint:"amber",v:kcal,l:"kcal do treino"}));
  const selectedDayKey = weekDays[sel] ? weekDays[sel].key : todayKey;
  const progressionCycleStart=state.profile?.progressionCycleStart||currentWeekDays[0].key;
+ const activeCycleStart=progressionCycleStartFor(progressionCycleStart,selectedDayKey)||progressionCycleStart;
  const cycleWeek=state.profile?.progressionCycleStart?progressionWeekNumber(progressionCycleStart,selectedDayKey):1;
  const selectedSession = state.sessions.find(s => s.date === selectedDayKey && s.dayIdx === sel) || null;
  const loggedSelected = !!selectedSession;
@@ -3326,10 +3335,11 @@ function Workouts({
  // Usa sempre a prescrição atual no registo; uma sessão antiga da semana não deve
  // voltar a mostrar a lista de exercícios do plano anterior. Os seus dados ficam
  // guardados na sessão/histórico e são usados para pré-preencher movimentos compatíveis.
- const loggerExercises = fridayFallback ? [
+ const loggerBaseExercises = fridayFallback ? [
   ...(plano[1]?.ex||[]).filter(x=>/hack/i.test(x.name||"")).slice(0,1),
   ...(plano[4]?.ex||[]).filter(x=>/romanian deadlift|hip thrust|leg curl|calf raise/i.test(x.name||""))
  ] : (plano[sel]?.ex||[]);
+ const loggerExercises = loggerBaseExercises.map(x=>({...x,sets:effectiveSetCount(x,cycleWeek,activeCycleStart)}));
  const saveSession = (entries,cardioEntries=[]) => update(s => {
   s.profile=s.profile&&typeof s.profile==="object"?s.profile:{};
   if(!s.profile.progressionCycleStart)s.profile.progressionCycleStart=currentWeekDays[0].key;
@@ -3350,7 +3360,8 @@ function Workouts({
 
  const setPlanEx = (di, xi, f, val) => update(s => {
  const ex=s.plano[di].ex[xi];
- ex[f] = f === "name" || f === "notes" ? val : f === "weight" || f === "plateStepKg" || f === "machineStepKg" ? parseNum(val) : parseInt(val, 10) || 0;
+ ex[f] = f === "name" || f === "notes" || f === "optionalExtraSetCycleStart" ? val : f === "weight" || f === "plateStepKg" || f === "machineStepKg" ? parseNum(val) : parseInt(val, 10) || 0;
+ if(f==="name")ex.progressionCategory=progressionCategory({...ex,name:String(val||""),progressionCategory:null});
  if(f==="weight"&&Number(ex.weight)>0&&ex.week1Start==null){ex.week1Start=Number(ex.weight);ex.week1StartLabel=fmtNum(ex.weight)+" kg";}
  });
  const setPlanName = (di, val) => update(s => {
@@ -3362,7 +3373,9 @@ function Workouts({
  reps: 10,
  repsMax: 0,
  weight: 0,
- rir: DEFAULT_RIR
+ rir: DEFAULT_RIR,
+ progressionCategory: "secondary",
+ optionalExtraSetCycleStart: ""
  }));
  const delPlanEx = (di, xi) => update(s => s.plano[di].ex.splice(xi, 1));
  const reorderPlanEx = (di, order) => update(s => {
@@ -3452,7 +3465,8 @@ function Workouts({
  today: todaySession,
  last: lastSession,
  cycleWeek,
- cycleStart: progressionCycleStart
+ cycleStart: progressionCycleStart,
+ extraSetCycleStart: activeCycleStart
  }))), view === "progresso" && React.createElement(React.Fragment,null,
  React.createElement("div",{className:"progress-exercise-filter"},
    React.createElement("div",{className:"progress-exercise-filter-label"},"Escolhe o treino"),
@@ -3481,7 +3495,8 @@ function Workouts({
  onAdd: addPlanEx,
  onDelete: delPlanEx,
  onReorder: reorderPlanEx,
- cycleWeek
+ cycleWeek,
+ cycleStart: activeCycleStart
  })), /*#__PURE__*/React.createElement("div", {
  className: "pad"
  }));
@@ -3495,22 +3510,69 @@ const RIR_OPTS = [0, 1, 2, 3, 4];
 const RIR_COLORS = ["#C0392B", "#C98A1B", "#1E9E6A", "#0E8F9E", "#5B6BC0"];
 const rirOf = x => x && x.rir != null ? x.rir : DEFAULT_RIR;
 const rirLabel = v => v >= 4 ? "4+" : String(v);
+function progressionCategory(exercise) {
+ if(exercise?.progressionCategory)return exercise.progressionCategory;
+ if(exercise?.anchor)return "anchor";
+ const name=String(exercise?.name||"");
+ if(/\b(lateral|curl|pushdown|extension|fly|pec deck|calf|gémeos|gêmeos|crunch|hanging leg raise|abdominal|abs)\b/i.test(name))return "isolation";
+ return "secondary";
+}
+function rirTargetsFor(exercise,cycleWeek) {
+ if(cycleWeek===1||cycleWeek===8)return [3];
+ const category=progressionCategory(exercise);
+ return category==="anchor"?[1,2]:category==="secondary"?[0,1]:[0];
+}
+function preferredRirFor(exercise,cycleWeek) {
+ if(cycleWeek===1||cycleWeek===8)return 3;
+ const category=progressionCategory(exercise);
+ return category==="anchor"||category==="secondary"?1:0;
+}
+function rirTargetLabel(exercise,cycleWeek) {
+ if(cycleWeek===1)return "3 (semana 1)";
+ if(cycleWeek===8)return "3 (deload)";
+ const category=progressionCategory(exercise);
+ return category==="anchor"?"1–2 (âncora)":category==="secondary"?"0–1 (secundário)":"0 na última série";
+}
+function rirInstruction(exercise,cycleWeek) {
+ if(cycleWeek===1)return "Semana 1: mantém RIR 3 em todas as séries.";
+ if(cycleWeek===8)return "Deload: mantém RIR 3 e evita a falha.";
+ const category=progressionCategory(exercise);
+ if(category==="anchor")return "Âncora: última série em RIR 1–2; nunca RIR 0.";
+ if(category==="secondary")return "Secundário: última série em RIR 0–1.";
+ return "Isolamento: séries anteriores em RIR 1; última série em RIR 0 (falha técnica).";
+}
+const OPTIONAL_EXTRA_SET_IDS=new Set(["v5-mon-db-lateral","v5-tue-leg-extension","v5-wed-reverse-pec","v5-thu-cable-lateral","v5-fri-lying-curl"]);
+function isOptionalSetCandidate(exercise) {
+ return OPTIONAL_EXTRA_SET_IDS.has(exercise?.exerciseId)||/\b(lateral raise|leg extension|reverse pec deck|lying leg curl)\b/i.test(String(exercise?.name||""));
+}
+function effectiveSetCount(exercise,cycleWeek,cycleStart) {
+ const base=parseInt(exercise?.sets,10)||0;
+ const optedIn=!!cycleStart&&exercise?.optionalExtraSetCycleStart===cycleStart;
+ return base+(cycleWeek>=5&&cycleWeek<=7&&optedIn&&isOptionalSetCandidate(exercise)?1:0);
+}
+PLAN.forEach(day=>day.ex.forEach(exercise=>{
+ exercise.progressionCategory=progressionCategory(exercise);
+ exercise.optionalExtraSetCycleStart=String(exercise.optionalExtraSetCycleStart||"");
+}));
 function RirChips({
  value,
  target,
  onChange,
  small,
- clearable
+ clearable,
+ readOnly=false
 }) {
+ const targets=Array.isArray(target)?target:[target];
  return /*#__PURE__*/React.createElement("div", {
  className: "rir-chips" + (small ? " sm" : "")
- }, RIR_OPTS.map(n => /*#__PURE__*/React.createElement("button", {
+ }, RIR_OPTS.map(n => /*#__PURE__*/React.createElement(readOnly?"span":"button", {
  key: n,
- type: "button",
- className: "rir-chip" + (value === n ? " on" : "") + (target === n && value !== n ? " tgt" : ""),
+ type: readOnly?undefined:"button",
+ className: "rir-chip" + (value === n ? " on" : "") + (targets.includes(n) && value !== n ? " tgt" : ""),
  "aria-label": "RIR " + rirLabel(n),
- "aria-pressed": value === n,
- onClick: () => onChange(clearable && value === n ? null : n)
+ "aria-pressed": readOnly?undefined:value === n,
+ style: readOnly?{cursor:"default"}:undefined,
+ onClick: readOnly?undefined:() => onChange(clearable && value === n ? null : n)
  }, rirLabel(n))));
 }
 function ExerciseProgressChart({exercise}) {
@@ -3565,11 +3627,12 @@ function arrayMove(arr, from, to) {
 function TrainingCycleGuide(){
  const h=React.createElement;
  const phases=[
-  {title:"SUBIR",text:"Todas as séries no topo + RIR final ≥ 2 nas âncoras ou ≥ 1 nos restantes. Incremento normal: tronco +2,5 kg · pernas +5 kg · máquinas: incremento em kg definido no plano."},
-  {title:"SUBIR ×2",text:"Alguma série ultrapassou o topo, ou todas no topo com RIR final ≥ 4 nas âncoras / ≥ 3 nos restantes. Duplica o incremento de carga."},
-  {title:"MANTER",text:"Se nenhuma série ultrapassou o topo e o topo não foi atingido em todas; também se o RIR final for 0 nos restantes ou 0–1 nas âncoras."},
-  {title:"DESCER",text:"Alguma série abaixo da base: desce 5–10%. Duas sessões no mesmo peso sem ganhar reps totais, ou duas descidas seguidas: desce 10% e reconstrói."},
-  {title:"Semanas específicas",text:"Semana 1: RIR alvo 3 em tudo, sem recomendações. Semana 8: deload, só registar. O incremento de carga das máquinas pode ser ajustado no Plano, em kg. O ciclo começa na semana atual, ao guardar a primeira sessão, e repete-se a cada 8 semanas."}
+  {title:"RIR por categoria",text:"Âncoras — Bench, Hack, Pulldown 4×5–8, Incline Smith e RDL: RIR 1–2 na última série, nunca 0. Secundários — Cable Row, Incline DB press, Leg Press, CS Row, Low Row, Chest Press unilateral, Shoulder Press, Hip Thrust e Búlgaro; também as restantes remadas, presses e pulldowns fora da âncora (ex.: Lat Pulldown larga): RIR 0–1 na última. Isolamentos — elevações laterais, curls, pushdowns, leg extension/curl, flys, gémeos e abdominais: séries anteriores RIR 1; última série RIR 0 (falha técnica)."},
+  {title:"SUBIR",text:"Com todas as séries no topo: âncoras com RIR ≥2; secundários com RIR ≥1; isolamentos independentemente do RIR. Incremento normal: tronco +2,5 kg · pernas +5 kg · máquinas: incremento em kg definido no plano."},
+  {title:"SUBIR ×2",text:"Qualquer série acima do topo dá SUBIR ×2. Também se todas chegarem ao topo: âncoras com RIR ≥4, secundários ≥3 ou isolamentos ≥2. Duplica o incremento de carga."},
+  {title:"MANTER / DESCER",text:"MANTER se o topo não for atingido em todas as séries; também em âncoras com RIR 0–1 ou secundários com RIR 0. Abaixo da base: desce 5–10%. Duas sessões no mesmo peso sem ganhar reps totais, ou duas descidas seguidas: desce 10% e reconstrói."},
+  {title:"Semanas 1 e 8",text:"Semana 1: RIR 3 em tudo, apenas registar e calibrar, sem recomendações. Semana 8: deload, RIR 3, sem falha nem recomendações."},
+  {title:"Volume opcional · semanas 5–7",text:"Se a recuperação estiver boa e o treino couber em 60 min, ativa +1 série no Plano para a lateral raise, leg extension, reverse pec deck, cable lateral raise e lying leg curl. A opção fica desligada por defeito."}
  ];
  return h("section",{className:"card training-cycle","aria-labelledby":"training-cycle-title"},
   h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Progressão dos treinos"),h("p",null,"Recomendação automática por exercício para a próxima sessão")),h("span",{className:"training-cycle-badge"},"AUTO")),
@@ -3585,6 +3648,7 @@ function PlanDayCard({
  d,
  di,
  cycleWeek=1,
+ cycleStart=null,
  onEditName,
  onEditField,
  onAdd,
@@ -3644,7 +3708,7 @@ function PlanDayCard({
  }), ico("arrowUp", () => move(i, -1), i === 0, "Subir"), ico("arrowDown", () => move(i, 1), i === d.ex.length - 1, "Descer"), ico("trash", () => onDelete(di, i), false, "Apagar exercício")), hasMeta(x) && h("div",{className:"plan-meta"},
   x.anchor&&h("span",{className:"plan-meta-anchor"},"Âncora pesada"),
   x.superset&&h("span",{className:"plan-meta-superset"},"Superset "+x.superset+(x.supersetPart?" · "+x.supersetPart:"")),
-  x.rirDisplay&&h("span",null,"RIR "+x.rirDisplay),
+  x.rirDisplay&&h("span",null,"RIR final "+rirTargetLabel(x,cycleWeek)),
   x.rest&&h("span",null,"Descanso "+x.rest),
   h("span",null,"Início: "+startMeta(x)),
   x.week8Target&&h("span",null,"Alvo sem. 8: "+x.week8Target)
@@ -3657,7 +3721,7 @@ function PlanDayCard({
  placeholder: "",
  value: x.weight,
  onCommit: n => onEditField(di, i, "weight", n)
- })),isMachineExercise(x)&&h("div",{className:"pl-f"},h("label",null,"Incremento da máquina (kg)"),h(DecInput,{className:"in",value:x.machineStepKg||x.plateStepKg||x.progressionStep||(/\bleg extension\b/i.test(x.name||"")?10:5),onCommit:n=>onEditField(di,i,"machineStepKg",n)}))), h("div", {
+ })),isMachineExercise(x)&&h("div",{className:"pl-f"},h("label",null,"Incremento da máquina (kg)"),h(DecInput,{className:"in",value:x.machineStepKg||x.plateStepKg||x.progressionStep||(/\bleg extension\b/i.test(x.name||"")?10:5),onCommit:n=>onEditField(di,i,"machineStepKg",n)}))), isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&h("label",{style:{display:"flex",alignItems:"flex-start",gap:8,margin:"9px 0",fontSize:12,lineHeight:1.4}},h("input",{type:"checkbox",checked:!!cycleStart&&x.optionalExtraSetCycleStart===cycleStart,style:{marginTop:2,accentColor:"var(--navy)"},onChange:e=>onEditField(di,i,"optionalExtraSetCycleStart",e.target.checked?cycleStart:"")}),h("span",null,"+1 série opcional (se recuperas bem e o treino cabe em 60 min).")), h("div", {
  className: "pex-rir",
  style: {
  paddingLeft: 0,
@@ -3665,11 +3729,11 @@ function PlanDayCard({
  }
  }, h("span", {
  className: "rir-lbl"
- }, "RIR alvo"), h(RirChips, {
- value: rirOf(x),
- target: cycleWeek===1?3:rirOf(x),
+ }, "RIR última série"), h(RirChips, {
+ value: preferredRirFor(x,cycleWeek),
+ target: rirTargetsFor(x,cycleWeek),
  small: true,
- onChange: v => onEditField(di, i, "rir", v)
+ readOnly: true
  })), h("input", {
  className: "in",
  value: x.notes || "",
@@ -3746,7 +3810,8 @@ function WorkoutLogger({
  cardioTarget=0,
  sessionNote="",
  cycleWeek=1,
- cycleStart=null
+ cycleStart=null,
+ extraSetCycleStart=null
 }) {
  const initRow = x => {
  const t = today && (today.ex||[]).find(e=>x.exerciseId&&e.exerciseId?e.exerciseId===x.exerciseId:e.name===x.name);
@@ -3882,7 +3947,8 @@ function WorkoutLogger({
  className: "log-progress-l"
  }, doneCount, "/", exercises.length, " concluídos")), exercises.map((x, i) => {
  const r = row(x, i);
- const tgt = cycleWeek===1?3:rirOf(x);
+ const tgt = preferredRirFor(x,cycleWeek);
+ const rirTargetRange=rirTargetsFor(x,cycleWeek);
  const matchExercise=se=>(se?.ex||[]).find(e=>x.exerciseId&&e.exerciseId?e.exerciseId===x.exerciseId:e.name===x.name);
  const prev = last && matchExercise(last);
  const hasCurrentReps=parseActualRepsBySet(r.repsBySet).length>0;
@@ -3934,11 +4000,12 @@ function WorkoutLogger({
  style:{margin:"0 12px 8px",padding:"8px 10px",borderRadius:"10px",background:"var(--surface2)"}
  },React.createElement("strong",null,recommendationLabel),sug.text), isOpen && /*#__PURE__*/React.createElement("div", {
  className: "log-panel"
- }, (x.anchor||x.superset||x.rest||x.week8Target) && React.createElement("div",{className:"log-plan-meta"},
+ }, (x.anchor||x.superset||x.rest||x.week8Target||(isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&x.optionalExtraSetCycleStart===extraSetCycleStart)) && React.createElement("div",{className:"log-plan-meta"},
   x.anchor&&React.createElement("span",{className:"plan-meta-anchor"},"Âncora pesada"),
   x.superset&&React.createElement("span",{className:"plan-meta-superset"},"Superset "+x.superset+(x.supersetPart?" · "+x.supersetPart:"")),
   x.rest&&React.createElement("span",null,"Descanso "+x.rest),
-  x.week8Target&&React.createElement("span",null,"Alvo sem. 8: "+x.week8Target)
+  x.week8Target&&React.createElement("span",null,"Alvo sem. 8: "+x.week8Target),
+  isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&x.optionalExtraSetCycleStart===extraSetCycleStart&&React.createElement("span",null,"Série extra ativa: +1")
  ), /*#__PURE__*/React.createElement("div", {
  className: "log-panel-row"
  }, /*#__PURE__*/React.createElement("input", {
@@ -3975,10 +4042,10 @@ function WorkoutLogger({
  className: "rir-lbl"
  }, "RIR final"), /*#__PURE__*/React.createElement(RirChips, {
  value: r.rir,
- target: tgt,
+ target: rirTargetRange,
  clearable: true,
  onChange: v => setField(i, "rir", v)
- })), openNotes[i] && /*#__PURE__*/React.createElement("input", {
+ })), /*#__PURE__*/React.createElement("div",{className:"rir-target-note",style:{fontSize:12,lineHeight:1.4,color:"var(--muted)",marginTop:-4,marginBottom:9}},rirInstruction(x,cycleWeek)), openNotes[i] && /*#__PURE__*/React.createElement("input", {
  className: "log-note",
  placeholder: "Nota (ex: técnica, sensação, próxima carga...)",
  value: r.notes,
@@ -4111,7 +4178,7 @@ function progressionLoadStep(exercise) {
 }
 const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycleStart) => {
  if(cycleWeek===1)return {action:"skip",k:"",text:"Semana 1 · RIR alvo 3 em tudo; só registar, sem recomendações."};
- if(cycleWeek===8)return {action:"skip",k:"",text:"Semana 8 · deload; só registar, sem recomendações."};
+ if(cycleWeek===8)return {action:"skip",k:"",text:"Semana 8 · deload, alvo RIR 3; só registar, sem recomendações."};
  if(!cycleWeek)return {action:"skip",k:"",text:"Ainda não há semana de ciclo definida; regista uma sessão para iniciar o ciclo."};
  const plannedSets=parseInt(exercise?.sets,10)||0;
  const minReps=parseInt(exercise?.reps,10)||0;
@@ -4121,8 +4188,9 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
  const hasWeight=current?.weight!=null&&String(current.weight).trim()!==""&&Number.isFinite(weight);
  const rir=current?.rir==null||current.rir===""?null:parseInt(current.rir,10);
  const step=progressionLoadStep(exercise);
- const requiredRir=exercise.anchor?2:1;
- const doubleRir=exercise.anchor?4:3;
+ const category=progressionCategory(exercise);
+ const requiredRir=category==="anchor"?2:category==="secondary"?1:0;
+ const doubleRir=category==="anchor"?4:category==="secondary"?3:2;
  const formatDown=(reason,ten=false)=>{
   const next5=weight>0?fmtNum(+(weight*.95).toFixed(2)):null;
   const next10=weight>0?fmtNum(+(weight*.9).toFixed(2)):null;
@@ -4156,7 +4224,7 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
   const allAtTop=entry.reps.every(n=>n>=maxReps);
   if(passedTop)return "up2";
   if(allAtTop&&entry.rir!=null&&entry.rir>=doubleRir)return "up2";
-  if(allAtTop&&entry.rir!=null&&entry.rir>=requiredRir)return "up";
+  if(allAtTop&&(category==="isolation"||entry.rir!=null&&entry.rir>=requiredRir))return "up";
   const recent=[...earlier.slice(-1),entry];
   if(recent.length===2&&noProgress(recent[0],recent[1]))return "down10";
   return "keep";
@@ -4183,7 +4251,8 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
  if(reps.some(n=>n>maxReps))return {action:"need",k:"",text:"Regista a carga atual para calcular a progressão."};
  if(!allAtTop)return {action:"keep",k:"",text:"MANTER: o topo ainda não foi atingido em todas as séries."};
  if(rir==null)return {action:"need",k:"",text:"Regista o RIR final para decidir se deves subir ou manter."};
- return {action:"keep",k:"warn",text:"MANTER: RIR final "+rirLabel(rir)+" abaixo do limiar de subida (≥ "+requiredRir+(exercise.anchor?" nas âncoras":" nos restantes")+")."};
+ const rirReason=category==="anchor"?"âncora (precisa de RIR ≥2 para SUBIR)":"secundário (precisa de RIR ≥1 para SUBIR)";
+ return {action:"keep",k:"warn",text:"MANTER: RIR final "+rirLabel(rir)+" abaixo do limiar de subida no "+rirReason+"."};
 };
 /* ============================ PROGRESSO CORPO =========================== */
 const BODY_METRICS = [{
