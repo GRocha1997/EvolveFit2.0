@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=27">
+<link rel="stylesheet" href="evolvefit-polish.css?v=30">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -662,6 +662,15 @@ function parseActualRepsBySet(value) {
 
 /* Garante que um estado guardado (possivelmente antigo/incompleto) tem todos os campos.
  Isto evita crashes e registos "a zero" quando a estrutura mudou entre versões. */
+function migrateTravelCalendarProfile(profile){
+ if(!profile||profile.progressionCycleStart!=="2026-11-10")return false;
+ profile.progressionCycleStart="2026-11-09";
+ const loads=profile.progressionWeek7Loads;
+ if(loads?.["2026-11-10"]&&!loads["2026-11-09"])loads["2026-11-09"]={...loads["2026-11-10"]};
+ if(profile.blockExtraSetCycleStart==="2027-01-26")profile.blockExtraSetCycleStart="2027-01-25";
+ if(profile.lastResetCycleStart==="2027-01-26")profile.lastResetCycleStart="2027-01-25";
+ return true;
+}
 function normalize(s) {
  if (!s || typeof s !== "object") return null;
  s.days = s.days && typeof s.days === "object" ? s.days : {};
@@ -690,6 +699,7 @@ function normalize(s) {
    cardio:Array.isArray(se.cardio)?se.cardio.filter(c=>c&&typeof c==="object").map(c=>({...c,name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0):[]
  }));
  s.profile = s.profile && typeof s.profile === "object" ? s.profile : {};
+ migrateTravelCalendarProfile(s.profile);
  delete s.profile.aiCloudConsent;
  delete s.profile.bfStart;
  delete s.profile.bfStartReviewed;
@@ -722,7 +732,7 @@ function normalize(s) {
  const planStructureIsCurrent=()=>Array.isArray(s.plano)&&s.plano.length===PLAN.length&&PLAN.every(day=>{
   const savedDay=s.plano.find(x=>x&&x.day===day.day);
   const exercises=savedDay&&Array.isArray(savedDay.ex)?savedDay.ex:[];
-  return !!savedDay&&day.ex.every(ex=>exercises.some(saved=>saved&&(saved.exerciseId===ex.exerciseId||planNameKey(saved.name)===planNameKey(ex.name))));
+  return !!savedDay&&day.ex.every(ex=>exercises.some(saved=>saved&&(saved.exerciseId===ex.exerciseId||planNameKey(saved.name)===planNameKey(ex.name)||s.profile.blockReviewPrevious?.[saved.exerciseId]?.exerciseId===ex.exerciseId)));
  });
  if (!Array.isArray(s.plano) || !s.plano.length) {
  s.plano = clone(PLAN);
@@ -744,6 +754,9 @@ function normalize(s) {
  s.plano=clone(PLAN).map(pd=>{
   const oldDay=oldPlan.find(x=>x&&x.day===pd.day);
   return {...pd,ex:pd.ex.map(ex=>{
+   // Uma troca aprovada pelo utilizador continua válida mesmo após uma migração do Plano.
+   const accepted=(oldDay?.ex||[]).find(prev=>s.profile.blockReviewPrevious?.[prev.exerciseId]?.exerciseId===ex.exerciseId);
+   if(accepted)return accepted;
    const keys=[planKey(ex.name),...(planAliases[planKey(ex.name)]||[]).map(planKey)];
    const sameDay=(oldDay&&Array.isArray(oldDay.ex)?oldDay.ex:[]).find(prev=>keys.includes(planKey(prev&&prev.name)));
    const anyDay=oldPlan.flatMap(x=>Array.isArray(x&&x.ex)?x.ex:[]).find(prev=>keys.includes(planKey(prev&&prev.name)));
@@ -1463,7 +1476,7 @@ const SECTIONS = [{
  tint: "green",
  tasks: [{
  id: "calorias_in",
- label: "Calorias ingeridas (2300–2400)",
+ label: "Calorias ingeridas (ver meta no Coach)",
  qty: true,
  unit: "kcal"
  }, {
@@ -1830,15 +1843,15 @@ function weekFromMonday(days) {
  return out;
 }
 // Pausa explícita do bloco de 2026. Só se aplica ao ciclo ativado no perfil.
-const TRAVEL_CYCLE_START="2026-11-10";
-const TRAVEL_PAUSE_START="2026-11-19",TRAVEL_PAUSE_END="2026-12-07",TRAVEL_RESUME="2026-12-08";
+const TRAVEL_CYCLE_START="2026-11-09";
+const TRAVEL_PAUSE_START="2026-11-19",TRAVEL_PAUSE_END="2026-12-06",TRAVEL_RESUME="2026-12-07";
 const isTravelCycle=startKey=>startKey===TRAVEL_CYCLE_START;
 const inTravelPause=(startKey,dateKey)=>isTravelCycle(startKey)&&dateKey>=TRAVEL_PAUSE_START&&dateKey<=TRAVEL_PAUSE_END;
 const utcDay=key=>{const [y,m,d]=String(key).split("-").map(Number);return Date.UTC(y,m-1,d);};
 function previousProgressionCycleStart(startKey,dateKey){
  const active=progressionCycleStartFor(startKey,dateKey);
  if(!active||active===startKey)return null;
- if(isTravelCycle(startKey)&&active==="2027-01-26")return startKey;
+ if(isTravelCycle(startKey)&&active==="2027-01-25")return startKey;
  return iso(addDays(new Date(active+"T12:00:00"),-56));
 }
 function globalProgressionWeekNumber(startKey,dateKey) {
@@ -1857,9 +1870,159 @@ function globalProgressionWeekNumber(startKey,dateKey) {
 }
 function progressionWeekNumber(startKey,dateKey) {
  const globalWeek=globalProgressionWeekNumber(startKey,dateKey);
- return globalWeek==null?null:((globalWeek-1)%8)+1;
+ if(globalWeek==null)return null;
+ // O segundo bloco da viagem arranca já treinado: 9–11 linear, 12–15 dupla, 16 deload.
+ if(isTravelCycle(startKey)&&globalWeek>=9&&globalWeek<=16)return globalWeek===16?8:globalWeek>=15?7:globalWeek-7;
+ if(globalWeek>=17){
+   const phase=(globalWeek-1)%8;
+   return [2,3,4,5,6,7,7,8][phase]; // bloco 3+: três lineares, quatro duplas, deload
+  }
+  return ((globalWeek-1)%8)+1;
+ }
+ const TRAVEL_WEIGHT_CHECKPOINTS={"2026-12-20":"91–92 kg","2027-01-10":"89,5–90,5 kg","2027-01-24":"88,5–89,5 kg"};
+const travelWeightCheckpoint=(startKey,dateKey)=>isTravelCycle(startKey)?TRAVEL_WEIGHT_CHECKPOINTS[dateKey]||null:null;
+function isBlockCheckpointDate(startKey,dateKey){
+ // O check-in é no domingo do deload: 24 jan, 21 mar, 16 mai, 11 jul...
+ if(!isTravelCycle(startKey)||!/^\d{4}-\d{2}-\d{2}$/.test(String(dateKey)))return false;
+ const days=(utcDay(dateKey)-utcDay("2027-01-24"))/86400000;
+ return days>=0&&days%56===0;
 }
-function progressionCycleStartFor(startKey,dateKey) {
+function blockWeek(startKey,dateKey){
+  const week=globalProgressionWeekNumber(startKey,dateKey);
+  return week!=null&&week>=9?((week-9)%8)+1:null;
+ }
+ const inBlock2Maintenance=(startKey,dateKey)=>isTravelCycle(startKey)&&dateKey>="2027-01-25"&&blockWeek(startKey,dateKey)<=2;
+ const inBlock2Deficit=(startKey,dateKey)=>isTravelCycle(startKey)&&dateKey>="2027-01-25"&&blockWeek(startKey,dateKey)>2;
+ function longMaintenanceThreshold(body,after="2026-10-29"){
+  const entries=(body||[]).filter(r=>/^\d{4}-\d{2}-\d{2}$/.test(r.date)&&r.date>after).slice().sort((a,b)=>a.date.localeCompare(b.date));
+  const weights=entries.filter(r=>Number(r.weight)>0);
+  for(const r of entries){
+   const previous=weights.filter(w=>w.date<=r.date&&utcDay(r.date)-utcDay(w.date)<7*86400000);
+   const distinct=[...new Map(previous.map(w=>[w.date,w])).values()];
+   if(distinct.length===7&&distinct.reduce((n,w)=>n+Number(w.weight),0)/7<=82)return {date:r.date,reason:"média de 7 dias ≤82 kg"};
+   const fats=entries.filter(w=>w.date<=r.date&&Number(w.bodyFat)>0);
+   if(fats.length>=2&&fats.at(-1).date===r.date&&fats.at(-1).bodyFat<=15&&fats.at(-2).bodyFat<=15&&Number(fats.at(-1).weight)>0&&Number(fats.at(-2).weight)>0)return {date:r.date,reason:"gordura ≤15% em duas pesagens seguidas"};
+  }
+  return null;
+ }
+ function nutritionPhase(state,dateKey){
+  const start=state?.profile?.progressionCycleStart;
+  if(!isTravelCycle(start))return null;
+  const stop=state.profile.longMaintenanceSince||longMaintenanceThreshold((state.body||[]).filter(r=>r.date<=dateKey))?.date;
+  if(stop&&dateKey>=stop)return "longMaintenance";
+  if(dateKey<"2027-01-25")return null;
+  return inBlock2Maintenance(start,dateKey)?"maintenance":"deficit";
+ }
+function validBlockExercise(e){
+ const sets=parseInt(e?.sets,10)||0,reps=parseActualRepsBySet(e?.actualRepsBySet);
+ return !!e&&!e.cutForTime&&!e.noDecision&&!e.decisionSourceExerciseId&&sets>0&&reps.length===sets&&e.rir!==""&&e.rir!=null&&Number.isFinite(Number(e.rir))&&Number(e.weight)>0;
+}
+function lastValidBlockExercise(sessions,exerciseId){
+ return (sessions||[]).filter(se=>!se.maintenance).map(se=>(se.ex||[]).find(e=>e.exerciseId===exerciseId)).find(validBlockExercise)||null;
+}
+function blockExtraSetEligibility(state,blockStartWeek=9){
+  const start=state.profile?.progressionCycleStart;
+  const from=blockStartWeek-8;
+  const sessions=(state.sessions||[]).filter(se=>!se.maintenance&&se.date&&globalProgressionWeekNumber(start,se.date)>=from&&globalProgressionWeekNumber(start,se.date)<=from+6);
+ const reasons=[];
+ if(!sessions.length)reasons.push("Sem sessões do bloco anterior registadas.");
+ if(sessions.some(se=>!Number.isFinite(Number(se.durationMinutes))||Number(se.durationMinutes)<=0))reasons.push("Regista a duração de todas as sessões do bloco anterior no Histórico.");
+ if(sessions.some(se=>Number(se.durationMinutes)>60))reasons.push("Houve sessões acima de 60 min.");
+ if(sessions.some(se=>se.painFlag!==false))reasons.push("Confirma a ausência de dor em todas as sessões do bloco anterior.");
+ if(sessions.some(se=>se.painFlag===true||(se.ex||[]).some(e=>e.painFlag===true)))reasons.push("Há dor assinalada no bloco anterior.");
+ const anchors=new Set();
+ for(const day of state.plano||[])for(const x of day.ex||[]){
+  if(!x.anchor||!x.exerciseId)continue;
+  // Usar a data da sessão, não a posição do exercício no array.
+  const baseline=sessions.filter(se=>globalProgressionWeekNumber(start,se.date)===from).flatMap(se=>(se.ex||[]).filter(e=>e.exerciseId===x.exerciseId&&validBlockExercise(e)).map(e=>({date:se.date,weight:Number(e.weight)}))).sort((a,b)=>a.date.localeCompare(b.date))[0];
+  const week7=sessions.filter(se=>globalProgressionWeekNumber(start,se.date)===from+6).flatMap(se=>(se.ex||[]).filter(e=>e.exerciseId===x.exerciseId&&validBlockExercise(e)).map(e=>({date:se.date,weight:Number(e.weight)}))).sort((a,b)=>b.date.localeCompare(a.date))[0];
+  if(baseline&&week7&&week7.weight>baseline.weight)anchors.add(x.exerciseId);
+ }
+ if(anchors.size<3)reasons.push("Só "+anchors.size+" âncora(s) com subida comprovada; são precisas pelo menos 3.");
+ return {eligible:reasons.length===0,anchors:anchors.size,reasons};
+ }
+ function block1ExtraSetEligibility(state){return blockExtraSetEligibility(state,9);}
+ function resetSecondBlockPreferences(state){
+ if(!isTravelCycle(state.profile?.progressionCycleStart)||state.profile.block2ResetApplied)return false;
+ state.profile.block2ResetApplied=true;
+ state.profile.block2ExtraSetEnabled=false;
+ state.profile.block2ExtraSetEnabledAt=null;
+ (state.plano||[]).forEach(day=>(day.ex||[]).forEach(x=>{x.techniqueDegraded=false;x.optionalExtraSetCycleStart="";}));
+ return true;
+}
+function resetNextBlockPreferences(state,cycleStart){
+  if(!cycleStart||state.profile.lastResetCycleStart===cycleStart)return false;
+  state.profile.lastResetCycleStart=cycleStart;
+  state.profile.block2ExtraSetEnabled=false;
+  state.profile.block2ExtraSetEnabledAt=null;
+  (state.plano||[]).forEach(day=>(day.ex||[]).forEach(x=>{x.techniqueDegraded=false;x.optionalExtraSetCycleStart="";}));
+  return true;
+ }
+ function shouldUseBlock2Extra(state,date,dayIdx,exercise){
+  const profile=state.profile||{};
+ const logged=(state.sessions||[]).find(se=>!se.maintenance&&se.date===date&&se.dayIdx===dayIdx);
+ if(logged){
+  const prior=(logged.ex||[]).find(e=>e.exerciseId===exercise.exerciseId);
+  // Uma sessão anterior mantém as séries guardadas, mesmo após o reset do bloco seguinte.
+  return !!prior&&Number(prior.sets)>Number(exercise.sets);
+ }
+ const start=profile.progressionCycleStart;
+ const enabledCycle=profile.blockExtraSetCycleStart||"2027-01-25";
+ return !!profile.block2ExtraSetEnabled&&progressionCycleStartFor(start,date)===enabledCycle&&date>=(profile.block2ExtraSetEnabledAt||enabledCycle);
+}
+function reviewAlternatives(name){
+ if(/bench press/i.test(name))return ["Supino com pegada fechada","Supino com halteres neutros"];
+ if(/hack squat/i.test(name))return ["Leg Press com pés altos"];
+ if(/romanian deadlift|\brdl\b/i.test(name))return ["RDL com halteres","Hip Thrust"];
+ if(/low row/i.test(name))return ["Single-Arm DB Row"];
+ return [];
+}
+function acceptReviewSwap(state,item,cycleStart,replacement,optionIndex){
+ const day=state.plano?.[item.dayIdx];
+ const index=day?.ex?.findIndex(x=>x.exerciseId===item.exerciseId);
+ if(index==null||index<0||!reviewAlternatives(day.ex[index].name).includes(replacement))return false;
+ const old=day.ex[index];
+ const id="review-"+cycleStart+"-"+item.exerciseId+"-"+optionIndex;
+ day.ex[index]={...old,exerciseId:id,name:replacement,weight:0,week1Start:null,week1StartLabel:"",painFlag:false,techniqueDegraded:false,optionalExtraSetCycleStart:"",calibrationPending:true,progressionStepCustom:false,progressionCategory:null};
+ day.ex[index].anchor=isAnchorExerciseName(replacement);
+ day.ex[index].progressionCategory=progressionCategory(day.ex[index]);
+ const step=defaultProgressionStep(day.ex[index]);
+ day.ex[index].progressionStepKg=step.amount;day.ex[index].progressionStepKind=step.kind;day.ex[index].progressionStepUnit=step.unit;
+ state.profile.blockReviewDecisions={...(state.profile.blockReviewDecisions||{}),[cycleStart]:{...(state.profile.blockReviewDecisions?.[cycleStart]||{}),[item.exerciseId]:"Troca aceite: "+replacement}};
+ state.profile.blockReviewPrevious={...(state.profile.blockReviewPrevious||{}),[id]:old};
+ return true;
+}
+function blockReviewItems(state,reviewWeek=17){
+  const start=state.profile?.progressionCycleStart;
+  const sessions=(state.sessions||[]).filter(se=>!se.maintenance&&globalProgressionWeekNumber(start,se.date)>=reviewWeek-8&&globalProgressionWeekNumber(start,se.date)<=reviewWeek).sort((a,b)=>String(a.date).localeCompare(String(b.date)));
+ const alternative=name=>/bench press/i.test(name)?"Supino com pegada fechada ou halteres neutros":/hack squat/i.test(name)?"Leg Press com pés altos":/romanian deadlift|\brdl\b/i.test(name)?"RDL com halteres ou Hip Thrust primeiro":/low row/i.test(name)?"Single-Arm DB Row":null;
+ const results=[];
+ for(const [dayIdx,day] of (state.plano||[]).entries())for(const exercise of day.ex||[]){
+  const id=exercise.exerciseId;
+  const entries=sessions.flatMap(se=>(se.ex||[]).filter(e=>id&&e.exerciseId===id).map(e=>({e,date:se.date,sleepRecoveryMode:!!se.sleepRecoveryMode})));
+  const pain=!!exercise.painFlag||entries.some(({e})=>e.painFlag===true);
+  let run=[];
+  for(const {e,date,sleepRecoveryMode} of entries){
+   const week=globalProgressionWeekNumber(start,date);
+   if(week>=reviewWeek-1)continue; // deload e semana atual não contam
+   if(sleepRecoveryMode||!validBlockExercise(e)){run=[];continue;}
+   const reps=parseActualRepsBySet(e.actualRepsBySet).reduce((a,b)=>a+b,0),sets=Number(e.sets),weight=Number(e.weight);
+   const prev=run[run.length-1];
+   if(!prev||prev.sets!==sets||Math.abs(prev.weight-weight)>.001||reps>prev.reps)run=[];
+   run.push({date,weight,sets,reps});
+   }
+  const stalled=run.length>=3&&(utcDay(run.at(-1).date)-utcDay(run[0].date))>=21*86400000;
+  if(pain||stalled)results.push({exerciseId:id,dayIdx,name:exercise.name,reason:[stalled?"≥3 semanas sem ganhar reps à mesma carga/séries":null,pain?"dor assinalada":null].filter(Boolean).join(" · "),alternative:alternative(exercise.name)});
+ }
+ return results;
+ }
+ function week17ReviewItems(state){return blockReviewItems(state,17);}
+function pulldownMilestoneReached(state,blockStartWeek){
+ const start=state.profile?.progressionCycleStart;
+ return (state.sessions||[]).some(se=>!se.maintenance&&globalProgressionWeekNumber(start,se.date)>=blockStartWeek-8&&globalProgressionWeekNumber(start,se.date)<=blockStartWeek-2&&se.dayIdx===2&&
+  (se.ex||[]).some(e=>(/lat pulldown/i.test(String(e.name||""))||/pulldown/i.test(String(e.exerciseId||"")))&&validBlockExercise(e)&&Number(e.weight)===80&&parseActualRepsBySet(e.actualRepsBySet).every(n=>n===8)));
+}
+ function progressionCycleStartFor(startKey,dateKey) {
  if(isTravelCycle(startKey)){
   const week=globalProgressionWeekNumber(startKey,dateKey);
   if(week==null)return null;
@@ -2809,7 +2972,14 @@ function Dashboard({
    console.error("Erro ao atualizar dados:", e);
    return p;
  }
-});
+ });
+ // Guarda a passagem à manutenção quando medições sincronizadas já cumprem o limiar.
+ // Uma edição/eliminação posterior não volta a ativar o défice sem decisão explícita.
+ useEffect(()=>{
+   if(!isTravelCycle(state.profile?.progressionCycleStart)||state.profile?.longMaintenanceSince)return;
+   const stop=longMaintenanceThreshold((state.body||[]).filter(r=>r.date<=todayKey));
+   if(stop)update(next=>{if(!next.profile.longMaintenanceSince){next.profile.longMaintenanceSince=stop.date;next.profile.longMaintenanceReason=stop.reason;}});
+ },[state.body,state.profile?.progressionCycleStart,state.profile?.longMaintenanceSince]);
  useEffect(()=>{
   const needsPlanMetadata=(state.plano||[]).some(day=>(day.ex||[]).some(ex=>!["anchor","secondary","isolation"].includes(ex.progressionCategory)||typeof ex.optionalExtraSetCycleStart!=="string"||!(Number(ex.progressionStepKg)>0)||typeof ex.progressionStepKind!=="string"||typeof ex.progressionStepUnit!=="string"||typeof ex.techniqueDegraded!=="boolean"||typeof ex.progressionStepCustom!=="boolean"));
   if(!needsPlanMetadata)return;
@@ -3059,6 +3229,19 @@ function Checklist({
        /*#__PURE__*/React.createElement("span",{"aria-hidden":true},"→")
      )
    ),
+   (!state.profile?.progressionCycleStart||isTravelCycle(state.profile.progressionCycleStart))&&todayKey>="2026-11-05"&&todayKey<="2026-11-08"&&/*#__PURE__*/React.createElement("div",{className:"card evf-block2-banner",role:"note"},
+    /*#__PURE__*/React.createElement("strong",null,"Início segunda, 9 nov · calibração"),
+    /*#__PURE__*/React.createElement("p",null,"Até lá, regista o peso em três manhãs e acompanha os passos. Treinas de segunda a sexta; sábado e domingo ficam para descanso. Se ainda não ativaste este calendário, confirma-o em Treinos.")),
+   travelWeightCheckpoint(state.profile?.progressionCycleStart,todayKey)&&!isBlockCheckpointDate(state.profile?.progressionCycleStart,todayKey)&&/*#__PURE__*/React.createElement("div",{className:"card evf-block2-banner",role:"note"},
+    /*#__PURE__*/React.createElement("strong",null,"Checkpoint de peso · "+travelWeightCheckpoint(state.profile?.progressionCycleStart,todayKey)),
+    /*#__PURE__*/React.createElement("p",null,"Regista uma pesagem real e reavalia a tendência. Este checkpoint não cria uma pausa alimentar nem muda o treino.")),
+   isBlockCheckpointDate(state.profile?.progressionCycleStart,todayKey)&&/*#__PURE__*/React.createElement("div",{className:"card evf-block2-banner",role:"alert"},
+    /*#__PURE__*/React.createElement("strong",null,"Check-in · fim do deload"),
+    /*#__PURE__*/React.createElement("p",null,"Hoje: pesagem na balança inteligente, cintura ao umbigo e fotos de frente, lado e costas."+(travelWeightCheckpoint(state.profile?.progressionCycleStart,todayKey)?" Checkpoint: "+travelWeightCheckpoint(state.profile?.progressionCycleStart,todayKey)+".":"")+" Regista-os em Corpo e no Coach."),
+    /*#__PURE__*/React.createElement("button",{type:"button",className:"menu-btn",onClick:()=>go("body")},"Registar medições")),
+   nutritionPhase(state,todayKey)&&/*#__PURE__*/React.createElement("div",{className:"card evf-block2-banner",role:"note"},
+    /*#__PURE__*/React.createElement("strong",null,nutritionPhase(state,todayKey)==="longMaintenance"?"Manutenção longa · sem défice":nutritionPhase(state,todayKey)==="maintenance"?"Manutenção · início do bloco":"Défice · semanas 3–8"),
+    /*#__PURE__*/React.createElement("p",null,nutritionPhase(state,todayKey)!=="deficit"?"Hoje: 2 600–2 700 kcal, proteína igual ("+(state.profile?.proteinTarget||170)+" g). "+(nutritionPhase(state,todayKey)==="longMaintenance"?"Sem novo défice sem uma decisão tua.":"Mantém o peso ±0,5 kg; flutuação pontual não é alerta."):"Hoje: "+(TODAY.getDay()>=1&&TODAY.getDay()<=5?"2 300 kcal (dia de treino)":"2 100 kcal (dia de descanso)")+"; proteína igual ("+(state.profile?.proteinTarget||170)+" g). Metas personalizadas continuam editáveis.")),
    /*#__PURE__*/React.createElement(HomeBodyProgress, {state, onOpen:()=>go("body")}),
    !state.profile?.targetsReviewed && /*#__PURE__*/React.createElement("div",{className:"card evf-onboarding-note"},
      /*#__PURE__*/React.createElement("strong",null,"Revê as tuas metas"),
@@ -3353,16 +3536,37 @@ function Workouts({
  const progressionCycleStart=state.profile?.progressionCycleStart||currentWeekDays[0].key;
  const travelActive=isTravelCycle(state.profile?.progressionCycleStart);
  const pauseSelected=inTravelPause(progressionCycleStart,selectedDayKey);
- const firstReturnDay=travelActive&&selectedDayKey>=TRAVEL_RESUME&&!state.sessions.some(se=>se.date>=TRAVEL_RESUME&&se.date<selectedDayKey&&se.dayIdx===sel&&!se.maintenance);
+ const firstReturnDay=travelActive&&selectedDayKey>=TRAVEL_RESUME&&globalProgressionWeekNumber(progressionCycleStart,selectedDayKey)<=8&&!state.sessions.some(se=>se.date>=TRAVEL_RESUME&&se.date<selectedDayKey&&se.dayIdx===sel&&!se.maintenance);
  const activateTravelCycle=()=>{
-  if(state.profile?.progressionCycleStart&&!window.confirm("Ativar o bloco de 10 nov 2026? O início do ciclo atual será substituído; todas as sessões, cargas e dados continuam guardados."))return;
+  if(state.profile?.progressionCycleStart&&!window.confirm("Ativar o bloco de 9 nov 2026? O início do ciclo atual será substituído; todas as sessões, cargas e dados continuam guardados."))return;
   update(s=>{s.profile=s.profile||{};s.profile.progressionCycleStart=TRAVEL_CYCLE_START;});
  };
  const activeCycleStart=progressionCycleStartFor(progressionCycleStart,selectedDayKey)||progressionCycleStart;
  const globalWeek=state.profile?.progressionCycleStart?globalProgressionWeekNumber(progressionCycleStart,selectedDayKey):1;
  const cycleWeek=state.profile?.progressionCycleStart?progressionWeekNumber(progressionCycleStart,selectedDayKey):1;
  const cycleNumber=globalWeek?Math.floor((globalWeek-1)/8)+1:1;
- const reviewWeek=globalWeek===17;
+ const reviewWeek=globalWeek>=17&&(globalWeek-17)%8===0;
+ const startOfBlock=travelActive&&globalWeek>=9&&(globalWeek-9)%8===0;
+ const block2Week9=travelActive&&(globalWeek===9||workoutWeekOffset===0&&globalProgressionWeekNumber(progressionCycleStart,todayKey)===9);
+ const block2Offer=block2Week9?block1ExtraSetEligibility(state):startOfBlock?blockExtraSetEligibility(state,globalWeek):null;
+ const showBlock2Review=travelActive&&(reviewWeek||workoutWeekOffset===0&&globalProgressionWeekNumber(progressionCycleStart,todayKey)>=17&&(globalProgressionWeekNumber(progressionCycleStart,todayKey)-17)%8===0);
+ const reviewGlobalWeek=reviewWeek?globalWeek:globalProgressionWeekNumber(progressionCycleStart,todayKey);
+ const reviewCycleStart=progressionCycleStartFor(progressionCycleStart,reviewWeek?selectedDayKey:todayKey);
+ const block2Review=showBlock2Review?blockReviewItems(state,reviewGlobalWeek):[];
+ useEffect(()=>{
+  if(!travelActive||todayKey<"2027-01-25"||state.profile?.block2ResetApplied)return;
+  update(s=>{resetSecondBlockPreferences(s);});
+ },[travelActive,state.profile?.block2ResetApplied]);
+ const currentGlobalWeek=globalProgressionWeekNumber(progressionCycleStart,todayKey);
+ const currentBlockStart=progressionCycleStartFor(progressionCycleStart,todayKey);
+ useEffect(()=>{
+  if(!travelActive||currentGlobalWeek<17||state.profile?.lastResetCycleStart===currentBlockStart)return;
+  update(s=>{resetNextBlockPreferences(s,currentBlockStart);});
+ },[travelActive,currentBlockStart,state.profile?.lastResetCycleStart]);
+ const optIntoBlock2Extra=()=>{
+  if(!startOfBlock||selectedDayKey>todayKey||!block2Offer?.eligible||globalWeek===9&&!state.profile?.block2ResetApplied||globalWeek>=17&&state.profile?.lastResetCycleStart!==activeCycleStart)return;
+  update(s=>{if(blockExtraSetEligibility(s,globalWeek).eligible){s.profile.block2ExtraSetEnabled=true;s.profile.block2ExtraSetEnabledAt=todayKey;s.profile.blockExtraSetCycleStart=activeCycleStart;}});
+ };
  const selectedSession = state.sessions.find(s => s.date === selectedDayKey && s.dayIdx === sel && !s.maintenance && !pauseSelected) || null;
  const loggedSelected = !!selectedSession;
  const trainedSelected = trainedOn(state, selectedDayKey);
@@ -3394,23 +3598,21 @@ function Workouts({
   if(fly)loggerBaseExercises=[...loggerBaseExercises,{exerciseId:"v5-thu-fly-extra",decisionSourceExerciseId:fly.exerciseId,noDecision:true,unilateral:true,name:"Cable Fly extra · lado direito (segue ex. 4)",sets:2,reps:12,repsMax:15,weight:fly.weight,progressionCategory:"isolation",progressionStepKg:2.5,progressionStepKind:"kg",progressionStepUnit:"kg"}];
  }
  const previousCycleStart=previousProgressionCycleStart(progressionCycleStart,selectedDayKey);
- const savedWeek7Loads=previousCycleStart?state.profile?.progressionWeek7Loads?.[previousCycleStart]||{}:{};
  const previousCycleSessions=previousCycleStart?state.sessions.filter(se=>!se.maintenance&&!inTravelPause(progressionCycleStart,se.date)&&se.date&&progressionCycleStartFor(progressionCycleStart,se.date)===previousCycleStart&&progressionWeekNumber(progressionCycleStart,se.date)>=1&&progressionWeekNumber(progressionCycleStart,se.date)<=7).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))):[];
- const hasWeek7LoadData=Object.keys(savedWeek7Loads).length>0||previousCycleSessions.some(se=>(se.ex||[]).some(e=>!e.cutForTime&&!e.noDecision&&e.rir!=null&&parseActualRepsBySet(e.actualRepsBySet).length===(parseInt(e.sets,10)||0)&&Number(e.weight)>0));
- const useWeek7Loads=globalWeek>1&&cycleWeek===1;
+ const useWeek7Loads=globalWeek>1&&(cycleWeek===1||globalWeek>=9&&blockWeek(progressionCycleStart,selectedDayKey)===1);
+ const deload16=globalWeek>=16&&cycleWeek===8;
+ const secondDeloadSessions=deload16?state.sessions.filter(se=>!se.maintenance&&se.date&&progressionCycleStartFor(progressionCycleStart,se.date)===activeCycleStart&&progressionWeekNumber(progressionCycleStart,se.date)!==8).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))):[];
  const calibrationSessions=firstReturnDay&&cycleWeek===2?state.sessions.filter(se=>se.date>=TRAVEL_CYCLE_START&&se.date<TRAVEL_PAUSE_START&&se.dayIdx===sel&&!se.maintenance).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))):[];
  const loggerExercises = loggerBaseExercises.map(x=>{
   const sourceId=x.decisionSourceExerciseId||(x.exerciseId==="v5-thu-fly-extra"?"v5-thu-cable-fly":null);
   const source=sourceId?loggerBaseExercises.find(p=>p.exerciseId===sourceId)||(plano.flatMap(pd=>pd.ex||[])).find(p=>p.exerciseId===sourceId):null;
-  const saved=savedWeek7Loads[x.exerciseId];
-  const historical=previousCycleSessions.map(se=>(se.ex||[]).find(e=>e.exerciseId===x.exerciseId)).find(e=>e&&!e.cutForTime&&!e.noDecision&&e.rir!=null&&parseActualRepsBySet(e.actualRepsBySet).length===(parseInt(e.sets,10)||0)&&Number.isFinite(Number(e.weight))&&Number(e.weight)>0);
+  const historical=lastValidBlockExercise(deload16?secondDeloadSessions:previousCycleSessions,x.exerciseId);
   const calibrated=calibrationSessions.map(se=>(se.ex||[]).find(e=>e.exerciseId===x.exerciseId)).find(e=>e&&!e.cutForTime&&Number.isFinite(Number(e.weight))&&Number(e.weight)>0);
-   const baseWeight=useWeek7Loads?(saved?.weight??(historical?historical.weight:x.weight)):calibrated?calibrated.weight:x.weight;
-  const sourceSaved=source?savedWeek7Loads[source.exerciseId]:null;
-  const sourceHistorical=source?previousCycleSessions.map(se=>(se.ex||[]).find(e=>e.exerciseId===source.exerciseId)).find(e=>e&&!e.cutForTime&&!e.noDecision&&e.rir!=null&&parseActualRepsBySet(e.actualRepsBySet).length===(parseInt(e.sets,10)||0)&&Number.isFinite(Number(e.weight))&&Number(e.weight)>0):null;
-  const sourceBaseWeight=source&&useWeek7Loads?(sourceSaved?.weight??(sourceHistorical?sourceHistorical.weight:source.weight)):source?.weight;
+   const baseWeight=(useWeek7Loads||deload16)?(historical?historical.weight:x.weight):calibrated?calibrated.weight:x.weight;
+  const sourceHistorical=source?lastValidBlockExercise(deload16?secondDeloadSessions:previousCycleSessions,source.exerciseId):null;
+  const sourceBaseWeight=source&&(useWeek7Loads||deload16)?(sourceHistorical?sourceHistorical.weight:source.weight):source?.weight;
   const sourceCalibrated=source?calibrationSessions.map(se=>(se.ex||[]).find(e=>e.exerciseId===source.exerciseId)).find(e=>e&&!e.cutForTime&&Number.isFinite(Number(e.weight))&&Number(e.weight)>0):null;
-   return {...x,weight:source?(sourceCalibrated?sourceCalibrated.weight:sourceBaseWeight):baseWeight,sets:effectiveSetCount(x,cycleWeek,activeCycleStart)};
+   return {...x,weight:source?(sourceCalibrated?sourceCalibrated.weight:sourceBaseWeight):baseWeight,sets:effectiveSetCount(x,cycleWeek,activeCycleStart,{globalWeek,exerciseIndex:(plano[sel]?.ex||[]).findIndex(p=>p.exerciseId===x.exerciseId),block2Extra:travelActive&&shouldUseBlock2Extra(state,selectedDayKey,sel,x)})};
  });
  const saveSession = (entries,cardioEntries=[],sessionMeta={}) => update(s => {
   s.profile=s.profile&&typeof s.profile==="object"?s.profile:{};
@@ -3423,8 +3625,8 @@ function Workouts({
    const weight=parseNum(sourceEntry?sourceEntry.weight:entry.weight),notes=entry.notes||"";
    const allPlanEx=s.plano.flatMap(pd=>pd.ex||[]);
    const planMatch=allPlanEx.find(p=>x.exerciseId&&p.exerciseId===x.exerciseId)||(s.plano[sel]?.ex||[]).find(p=>p.name===x.name);
-   if(planMatch&&!entry.cutForTime&&cycleWeek!=null&&cycleWeek!==8){planMatch.weight=weight;planMatch.notes=notes;if(planMatch.week1Start==null&&weight>0){planMatch.week1Start=weight;planMatch.week1StartLabel=fmtNum(weight)+" kg";}}
-   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:isDecisionExcludedExercise(x)?null:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),actualRepsBySet:parseActualRepsBySet(entry.repsBySet),cutForTime:!!entry.cutForTime,cutReason:entry.cutReason||"",noDecision:isDecisionExcludedExercise(x),decisionSourceExerciseId:x.decisionSourceExerciseId||null,rirAlvo:firstReturnDay&&x.anchor?3:x.rirAlvo!=null?x.rirAlvo:preferredRirFor(x,cycleWeek,sessionMeta.sleepRecoveryMode)};
+   if(planMatch&&!entry.cutForTime&&cycleWeek!=null&&cycleWeek!==8){if(planMatch.calibrationPending&&weight>0&&Number(entry.rir)===3&&parseActualRepsBySet(entry.repsBySet).length===Number(x.sets))planMatch.calibrationPending=false;planMatch.weight=weight;planMatch.notes=notes;if(planMatch.week1Start==null&&weight>0){planMatch.week1Start=weight;planMatch.week1StartLabel=fmtNum(weight)+" kg";}}
+   return {name:x.name,exerciseId:x.exerciseId||null,sets:parseInt(x.sets,10)||0,reps:parseInt(x.reps,10)||0,repsMax:parseInt(x.repsMax,10)||0,weight,notes,rir:isDecisionExcludedExercise(x)?null:entry.rir!=null?entry.rir:null,actualSets:parseInt(entry.actualSets,10)>0?parseInt(entry.actualSets,10):(parseInt(x.actualSets,10)>0?parseInt(x.actualSets,10):null),actualReps:parseInt(entry.actualReps,10)>0?parseInt(entry.actualReps,10):(parseInt(x.actualReps,10)>0?parseInt(x.actualReps,10):null),actualRepsBySet:parseActualRepsBySet(entry.repsBySet),cutForTime:!!entry.cutForTime,cutReason:entry.cutReason||"",painFlag:!!entry.painFlag,calibrationSession:!!(x.calibrationPending||old?.ex?.find(e=>e.exerciseId===x.exerciseId)?.calibrationSession),noDecision:isDecisionExcludedExercise(x),decisionSourceExerciseId:x.decisionSourceExerciseId||null,rirAlvo:firstReturnDay&&x.anchor?3:x.rirAlvo!=null?x.rirAlvo:preferredRirFor(x,cycleWeek,sessionMeta.sleepRecoveryMode)};
   });
   if(cycleWeek===7){
    const week7={...(s.profile.progressionWeek7Loads?.[activeCycleStart]||{})};
@@ -3434,7 +3636,7 @@ function Workouts({
   }
   const preserved=(old?.ex||[]).filter(previous=>!ex.some(current=>current.exerciseId&&previous.exerciseId?current.exerciseId===previous.exerciseId:current.name===previous.name));
   const cardio=(Array.isArray(cardioEntries)?cardioEntries:[]).map(c=>({name:String(c.name||"Cardio").trim()||"Cardio",minutes:Math.max(0,parseInt(c.minutes,10)||0)})).filter(c=>c.minutes>0);
-  const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,cycleStart:activeCycleStart,cycleWeek,globalWeek,sleepRecoveryMode:!!sessionMeta.sleepRecoveryMode,cardioSkippedForDriving:!!sessionMeta.cardioSkippedForDriving,ex:[...ex,...preserved],cardio};
+  const rec={id:old?.id||"s"+Date.now(),date:selectedDayKey,dayIdx:sel,name:old?.name||s.plano[sel].name,cycleStart:activeCycleStart,cycleWeek,globalWeek,sleepRecoveryMode:!!sessionMeta.sleepRecoveryMode,cardioSkippedForDriving:!!sessionMeta.cardioSkippedForDriving,durationMinutes:sessionMeta.durationMinutes>0?Math.round(sessionMeta.durationMinutes):null,painFlag:!!sessionMeta.painFlag,ex:[...ex,...preserved],cardio};
   if(i>=0)s.sessions[i]=rec;else s.sessions.push(rec);
  });
 
@@ -3495,12 +3697,46 @@ function Workouts({
  }, l))), view === "treino" && React.createElement(React.Fragment, null,
   (todayKey<="2027-02-15"||travelActive&&selectedDayKey<="2027-02-15")&&/*#__PURE__*/React.createElement("div",{className:"card evf-travel-banner",role:"note"},
     /*#__PURE__*/React.createElement("strong",null,travelActive?"Pausa planeada · Tailândia":"Pausa planeada para a viagem"),
-    /*#__PURE__*/React.createElement("p",null,"19 nov – 7 dez 2026 fora do bloco. Semana 2: 8 dez; deload: 19–25 jan; semana 9: 26 jan. Sem compensar treinos no fim de semana."),
+    /*#__PURE__*/React.createElement("p",null,"Semana 1: 9–18 nov (calibração também em 16–18 nov). Pausa: 19 nov – 6 dez. Semana 2: seg 7 dez. Deload: 18–24 jan; bloco 2: seg 25 jan. Treinos seg–sex; fins de semana para descanso."),
     !travelActive&&/*#__PURE__*/React.createElement("button",{type:"button",className:"menu-btn main",onClick:activateTravelCycle},"Ativar este calendário (sem apagar sessões)"),
-    travelActive&&/*#__PURE__*/React.createElement("small",null,"Checkpoint de peso: 20 dez · 90,5–91,5 kg; 10 jan · 89–90 kg; 1 fev · 87–88 kg. Depois, 2 semanas de manutenção alimentar, sem alterações automáticas às calorias.")),
+    travelActive&&/*#__PURE__*/React.createElement("small",null,"Checkpoints: 20 dez · 91–92 kg; 10 jan · 89,5–90,5 kg; 24 jan · 88,5–89,5 kg. Manutenção alimentar de 25 jan a 7 fev; sem alterar metas personalizadas automaticamente.")),
+  isBlockCheckpointDate(progressionCycleStart,todayKey)&&workoutWeekOffset===0&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"alert"},
+    /*#__PURE__*/React.createElement("strong",null,"Fim do deload · check-in"),
+    /*#__PURE__*/React.createElement("p",null,"Faz hoje pesagem na balança inteligente, cintura ao umbigo e fotos de frente, lado e costas. Regista em Corpo e no Coach; o bloco seguinte começa automaticamente amanhã.")),
+  block2Week9&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
+   /*#__PURE__*/React.createElement("strong",null,"Bloco 2 · semana 9 · sem calibração"),
+   /*#__PURE__*/React.createElement("p",null,"Mesmo Plano e ordem. Cargas da semana 7, ou última sessão válida antes do deload. Contadores de estagnação reiniciados; série extra e técnica degradada desligadas."),
+   /*#__PURE__*/React.createElement("p",null,"Sugestão: ativar +1 série nos exercícios 2 e 3 de cada dia? Só com ≥3 âncoras mais fortes, sem dor e todas as sessões até 60 min."),
+   block2Offer?.eligible?/*#__PURE__*/React.createElement("button",{type:"button",className:"menu-btn main",disabled:todayKey<"2027-01-25"||!state.profile?.block2ResetApplied||!!state.profile?.block2ExtraSetEnabled,onClick:optIntoBlock2Extra},state.profile?.block2ExtraSetEnabled?"Série extra ativada por ti":"Ativar +1 série (opcional)"):
+   /*#__PURE__*/React.createElement("small",null,"Não disponível: "+(block2Offer?.reasons||[]).join(" "))),
+  startOfBlock&&globalWeek>=17&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
+   /*#__PURE__*/React.createElement("strong",null,"Bloco "+cycleNumber+" · arranque linear sem semana perdida"),
+   /*#__PURE__*/React.createElement("p",null,"Cargas válidas antes do deload. Semanas 1–3 lineares, 4–7 dupla progressão, 8 deload. Técnica degradada, contadores e série extra reiniciados."),
+   /*#__PURE__*/React.createElement("p",null,"+1 série nos exercícios 2 e 3? Só com 3 âncoras mais fortes, sessões até 60 min e ausência de dor confirmada no bloco anterior."),
+   block2Offer?.eligible?/*#__PURE__*/React.createElement("button",{type:"button",className:"menu-btn main",disabled:!!state.profile?.block2ExtraSetEnabled||state.profile?.lastResetCycleStart!==activeCycleStart||selectedDayKey>todayKey,onClick:optIntoBlock2Extra},state.profile?.block2ExtraSetEnabled?"Série extra ativada":"Ativar série extra (opcional)"):
+   /*#__PURE__*/React.createElement("small",null,"Não disponível: "+(block2Offer?.reasons||[]).join(" "))),
+  startOfBlock&&pulldownMilestoneReached(state,globalWeek)&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
+   /*#__PURE__*/React.createElement("strong",null,"Lat Pulldown · marco de 80 kg × 8"),
+   /*#__PURE__*/React.createElement("p",null,"Todas as séries completas no bloco anterior: proposta de experimentar elevações assistidas, depois com peso corporal e, quando possível, com peso adicional. Não substituímos o Lat Pulldown."),
+   state.profile?.blockPullupDecisions?.[activeCycleStart]?/*#__PURE__*/React.createElement("small",null,"Decisão: "+state.profile.blockPullupDecisions[activeCycleStart]):
+   /*#__PURE__*/React.createElement("div",{className:"evf-review-actions"},
+     ["Manter Lat Pulldown","Quero experimentar elevações"].map(choice=>/*#__PURE__*/React.createElement("button",{key:choice,type:"button",className:"menu-btn",disabled:todayKey<activeCycleStart||currentGlobalWeek!==globalWeek,onClick:()=>update(s=>{s.profile.blockPullupDecisions={...(s.profile.blockPullupDecisions||{}),[activeCycleStart]:choice};})},choice)))),
+  showBlock2Review&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
+   /*#__PURE__*/React.createElement("strong",null,"Semana "+reviewGlobalWeek+" · revisão seletiva e treino linear"),
+   block2Review.length?block2Review.map((item,i)=>/*#__PURE__*/React.createElement("div",{key:i,className:"evf-review-item"},
+     /*#__PURE__*/React.createElement("p",null,"• "+item.name+" — "+item.reason+". "+(item.alternative?"Alternativa do Plano: "+item.alternative+". ":"Sem alternativa pré-definida no Plano. ")),
+     state.profile?.blockReviewDecisions?.[reviewCycleStart]?.[item.exerciseId]?/*#__PURE__*/React.createElement("small",null,"Decisão: "+state.profile.blockReviewDecisions[reviewCycleStart][item.exerciseId]):
+     /*#__PURE__*/React.createElement("div",{className:"evf-review-actions"},
+       /*#__PURE__*/React.createElement("button",{type:"button",className:"menu-btn",disabled:todayKey<reviewCycleStart||currentGlobalWeek!==reviewGlobalWeek,onClick:()=>update(s=>{s.profile.blockReviewDecisions={...(s.profile.blockReviewDecisions||{}),[reviewCycleStart]:{...(s.profile.blockReviewDecisions?.[reviewCycleStart]||{}),[item.exerciseId]:"Manter o exercício"}};})},"Manter"),
+       reviewAlternatives(item.name).map((name,j)=>/*#__PURE__*/React.createElement("button",{key:j,type:"button",className:"menu-btn",disabled:todayKey<reviewCycleStart||currentGlobalWeek!==reviewGlobalWeek,onClick:()=>{
+        if(!window.confirm("Trocar "+item.name+" por "+name+"? O Histórico mantém o exercício anterior. A primeira sessão de "+name+" será calibração a RIR 3."))return;
+        update(s=>{acceptReviewSwap(s,item,reviewCycleStart,name,j);});
+       }},"Trocar: "+name))))) :
+   /*#__PURE__*/React.createElement("p",null,Object.keys(state.profile?.blockReviewDecisions?.[reviewCycleStart]||{}).length?"Decisões desta revisão guardadas abaixo. O treino continua normalmente.":"Nenhum exercício com dor ou estagnação de ≥3 semanas confirmada. Mantém o programa; não há trocas automáticas."),
+   Object.entries(state.profile?.blockReviewDecisions?.[reviewCycleStart]||{}).filter(([,decision])=>decision.startsWith("Troca aceite:")).map(([id,decision])=>/*#__PURE__*/React.createElement("small",{key:id},"✓ "+(state.profile?.blockReviewPrevious&&Object.values(state.profile.blockReviewPrevious).find(x=>x.exerciseId===id)?.name||id)+" · "+decision+" · primeira sessão do novo exercício a RIR 3."))),
   /*#__PURE__*/React.createElement(RestTimer, null), /*#__PURE__*/React.createElement("div",{className:"training-week-nav",role:"group","aria-label":"Escolher semana de treino"},
  /*#__PURE__*/React.createElement("button",{type:"button",className:"training-week-nav-button",onClick:()=>setWorkoutWeekOffset(offset=>offset-1),"aria-label":"Ver semana anterior"},"‹"),
- /*#__PURE__*/React.createElement("span",{className:"training-week-nav-label"},(workoutWeekOffset===0?"Esta semana · ":"")+weekRangeLabel+(pauseSelected?" · pausa · fora do bloco":globalWeek?" · semana "+globalWeek+" (bloco "+cycleNumber+", semana "+cycleWeek+")":" · ciclo ainda não iniciado para esta data")),
+ /*#__PURE__*/React.createElement("span",{className:"training-week-nav-label"},(workoutWeekOffset===0?"Esta semana · ":"")+weekRangeLabel+(pauseSelected?" · pausa · fora do bloco":globalWeek?" · semana "+globalWeek+" (bloco "+cycleNumber+", semana "+(blockWeek(progressionCycleStart,selectedDayKey)||cycleWeek)+")":" · ciclo ainda não iniciado para esta data")),
  /*#__PURE__*/React.createElement("button",{type:"button",className:"training-week-nav-button",disabled:workoutWeekOffset===0,onClick:()=>setWorkoutWeekOffset(offset=>Math.min(0,offset+1)),"aria-label":"Regressar à semana atual"},"›")
  ), /*#__PURE__*/React.createElement("div", {
  className: "day-picker"
@@ -3542,7 +3778,7 @@ function Workouts({
  key: sel + ":" + selectedDayKey,
  exercises: loggerExercises,
  cardioTarget: plano[sel]?.cardioMinutes||0,
- sessionNote: fridayFallback ? "Como terça-feira não foi concluída, hoje passa a ser pernas completas: Hack 3×5–8, RDL 3×6–8, Hip Thrust 3×8–10, Leg Curl 3×10–12 e Calf 3×10–12." : mondayFallback ? "Quinta-feira falhada: usa Incline Smith 3×6–8 em vez do Incline DB Press." : useWeek7Loads ? (hasWeek7LoadData?"Novo bloco: usa as cargas guardadas da semana 7 (ou última sessão válida antes do deload); o deload não substitui as cargas.":"Novo bloco: não há cargas válidas guardadas antes do deload; mantém as cargas configuradas no Plano.") : "",
+ sessionNote: fridayFallback ? "Como terça-feira não foi concluída, hoje passa a ser pernas completas: Hack 3×5–8, RDL 3×6–8, Hip Thrust 3×8–10, Leg Curl 3×10–12 e Calf 3×10–12." : mondayFallback ? "Quinta-feira falhada: usa Incline Smith 3×6–8 em vez do Incline DB Press." : useWeek7Loads ? (hasWeek7LoadData?"Novo bloco: cargas da semana 7 (ou última sessão válida antes do deload). Sem nova calibração; o deload não altera as cargas.":"Novo bloco: sem registos válidos pré-deload; mantém as cargas configuradas no Plano. Sem inventar valores.") : "",
  history: state.sessions,
  onSave: saveSession,
  loggedSelected: loggedSelected,
@@ -3631,7 +3867,7 @@ function rirTargetLabel(exercise,cycleWeek,recoveryMode=false) {
 function rirInstruction(exercise,cycleWeek,recoveryMode=false) {
  if(recoveryMode)return "Sono baixo: trabalha a RIR 3 em todas as séries e corta o último acessório.";
  if(cycleWeek===1)return progressionCategory(exercise)==="anchor"?"Calibração: procura 6–8 reps a RIR 2–3; se 8 forem fáceis, sobe 2,5 kg (tronco) ou 5 kg (pernas) na série seguinte. Sem recomendação automática.":"Calibração: encontra uma carga em que o topo saia a RIR 2–3. RIR 3 em tudo; apenas registar.";
- if(cycleWeek===8)return "Deload: metade das séries, carga da semana 7, RIR 3; sem falha nem recomendações.";
+ if(cycleWeek===8)return "Deload: metade das séries, última carga válida antes do deload, RIR 3; sem falha nem recomendações.";
  const category=progressionCategory(exercise);
  if(category==="anchor")return "Âncora: última série em RIR 1–2; nunca RIR 0.";
  if(category==="secondary")return "Secundário: última série em RIR 0–1.";
@@ -3641,11 +3877,12 @@ const OPTIONAL_EXTRA_SET_IDS=new Set(["v5-mon-db-lateral","v5-tue-leg-extension"
 function isOptionalSetCandidate(exercise) {
  return OPTIONAL_EXTRA_SET_IDS.has(exercise?.exerciseId)||/\b(lateral raise|leg extension|reverse pec deck|lying leg curl)\b/i.test(String(exercise?.name||""));
 }
-function effectiveSetCount(exercise,cycleWeek,cycleStart) {
+function effectiveSetCount(exercise,cycleWeek,cycleStart,options={}) {
  const base=parseInt(exercise?.sets,10)||0;
  if(cycleWeek===8)return base>0?Math.max(1,Math.ceil(base/2)):0;
  const optedIn=!!cycleStart&&exercise?.optionalExtraSetCycleStart===cycleStart;
- return base+(cycleWeek>=5&&cycleWeek<=7&&optedIn&&isOptionalSetCandidate(exercise)?1:0);
+ const extra=(cycleWeek>=5&&cycleWeek<=7&&optedIn&&isOptionalSetCandidate(exercise))||options.block2Extra&&options.globalWeek>=9&&((options.globalWeek<=15)||(options.globalWeek>=17&&(options.globalWeek-17)%8<=6))&&(options.exerciseIndex===1||options.exerciseIndex===2);
+ return base+(extra?1:0);
 }
 function defaultProgressionStep(exercise) {
  const name=String(exercise?.name||"");
@@ -3766,12 +4003,13 @@ function arrayMove(arr, from, to) {
 function TrainingCycleGuide(){
  const h=React.createElement;
  const phases=[
-  {title:"Rotina fixa e ciclos",text:"Segunda Upper A · terça Lower A · quarta Pull · quinta Push · sexta Lower B. Cada bloco tem 8 semanas: 1 calibração, 2–4 progressão linear das âncoras, 5–7 dupla progressão e 8 deload. O bloco seguinte começa com as cargas da semana 7, nunca as do deload; semana 17 é revisão seletiva."},
-  {title:"Viagem à Tailândia · pausa planeada",text:"Bloco iniciado a 10 nov 2026: semana 1 até 18 nov; pausa de 19 nov a 7 dez, sem contar para o bloco. Manutenção full-body opcional guardada no Histórico sem atualizar o Plano. Semana 2 começa a 8 dez com cargas da calibração; primeira sessão de cada dia: âncoras a RIR 3. Deload 19–25 jan 2027; semana 9 a 26 jan. Ativa este calendário em Treinar, sem apagar os dados anteriores."},
+  {title:"Rotina fixa e ciclos",text:"Segunda Upper A · terça Lower A · quarta Pull · quinta Push · sexta Lower B. Bloco 1: calibração no arranque. Bloco 2: semanas 9–11 lineares, 12–15 dupla, 16 deload. Desde o bloco 3, cada bloco de 8 semanas tem 3 semanas lineares, 4 de dupla progressão e 1 de deload. Começa automaticamente à segunda após o deload com cargas válidas da semana 7 anterior, nunca do deload; no arranque há revisão seletiva. Só um exercício trocado calibra na primeira sessão a RIR 3."},
+  {title:"Viagem à Tailândia · pausa planeada",text:"Semana 1 de calibração: seg 9 a dom 15 nov 2026, prolongada em 16–18 nov (sem recomendações). Pausa de 19 nov a 6 dez; manutenção full-body opcional isolada no Histórico. Semana 2: seg 7 dez. Semana 8: deload 18–24 jan 2027. Bloco 2: seg 25 jan. O calendário ativado anteriormente é corrigido sem mover sessões ou medições."},
+  {title:"Bloco 2 · 25 jan a 21 mar",text:"Mesmo programa e ordem, sem nova calibração. Semana 9 usa a última carga válida da semana 7 ou, se não houver, a última válida antes do deload. Âncoras lineares nas semanas 9–11, dupla progressão nas 12–15 e deload na 16 (15–21 mar). Manutenção 25 jan–7 fev: 2 600–2 700 kcal, proteína igual; desde 8 fev: défice 2 300 kcal nos dias de treino / 2 100 nos de descanso. Check-in de fim do deload a 24 jan. Bloco 3: seg 22 mar; bloco 4: seg 17 mai; bloco 5: seg 12 jul. Trocas e série extra apenas mediante aprovação."},
   {title:"Calibração e progressão linear",text:"Semana 1: RIR 3, apenas registar. Nas âncoras, procura 6–8 reps a RIR 2–3; se 8 forem fáceis, +2,5 kg no tronco ou +5 kg nas pernas na série seguinte. Nos exercícios restantes, encontra carga para o topo a RIR 2–3. Sem recomendações na semana 1. Nas semanas 2–4, as âncoras sobem +2,5 kg (Bench, Smith, Pulldown) ou +5 kg (Hack, RDL) apenas se todas as séries atingirem a base e RIR ≥1; caso contrário, repetem. Secundários seguem a regra normal desde a semana 2."},
   {title:"Dupla progressão e RIR",text:"Âncoras (Bench, Hack, Pulldown 4×5–8, Incline Smith e RDL): RIR 1–2 na última série, nunca falha. Secundários (incluindo Cable Row, Incline DB, Leg Press, CS Row, Low Row, Chest Press unilateral, Shoulder Press, Hip Thrust e Búlgaro): RIR 0–1. Isolamentos: séries anteriores RIR 1; última RIR 0/falha técnica. Semanas 5–7 podem ter +1 série opcional nos cinco acessórios indicados, desligada por defeito e ativa só no ciclo atual."},
   {title:"SUBIR, SUBIR ×2, MANTER ou DESCER",text:"Regista reps de cada série e RIR final; sem reps completas ou RIR não há recomendação. Abaixo da base em qualquer série: DESCER 5%; se a sessão válida seguinte voltar a falhar à mesma carga e com o mesmo número de séries, DESCER 10%. Acima do topo em qualquer série: SUBIR ×2. Com todas no topo: SUBIR ×2 em RIR ≥4 (âncora), ≥3 (secundário) ou ≥2 (isolamento); SUBIR em RIR ≥2, ≥1 ou qualquer RIR, respetivamente; senão, MANTER. Duas sessões completas seguidas à mesma carga e com o mesmo número de séries, sem ganhar reps totais: DESCER 10%. O contador reinicia quando muda a carga/séries, ao cortar uma sessão e no deload. Técnica degradada bloqueia subidas. Saltos >10% viram +1 rep/série até topo +1. Incrementos por exercício são editáveis."},
-  {title:"Deload e semana 17",text:"Semana 8: metade das séries (arredondada para cima: 3→2, 4→2, 2→1), carga da semana 7, RIR 3; sem falha nem recomendações. A semana 9 inicia novo bloco com cargas da semana 7 anterior. Semana 17: revisão seletiva — trocar só por estagnação ≥3 semanas apesar de sono/alimentação adequados ou por dor; nunca automaticamente. Acessórios podem rodar a cada 8–12 semanas. Pulldown de quarta a 80 kg×8 em todas as séries sugere testar elevações assistidas, depois peso corporal e com peso."},
+  {title:"Deload e semana 17",text:"Semana 8: metade das séries (arredondada para cima: 3→2, 4→2, 2→1), carga da semana 7, RIR 3; sem falha nem recomendações. Depois de cada deload, o bloco seguinte começa automaticamente à segunda com cargas válidas da semana 7 anterior. Semana 17 inicia o bloco 3 e treina como semana 2 (linear) enquanto decorre a revisão seletiva: aceitar ou recusar trocar cada exercício estagnado ≥3 semanas ou com dor. Apenas cada exercício efetivamente trocado calibra na sua primeira sessão, a RIR 3. A mesma regra repete-se no arranque dos blocos seguintes. Acessórios podem rodar a cada 8–12 semanas. Pulldown de quarta a 80 kg×8 em todas as séries sugere testar elevações assistidas, depois peso corporal e com peso."},
   {title:"Limite de 60 min e recuperação",text:"Se faltar tempo, corta e regista apenas o acessório final: segunda 6a/6b, terça cable crunch, quarta hammer curl, quinta rope pushdown ou sexta leg raise. Cortes não geram recomendação nem contam para estagnação. Com 3+ noites abaixo de 6 h, treina a RIR 3 e corta o último acessório; não reduzas comida. Menos de 6 h de sono + 7 h a conduzir: salta cardio, não os pesos. Não compenses treino ao fim de semana."},
   {title:"Falhas, dor e substituições",text:"Terça falhada: sexta passa a pernas completas (Hack 3×5–8, RDL 3×6–8, Hip Thrust 3×8–10, Leg Curl 3×10–12, Calf 3×10–12). Quinta falhada: segunda Incline Smith 3×6–8 em vez de Incline DB. Dor no ombro no supino: pegada fechada ou halteres neutros; joelho no Hack: Leg Press primeiro, pés altos; lombar no RDL: halteres ou Hip Thrust primeiro. Low Row ocupada: Single-Arm DB Row 3×8–10/lado. São alternativas, não substituições automáticas."},
   {title:"Cardio, passos e registo",text:"Mantém 3 sessões semanais de cardio de 30 min e 10 000 passos/dia; as duas séries extra de fly direito à quinta seguem a carga do fly principal e não geram decisão. Nos unilaterais regista reps do lado direito; o esquerdo iguala sem reps extra. Aquecimento, ativação e cardio não geram decisões."}
@@ -3899,14 +4137,16 @@ function TrainingHistory({state,update}) {
  const saveEdit=()=>{
   if(!draft||!draft.date||draft.date>todayKey){setMessage("A data da sessão tem de ser hoje ou uma data passada.");return;}
   if(!String(draft.name||"").trim()){setMessage("Indica um nome para a sessão.");return;}
-  const clean={...draft,name:String(draft.name||"").trim(),ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,actualRepsBySet:parseActualRepsBySet(e.actualRepsBySet),weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||"")})).filter(e=>e.name)};
+  const clean={...draft,name:String(draft.name||"").trim(),durationMinutes:Number(draft.durationMinutes)>0?Math.round(Number(draft.durationMinutes)):null,painFlag:draft.painFlag===true?true:draft.painFlag===false?false:null,ex:(draft.ex||[]).map(e=>({...e,name:String(e.name||"").trim(),sets:Math.max(0,parseInt(e.sets,10)||0),reps:Math.max(0,parseInt(e.reps,10)||0),repsMax:Math.max(0,parseInt(e.repsMax,10)||0),actualSets:parseInt(e.actualSets,10)>0?parseInt(e.actualSets,10):null,actualReps:parseInt(e.actualReps,10)>0?parseInt(e.actualReps,10):null,actualRepsBySet:parseActualRepsBySet(e.actualRepsBySet),weight:parseNum(e.weight),rir:e.rir===""||e.rir==null?null:Math.max(0,Math.min(4,parseInt(e.rir,10)||0)),notes:String(e.notes||""),painFlag:!!e.painFlag})).filter(e=>e.name)};
   update(s=>{const i=s.sessions.findIndex(x=>x.id===editingId);if(i>=0)s.sessions[i]=clean;});
   setEditingId(null);setDraft(null);setMessage("Sessão atualizada.");
  };
  const del=id=>{if(!window.confirm("Apagar esta sessão do histórico?"))return;update(s=>{const i=s.sessions.findIndex(x=>x.id===id);if(i>=0)s.sessions.splice(i,1);});};
  const field=(label,key,value,onChange,type="text",opts={})=>h("label",{className:"hist-edit-field"},h("span",null,label),h("input",{type,value:value??"",onChange:e=>onChange(e.target.value),...opts}));
  const editing=draft&&editingId===draft.id?h("div",{className:"hist-edit card",key:"edit"},
-  h("div",{className:"hist-edit-grid"},field("Data da sessão","date",draft.date,v=>setDraft(d=>({...d,date:v})),"date",{max:todayKey}),field("Nome da sessão","name",draft.name,v=>setDraft(d=>({...d,name:v})))),
+  h("div",{className:"hist-edit-grid"},field("Data da sessão","date",draft.date,v=>setDraft(d=>({...d,date:v})),"date",{max:todayKey}),field("Nome da sessão","name",draft.name,v=>setDraft(d=>({...d,name:v}))),
+   field("Duração (min)","durationMinutes",draft.durationMinutes??"",v=>setDraft(d=>({...d,durationMinutes:v})),"number",{min:1,inputMode:"numeric"}),
+   h("label",{className:"hist-edit-field"},h("span",null,"Dor nesta sessão?"),h("input",{type:"checkbox",checked:draft.painFlag===true,onChange:e=>setDraft(d=>({...d,painFlag:e.target.checked}))}))),
   (draft.ex||[]).map((e,i)=>h("div",{className:"hist-edit-ex",key:"ex-"+i},
    h("div",{className:"hist-edit-grid"},
     field("Exercício","name",e.name,v=>changeExercise(i,"name",v)),
@@ -3917,6 +4157,7 @@ function TrainingHistory({state,update}) {
     field("RIR","rir",e.rir??"",v=>changeExercise(i,"rir",v),"number",{min:"0",max:"4",inputMode:"numeric",placeholder:"não registado"})
    ),
    field("Nota","notes",e.notes||"",v=>changeExercise(i,"notes",v)),
+   h("label",{className:"hist-edit-field"},h("span",null,"Dor neste exercício?"),h("input",{type:"checkbox",checked:!!e.painFlag,onChange:event=>changeExercise(i,"painFlag",event.target.checked)})),
    h("button",{type:"button",className:"menu-btn evf-tool-button",onClick:()=>setDraft(d=>({...d,ex:d.ex.filter((_,j)=>j!==i)}))},"Remover exercício")
   )),
   h("div",{className:"menu-actions"},h("button",{type:"button",className:"menu-btn",onClick:()=>setDraft(d=>({...d,ex:[...d.ex,{name:"",sets:0,reps:0,actualSets:null,actualReps:null,weight:0,rir:null,notes:""}]}))},"Adicionar exercício"),h("button",{type:"button",className:"menu-btn",onClick:()=>{setEditingId(null);setDraft(null);}},"Cancelar"),h("button",{type:"button",className:"menu-btn main",onClick:saveEdit},"Guardar alterações"))
@@ -3928,6 +4169,7 @@ function TrainingHistory({state,update}) {
    shown.map(session=>h("div",{className:"hist-row",key:session.id},
     h("div",{className:"hist-top"},h("span",{className:"hist-date"},fmt(session.date)),h("span",{className:"hist-name"},session.maintenance?"Manutenção · "+session.name:inTravelPause(state.profile?.progressionCycleStart,session.date)?"Fora do bloco · "+session.name:session.name),h("button",{className:"hist-edit-btn",onClick:()=>beginEdit(session),"aria-label":"Editar sessão de "+fmt(session.date)},"Editar"),h("button",{className:"hist-del",onClick:()=>del(session.id),"aria-label":"Apagar treino"},h(I,{name:"trash",size:13}))),
     h("div",{className:"hist-ex"},(session.ex||[]).filter(e=>e.name).map(e=>e.name+(e.actualSets?" · "+e.actualSets+" séries feitas":(e.sets?" · "+e.sets+" séries planeadas":""))+(Array.isArray(e.actualRepsBySet)&&e.actualRepsBySet.length?" · reps/série "+e.actualRepsBySet.join("/"):e.actualReps?" · "+e.actualReps+" reps reais/série":(e.reps?" · meta "+repsLbl(e)+" reps":""))+(e.weight?" · "+fmtNum(e.weight)+"kg":"")+(e.rir!=null?" · RIR "+rirLabel(e.rir):"")).join(" · ")),
+    (session.durationMinutes>0||session.painFlag)&&h("div",{className:"hist-note"},[session.durationMinutes>0?session.durationMinutes+" min":null,session.painFlag?"Dor assinalada":null].filter(Boolean).join(" · ")),
     (session.cardio||[]).filter(c=>Number(c.minutes)>0).length>0&&h("div",{className:"hist-cardio"},h("strong",null,"Cardio: "),(session.cardio||[]).filter(c=>Number(c.minutes)>0).map(c=>(c.name||"Cardio")+" · "+c.minutes+" min").join(" · ")),
    (session.ex||[]).filter(e=>e.name&&e.notes).map((e,ni)=>h("div",{className:"hist-note",key:"note-"+ni},h("strong",null,e.name+": "),e.notes))
    )),
@@ -4012,6 +4254,7 @@ function WorkoutLogger({
  repsBySet: t && Array.isArray(t.actualRepsBySet) ? t.actualRepsBySet.join(", ") : "",
  cutForTime: !!(t&&t.cutForTime),
  cutReason: t&&t.cutReason||"",
+  painFlag: !!(t?.painFlag||x.painFlag),
  };
  };
  const firstIncomplete = rows => {
@@ -4022,6 +4265,8 @@ function WorkoutLogger({
  const [cardioRows,setCardioRows]=useState(()=>((today&&Array.isArray(today.cardio))?today.cardio:[]).map((c,i)=>({id:"cardio-"+i,name:String(c.name||""),minutes:c.minutes==null?"":String(c.minutes)})));
  const [sleepRecoveryMode,setSleepRecoveryMode]=useState(()=>!!today?.sleepRecoveryMode);
  const [skipCardioForDriving,setSkipCardioForDriving]=useState(()=>!!today?.cardioSkippedForDriving);
+ const [durationMinutes,setDurationMinutes]=useState(()=>today?.durationMinutes?String(today.durationMinutes):"");
+ const [painFlag,setPainFlag]=useState(()=>!!today?.painFlag);
  const [saveFeedback,setSaveFeedback]=useState("");
  const autoSaveTimer=useRef(null);
  const autoSaveDirty=useRef(false);
@@ -4049,7 +4294,7 @@ function WorkoutLogger({
  const saveDraft = (automatic,showFeedback=true) => {
    if(!canSave)return;
    try{
-     onSave(exercises.map((x,i)=>row(x,i)),cardioRows.map(c=>({name:c.name,minutes:c.minutes})).filter(c=>parseInt(c.minutes,10)>0),{sleepRecoveryMode,cardioSkippedForDriving:skipCardioForDriving});
+     onSave(exercises.map((x,i)=>row(x,i)),cardioRows.map(c=>({name:c.name,minutes:c.minutes})).filter(c=>parseInt(c.minutes,10)>0),{sleepRecoveryMode,cardioSkippedForDriving:skipCardioForDriving,durationMinutes:durationMinutes===""?null:parseInt(durationMinutes,10),painFlag});
      autoSaveDirty.current=false;
      if(showFeedback)setSaveFeedback(automatic?"Alterações guardadas automaticamente neste dispositivo.":window.EvolveFitLocalStatus?.status==="error"?"Não foi possível confirmar a gravação neste dispositivo.":window.__evfSyncMode==="cloud"?"Sessão guardada neste dispositivo. Consulta «Sincronização» no menu da conta para ver o estado da cloud.":"Sessão guardada neste dispositivo; sincronização cloud não configurada.");
    }catch(error){
@@ -4065,7 +4310,7 @@ function WorkoutLogger({
      if(autoSaveDirty.current)saveDraft(true);
    },650);
    return()=>{if(autoSaveTimer.current){clearTimeout(autoSaveTimer.current);autoSaveTimer.current=null;}};
- },[draft,cardioRows,sleepRecoveryMode,skipCardioForDriving,loggedSelected,canSave]);
+ },[draft,cardioRows,sleepRecoveryMode,skipCardioForDriving,durationMinutes,painFlag,loggedSelected,canSave]);
  flushAutoSave.current=()=>{
    if(autoSaveTimer.current){clearTimeout(autoSaveTimer.current);autoSaveTimer.current=null;}
    if(autoSaveDirty.current&&loggedSelected&&canSave)saveDraft(true,false);
@@ -4132,6 +4377,7 @@ function WorkoutLogger({
  actualReps: row(x, i).actualReps,
  repsBySet: row(x, i).repsBySet || "",
  rir: prev.rir != null ? prev.rir : rirOf(x),
+ painFlag: row(x,i).painFlag,
  } : row(x, i);
  });
  setDraft(d);
@@ -4148,7 +4394,11 @@ function WorkoutLogger({
  return /*#__PURE__*/React.createElement("div", null, sessionNote && React.createElement("div",{className:"log-session-note",role:"status"},sessionNote), React.createElement("div",{className:"log-policy-controls"},
  React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:sleepRecoveryMode,disabled:!canSave,onChange:e=>changeSleepRecovery(e.target.checked)}),React.createElement("span",null,"3+ noites com menos de 6 h: nesta sessão treina a RIR 3 e corta o último acessório. Não altera sessões futuras.")),
  React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:skipCardioForDriving,disabled:!canSave,onChange:e=>changeCardioDrivingSkip(e.target.checked)}),React.createElement("span",null,"Nesta sessão, se dormiste menos de 6 h e vais conduzir 7 h: salta o cardio, não os pesos. Não altera sessões futuras."))
- ), /*#__PURE__*/React.createElement("div", {
+ ),
+ React.createElement("div",{className:"evf-block2-session-meta"},
+  React.createElement("label",null,"Duração da sessão (min)",React.createElement("input",{className:"in",type:"number",min:1,inputMode:"numeric",value:durationMinutes,disabled:!canSave,onChange:e=>{markDraftChanged();setDurationMinutes(e.target.value)}})),
+  React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:painFlag,disabled:!canSave,onChange:e=>{markDraftChanged();setPainFlag(e.target.checked)}}),React.createElement("span",null,"Senti dor nesta sessão (identifica o exercício abaixo)"))),
+ /*#__PURE__*/React.createElement("div", {
  className: "log-progress"
  }, /*#__PURE__*/React.createElement("div", {
  className: "log-progress-bar"
@@ -4162,16 +4412,16 @@ function WorkoutLogger({
  }, doneCount, "/", exercises.length, " concluídos")), exercises.map((x, i) => {
  const r = row(x, i);
  const calibrationIncrease=/hack|romanian deadlift|\brdl\b/i.test(x.name||"")?5:2.5;
- const rirTargetRange=x.anchor&&firstReturnDay?[3]:rirTargetsFor(x,cycleWeek,sleepRecoveryMode);
+ const rirTargetRange=x.calibrationPending||today?.ex?.find(e=>e.exerciseId===x.exerciseId)?.calibrationSession?[3]:x.anchor&&firstReturnDay?[3]:rirTargetsFor(x,cycleWeek,sleepRecoveryMode);
  const matchExercise=se=>(se?.ex||[]).find(e=>x.exerciseId&&e.exerciseId?e.exerciseId===x.exerciseId:e.name===x.name);
  const prev = last && matchExercise(last);
  const hasCurrentReps=parseActualRepsBySet(r.repsBySet).length>0;
  const usingPreviousPerformance=!hasCurrentReps&&!r.cutForTime&&!isDecisionExcludedExercise(x)&&!!prev;
  const currentPerf=r.cutForTime?{...r,date:sessionDate}:hasCurrentReps?{...r,date:sessionDate}:prev?{...prev,repsBySet:Array.isArray(prev.actualRepsBySet)?prev.actualRepsBySet.join(", "):"",date:last.date}:{...r,date:sessionDate};
- const recommendationWeek=cycleWeek===1||cycleWeek===8?cycleWeek:usingPreviousPerformance?progressionWeekNumber(cycleStart,last.date):cycleWeek;
+ const recommendationWeek=cycleWeek===1||cycleWeek===8||globalWeek>=17&&(globalWeek-17)%8===0?cycleWeek:usingPreviousPerformance?progressionWeekNumber(cycleStart,last.date):cycleWeek;
  const recommendationLabel=r.cutForTime||isDecisionExcludedExercise(x)?"Registo · ":usingPreviousPerformance?"Carga desta sessão · ":"Próximo treino · ";
  const done = r.rir != null||r.cutForTime||isDecisionExcludedExercise(x)&&parseActualRepsBySet(r.repsBySet).length>0;
- const sug = progressionTip(history, x, currentPerf, sessionDate, recommendationWeek, cycleStart,{globalWeek,reviewWeek,sleepRecoveryMode,dayIdx,firstReturnDay});
+ const sug = progressionTip(history, x, currentPerf, sessionDate, recommendationWeek, cycleStart,{globalWeek,reviewWeek,sleepRecoveryMode,dayIdx,firstReturnDay,block2Start:globalWeek>=9&&(globalWeek-9)%8===0&&usingPreviousPerformance&&last?.date<sessionDate,exerciseCalibration:!!(x.calibrationPending||today?.ex?.find(e=>e.exerciseId===x.exerciseId)?.calibrationSession)});
  const evidenceReps=parseActualRepsBySet(currentPerf?.repsBySet??currentPerf?.actualRepsBySet);
  const recommendationEvidence=evidenceReps.length===(parseInt(x.sets,10)||0)&&currentPerf?.rir!=null?evidenceReps.join("/")+", RIR "+rirLabel(currentPerf.rir):"";
  const isOpen = openIdx === i;
@@ -4222,7 +4472,7 @@ function WorkoutLogger({
   x.rest&&React.createElement("span",null,"Descanso "+x.rest),
   x.week8Target&&React.createElement("span",null,"Alvo sem. 8: "+x.week8Target),
   isOptionalSetCandidate(x)&&cycleWeek>=5&&cycleWeek<=7&&x.optionalExtraSetCycleStart===extraSetCycleStart&&React.createElement("span",null,"Série extra ativa: +1")
- ), isTimeCutCandidate(x,dayIdx)&&React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:!!r.cutForTime,disabled:!canSave,onChange:e=>toggleTimeCut(i,e.target.checked,sleepRecoveryMode?"sleep":"time")}),React.createElement("span",null,r.cutForTime?"Cortado por limite de 60 min · sem recomendação":"Cortar só se necessário para respeitar 60 min; fica excluído de recomendações.")), isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Aquecimento, ativação e cardio não geram reps/RIR nem recomendação."), isDecisionExcludedExercise(x)&&!isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Série auxiliar: sem decisão; usa a carga do movimento principal."), !r.cutForTime&&!isNoLogExercise(x)&& /*#__PURE__*/React.createElement("div", {
+ ), React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:!!r.painFlag,disabled:!canSave,onChange:e=>setField(i,"painFlag",e.target.checked)}),React.createElement("span",null,"Dor neste exercício · considerar alternativa na revisão")), isTimeCutCandidate(x,dayIdx)&&React.createElement("label",{className:"evf-check-option"},React.createElement("input",{type:"checkbox",checked:!!r.cutForTime,disabled:!canSave,onChange:e=>toggleTimeCut(i,e.target.checked,sleepRecoveryMode?"sleep":"time")}),React.createElement("span",null,r.cutForTime?"Cortado por limite de 60 min · sem recomendação":"Cortar só se necessário para respeitar 60 min; fica excluído de recomendações.")), isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Aquecimento, ativação e cardio não geram reps/RIR nem recomendação."), isDecisionExcludedExercise(x)&&!isNoLogExercise(x)&&React.createElement("div",{className:"future-workout-note",role:"note"},"Série auxiliar: sem decisão; usa a carga do movimento principal."), !r.cutForTime&&!isNoLogExercise(x)&& /*#__PURE__*/React.createElement("div", {
  className: "log-panel-row"
  }, /*#__PURE__*/React.createElement("input", {
  className: "log-w",
@@ -4261,7 +4511,7 @@ function WorkoutLogger({
  target: rirTargetRange,
  clearable: true,
  onChange: v => setField(i, "rir", v)
- })), /*#__PURE__*/React.createElement("div",{className:"rir-target-note"},(firstReturnDay&&x.anchor?"Primeira sessão após a pausa: carga da calibração e âncora a RIR 3; a regra linear volta na sessão seguinte.":rirInstruction(x,cycleWeek,sleepRecoveryMode)))), openNotes[i] && /*#__PURE__*/React.createElement("input", {
+ })), /*#__PURE__*/React.createElement("div",{className:"rir-target-note"},(x.calibrationPending||today?.ex?.find(e=>e.exerciseId===x.exerciseId)?.calibrationSession?"Exercício trocado: calibra a RIR 3 na primeira sessão; os outros exercícios treinam normalmente.":firstReturnDay&&x.anchor?"Primeira sessão após a pausa: carga da calibração e âncora a RIR 3; a regra linear volta na sessão seguinte.":rirInstruction(x,cycleWeek,sleepRecoveryMode)))), openNotes[i] && /*#__PURE__*/React.createElement("input", {
  className: "log-note",
  placeholder: "Nota (ex: técnica, sensação, próxima carga...)",
  value: r.notes,
@@ -4386,36 +4636,16 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
  const name=String(exercise?.name||"");
  if(current?.cutForTime)return {action:"skip",k:"",text:"Cortado por limite de 60 min; guardado sem recomendação e excluído da sequência sem progresso."};
  if(isDecisionExcludedExercise(exercise))return {action:"skip",k:"",text:exercise?.decisionSourceExerciseId||/extra.*fly|fly.*extra/i.test(name)?"Série auxiliar sem decisão; segue a carga do fly principal.":"Aquecimento/ativação/cardio: sem registo de reps/RIR nem decisão."};
- if(options.reviewWeek&&options.dayIdx===2&&/lat pulldown/i.test(name)){
+ if(options.dayIdx===2&&/lat pulldown/i.test(name)){
   const repsNow=parseActualRepsBySet(current?.repsBySet??current?.actualRepsBySet);
   if(current?.rir!=null&&parseNum(current?.weight)===80&&repsNow.length===(parseInt(exercise?.sets,10)||0)&&repsNow.every(n=>n===8))return {action:"proposal",k:"warn",text:"PROPOSTA (não automática): testar elevações — assistidas, depois peso corporal e, quando possível, com peso."};
  }
  if(!cycleWeek)return {action:"skip",k:"",text:"Pausa planeada: manutenção fora do bloco, sem recomendações."};
   if(options.firstReturnDay)return {action:"skip",k:"",text:"Regresso: mantém a carga da calibração e treina as âncoras a RIR 3. Sem progressão automática nesta primeira sessão; a regra linear aplica-se na sessão seguinte."};
- if(options.reviewWeek){
-  const plannedForReview=parseInt(exercise?.sets,10)||0;
-  const reviewMatch=session=>(session.ex||[]).find(item=>exercise.exerciseId&&item.exerciseId?item.exerciseId===exercise.exerciseId:item.name===exercise.name);
-  const reviewSessions=(history||[]).filter(session=>!session.maintenance&&!inTravelPause(cycleStart,session.date)&&String(session.date||"")<String(sessionDate||"")&&(options.dayIdx==null||session.dayIdx==null||session.dayIdx===options.dayIdx||!!reviewMatch(session))).slice().sort((a,b)=>String(a.date||"").localeCompare(String(b.date||"")));
-  const reviewRecords=reviewSessions.map(session=>{
-   const date=String(session.date||""),entry=reviewMatch(session),sessionCycleWeek=progressionWeekNumber(cycleStart,date);
-   if(sessionCycleWeek==null||sessionCycleWeek===8||!entry||entry.cutForTime||isDecisionExcludedExercise(entry)||entry.rir==null)return {date,skip:true};
-   const reps=parseActualRepsBySet(entry.actualRepsBySet),weight=parseNum(entry.weight),sets=parseInt(entry.sets,10)||0;
-   if(sets!==plannedForReview||reps.length!==plannedForReview||!Number.isFinite(weight)||weight<=0)return {date,skip:true};
-   return {date,weight,sets,total:reps.reduce((sum,n)=>sum+n,0),skip:false};
-  });
-  let reviewRun=[];
-  reviewRecords.forEach(record=>{
-   if(record.skip){reviewRun=[];return;}
-   const prior=reviewRun[reviewRun.length-1];
-   if(prior&&(prior.sets!==record.sets||Math.abs(prior.weight-record.weight)>.001))reviewRun=[record];
-   else reviewRun.push(record);
-  });
-  const reviewEntries=reviewRun.slice(-4);
-  const stalled=reviewEntries.length===4&&((new Date(reviewEntries[3].date+"T12:00:00")-new Date(reviewEntries[0].date+"T12:00:00"))/86400000)>=18&&reviewEntries.every((entry,index)=>index===0||entry.total<=reviewEntries[index-1].total);
-  return stalled?{action:"review",k:"warn",text:"Revisão semana 17: 3+ semanas sem progresso no mesmo peso. Considera trocar apenas se sono e alimentação estiverem adequados ou existir dor; sem troca automática."}:{action:"review",k:"ok",text:"Semana 17 · revisão seletiva. Mantém o plano; troca só com estagnação ≥3 semanas apesar de sono/alimentação adequados ou por dor. Sem troca automática."};
- }
- if(cycleWeek===1)return {action:"skip",k:"",text:options.globalWeek>1?"Novo bloco (semana "+options.globalWeek+"): começa com as cargas da semana 7 anterior; calibração, sem recomendações.":"Semana 1 · calibração a RIR 3; apenas registar, sem recomendações."};
- if(cycleWeek===8)return {action:"skip",k:"",text:"Deload: meia dose de séries, carga da semana 7 e RIR 3; sem recomendações."};
+ if(options.exerciseCalibration)return {action:"skip",k:"",text:"Exercício trocado: primeira sessão a RIR 3 para calibrar a nova carga; depois retoma a progressão."};
+ if(options.block2Start)return {action:"skip",k:"",text:"Novo bloco: começa com a carga válida da semana 7 (ou última antes do deload). Sem calibração; regra linear a partir do desempenho desta sessão."};
+ if(cycleWeek===1)return {action:"skip",k:"",text:options.globalWeek>1?"Novo bloco: usa as cargas anteriores; regista sem progressão nesta semana.":"Semana 1 · calibração a RIR 3; apenas registar, sem recomendações."};
+ if(cycleWeek===8)return {action:"skip",k:"",text:"Deload: meia dose de séries, última carga válida antes do deload e RIR 3; sem recomendações."};
  const plannedSets=parseInt(exercise?.sets,10)||0;
  const minReps=parseInt(exercise?.reps,10)||0;
  const maxReps=parseInt(exercise?.repsMax,10)||minReps;
@@ -4453,7 +4683,7 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
  const currentDate=String(current?.date||sessionDate||"");
  const activeCycleStart=progressionCycleStartFor(cycleStart,currentDate)||cycleStart;
  const matchEntry=session=>(session.ex||[]).find(item=>exercise.exerciseId&&item.exerciseId?item.exerciseId===exercise.exerciseId:item.name===exercise.name);
- const historyRecords=(history||[]).filter(session=>!session.maintenance&&String(session.date||"")>=(isTravelCycle(cycleStart)&&currentDate>=TRAVEL_RESUME?TRAVEL_RESUME:String(activeCycleStart||""))&&String(session.date||"")<currentDate&&(options.dayIdx==null||session.dayIdx==null||session.dayIdx===options.dayIdx||!!matchEntry(session))).slice().sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))).map(session=>{
+ const historyRecords=(history||[]).filter(session=>!session.maintenance&&String(session.date||"")>=(isTravelCycle(cycleStart)&&activeCycleStart===cycleStart&&currentDate>=TRAVEL_RESUME?TRAVEL_RESUME:String(activeCycleStart||""))&&String(session.date||"")<currentDate&&(options.dayIdx==null||session.dayIdx==null||session.dayIdx===options.dayIdx||!!matchEntry(session))).slice().sort((a,b)=>String(a.date||"").localeCompare(String(b.date||""))).map(session=>{
   const entry=matchEntry(session);
   if(!entry||entry.cutForTime||isDecisionExcludedExercise(entry))return {date:String(session.date||""),weight:null,sets:0,reps:[],total:0,rir:null,valid:false,skip:true};
   const pastReps=parseActualRepsBySet(entry.actualRepsBySet);
@@ -4691,6 +4921,10 @@ function Body({
        rec.rabo = Number.isFinite(Number(previous.rabo)) ? Number(previous.rabo) : 0;
        if (i >= 0) s.body[i] = { ...previous, ...rec };
        else s.body.push(rec);
+       if(isTravelCycle(s.profile?.progressionCycleStart)&&!s.profile.longMaintenanceSince){
+         const stop=longMaintenanceThreshold(s.body.filter(r=>r.date<=todayKey));
+         if(stop){s.profile.longMaintenanceSince=stop.date;s.profile.longMaintenanceReason=stop.reason;}
+       }
      });
      setForm(false);
      setDate(todayKey);
@@ -5068,6 +5302,9 @@ function Body({
 
 function Coach2027({ state, update, onNavigate }) {
  const prof = state.profile || {};
+ const phase=nutritionPhase(state,todayKey);
+ const maintenanceNow=phase==="maintenance"||phase==="longMaintenance";
+ const deficitNow=phase==="deficit";
  const today = state.days[todayKey] || { tasks:{}, water:0 };
  const taskVal = id => today.tasks && today.tasks[id] ? Number(today.tasks[id].value || 0) : 0;
  const setTaskVal = (id, value) => update(s => {
@@ -5138,9 +5375,14 @@ function Coach2027({ state, update, onNavigate }) {
  if(isTravelCycle(prof.progressionCycleStart)&&todayKey>=TRAVEL_PAUSE_START&&todayKey<=TRAVEL_PAUSE_END){
   status=" Pausa planeada";
   decision="Viagem: mantém alimentação e recuperação sem compensar treinos. Sessões opcionais de manutenção não contam para a progressão.";
- } else if(isTravelCycle(prof.progressionCycleStart)&&todayKey>="2027-02-02"&&todayKey<="2027-02-15"){
+ } else if(phase==="longMaintenance"){
+  status=" Manutenção longa";
+  decision="Meta atingida ("+(prof.longMaintenanceReason||"limiar confirmado")+"). 2 600–2 700 kcal/dia, proteína igual. O treino continua; não se volta ao défice sem decisão explícita tua.";
+ } else if(maintenanceNow){
   status=" Manutenção de peso";
-  decision="Duas semanas de manutenção depois do checkpoint de 1 fev. Sem alterações automáticas às calorias; acompanha a média de peso e a cintura.";
+  decision="Primeiras 2 semanas deste bloco: 2 600–2 700 kcal/dia, proteína igual ("+(prof.proteinTarget||170)+" g). Mantém o peso ±0,5 kg. Uma subida transitória de 0,5–1 kg não é alerta.";
+ } else if(deficitNow){
+  decision="Semanas 3–8 do bloco: 2 300 kcal nos dias de treino e 2 100 kcal nos dias de descanso; proteína igual ("+(prof.proteinTarget||170)+" g). Os limiares de peso são checkpoints, não pausas adicionais.";
  }
 
  let recovery=0, recoveryParts=0;
@@ -5153,8 +5395,8 @@ function Coach2027({ state, update, onNavigate }) {
  const alerts=[];
  if(!inTravelPause(prof.progressionCycleStart,todayKey)&&wkSessions >= 5) alerts.push({text:"Meta semanal de 5 treinos atingida.", level:"positive", tab:"workout"});
  else if(!inTravelPause(prof.progressionCycleStart,todayKey)&&wkSessions > 0) alerts.push({text:wkSessions + (wkSessions===1 ? " treino registado esta semana." : " treinos registados esta semana."), level:"neutral", tab:"workout"});
- if(enoughData && waistTrend!=null && waistTrend<0) alerts.push({text:"Cintura em tendência descendente.", level:"positive", tab:"body"});
- if(enoughData && weightTrend!=null && Math.abs(weightTrend)<0.2 && (waistTrend==null || Math.abs(waistTrend)<0.3)) alerts.push({text:"Peso e cintura estão estáveis. Continua a registar para confirmar a tendência.", level:"neutral", tab:"body"});
+ if(!maintenanceNow&&enoughData && waistTrend!=null && waistTrend<0) alerts.push({text:"Cintura em tendência descendente.", level:"positive", tab:"body"});
+ if(!maintenanceNow&&enoughData && weightTrend!=null && Math.abs(weightTrend)<0.2 && (waistTrend==null || Math.abs(waistTrend)<0.3)) alerts.push({text:"Peso e cintura estão estáveis. Continua a registar para confirmar a tendência.", level:"neutral", tab:"body"});
 
  const fourWeeksAgo = new Date(TODAY); fourWeeksAgo.setDate(fourWeeksAgo.getDate()-28);
  const cutoff28 = iso(fourWeeksAgo);
@@ -5178,7 +5420,9 @@ function Coach2027({ state, update, onNavigate }) {
    const q=(question||"").toLowerCase();
    const lines=[];
    lines.push("ANÁLISE DO COACH");
-   if(!enoughData){
+   if(maintenanceNow){
+     lines.push((phase==="longMaintenance"?"Manutenção longa sem défice planeado.":"Início do bloco em manutenção.")+" 2 600–2 700 kcal, proteína igual; variação isolada de 0,5–1 kg não justifica reduzir comida.");
+   } else if(!enoughData){
      lines.push("Ainda faltam pelo menos 2 pesagens comparáveis para avaliar uma tendência corporal com confiança.");
    } else if(weightTrend < -3){
      lines.push("A perda de peso recente parece muito rápida. Não aumentaria o défice sem rever recuperação, rendimento e retenção de líquidos.");
@@ -5303,7 +5547,16 @@ function Coach2027({ state, update, onNavigate }) {
 
  return /*#__PURE__*/React.createElement("div",null,
  /*#__PURE__*/React.createElement(TabHead,{title:"Coach",sub:"Revisão semanal e orientação; análise local por defeito"}),
- /*#__PURE__*/React.createElement("section",{className:"card evf-measure-guide","aria-labelledby":"evf-measure-guide-title"},
+  travelWeightCheckpoint(prof.progressionCycleStart,todayKey)&&!isBlockCheckpointDate(prof.progressionCycleStart,todayKey)&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
+    /*#__PURE__*/React.createElement("strong",null,"Checkpoint de peso · "+travelWeightCheckpoint(prof.progressionCycleStart,todayKey)),
+    /*#__PURE__*/React.createElement("p",null,"Pesa-te na balança inteligente e acompanha a tendência; não cria uma pausa alimentar adicional.")),
+  isBlockCheckpointDate(prof.progressionCycleStart,todayKey)&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"alert"},
+   /*#__PURE__*/React.createElement("strong",null,"Check-in · fim do deload"),
+   /*#__PURE__*/React.createElement("p",null,"Faz hoje a pesagem na balança inteligente, mede a cintura ao umbigo e tira fotografias de frente, lado e costas."+(travelWeightCheckpoint(prof.progressionCycleStart,todayKey)?" Checkpoint: "+travelWeightCheckpoint(prof.progressionCycleStart,todayKey)+".":"")+" Regista em Corpo e nas fotografias abaixo; não se cria nenhum valor automaticamente.")),
+  phase&&([...body].reverse().some(r=>r.weight>0&&r.weight<=85||r.bodyFat>0&&r.bodyFat<=15))&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
+    /*#__PURE__*/React.createElement("strong",null,"Checkpoint corporal"),
+    /*#__PURE__*/React.createElement("p",null,"Aos 85 kg e aos 82 kg / 15% de gordura: reavalia com fotos de frente, lado e costas, cintura ao umbigo e balança inteligente. O checkpoint por si só não altera a fase alimentar.")),
+  /*#__PURE__*/React.createElement("section",{className:"card evf-measure-guide","aria-labelledby":"evf-measure-guide-title"},
    /*#__PURE__*/React.createElement("div",{className:"pc-title",id:"evf-measure-guide-title"},"O que medir"),
    /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-list"},
      /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Peso"), /*#__PURE__*/React.createElement("span",null,"Diariamente · acompanhar a média de 7 dias")),
@@ -5312,23 +5565,23 @@ function Coach2027({ state, update, onNavigate }) {
      /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Fotografias"), /*#__PURE__*/React.createElement("span",null,"De 2 em 2 semanas"))
    ),
    /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide"},
-     /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide-title"},"Só ajustar calorias após 3 semanas de dados"),
+     /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide-title"},"Reavaliar tendências, nunca criar pausas extra por atingir um peso"),
      /*#__PURE__*/React.createElement("ul",{className:"evf-calorie-guide-rules"},
        /*#__PURE__*/React.createElement("li",null,"Perda de 0,4–0,7 kg/semana: manter"),
-       /*#__PURE__*/React.createElement("li",null,"Perda inferior a 0,2 kg/semana com cintura parada: −150 kcal"),
-       /*#__PURE__*/React.createElement("li",null,"Perda superior a 1 kg/semana ou fome constante: +150 kcal")
+       /*#__PURE__*/React.createElement("li",null,"Perda inferior a 0,2 kg/semana: reavaliar após 3 semanas de dados; durante a manutenção não reduzir calorias"),
+       /*#__PURE__*/React.createElement("li",null,"Aos 85 kg, ou aos 82 kg / 15%: fotos, medidas e pesagem inteligente; sem pausa extra. Parar o défice só quando o limiar confirmado for atingido.")
      )
    )
  ),
  /*#__PURE__*/React.createElement("section",{className:"card evf-nutrition-guide","aria-labelledby":"evf-nutrition-guide-title"},
    /*#__PURE__*/React.createElement("div",{className:"pc-title",id:"evf-nutrition-guide-title"},"Nutrição e metas"),
    /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-macros"},
-     /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-macro"}, /*#__PURE__*/React.createElement("span",null,"Proteína"), /*#__PURE__*/React.createElement("strong",null,"185 g")),
-     /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-macro"}, /*#__PURE__*/React.createElement("span",null,"Hidratos"), /*#__PURE__*/React.createElement("strong",null,"235 g")),
-     /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-macro"}, /*#__PURE__*/React.createElement("span",null,"Gordura"), /*#__PURE__*/React.createElement("strong",null,"70 g"))
+     /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-macro"}, /*#__PURE__*/React.createElement("span",null,"Proteína"), /*#__PURE__*/React.createElement("strong",null,maintenanceNow||deficitNow?(prof.proteinTarget||170)+" g":"185 g")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-macro"}, /*#__PURE__*/React.createElement("span",null,"Hidratos"), /*#__PURE__*/React.createElement("strong",null,maintenanceNow?"ajustar":"235 g")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-macro"}, /*#__PURE__*/React.createElement("span",null,"Gordura"), /*#__PURE__*/React.createElement("strong",null,maintenanceNow?"ajustar":"70 g"))
    ),
-   /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-calories"},"5 × 2 300 + 2 × 2 100 = 15 700 kcal/semana · média de aproximadamente 2 240 kcal/dia."),
-   /*#__PURE__*/React.createElement("details",{className:"evf-nutrition-details"},
+   /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-calories"},phase==="longMaintenance"?"Manutenção longa · 2 600–2 700 kcal/dia; proteína igual ("+(prof.proteinTarget||170)+" g). Sem défice em blocos seguintes sem decisão tua.":maintenanceNow?"Semanas 1–2 de cada bloco · manutenção: 2 600–2 700 kcal/dia · proteína igual ("+(prof.proteinTarget||170)+" g) · manter peso ±0,5 kg. Flutuação isolada de +0,5–1 kg não é alerta.":deficitNow?"Semanas 3–8 · défice: 2 300 kcal nos dias de treino / 2 100 kcal nos dias de descanso · proteína igual ("+(prof.proteinTarget||170)+" g). Metas personalizadas não são substituídas.":"5 × 2 300 + 2 × 2 100 = 15 700 kcal/semana · média de aproximadamente 2 240 kcal/dia."),
+   !phase&&/*#__PURE__*/React.createElement("details",{className:"evf-nutrition-details"},
      /*#__PURE__*/React.createElement("summary",null,"Distribuição por refeições e margens"),
      /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-detail-body"},
        /*#__PURE__*/React.createElement("p",null, /*#__PURE__*/React.createElement("strong",null,"Proteína · 185 g.")," Cerca de 30–50 g em cada uma de 5–6 refeições. Exemplo: pré 20 g · pós 45 g · almoço 45 g · lanche 25 g · jantar 40 g · ceia 20 g."),
@@ -5336,15 +5589,15 @@ function Coach2027({ state, update, onNavigate }) {
        /*#__PURE__*/React.createElement("p",null, /*#__PURE__*/React.createElement("strong",null,"Gordura · 70 g.")," Cerca de 20 g podem vir da carne, ovos e lacticínios; planeia intencionalmente os outros ≈50 g: 10 g de azeite no almoço + 10 g no jantar + 20 g de amêndoas ou 15 g de manteiga de amendoim + 20 g de chocolate negro. Não desças de 60 g."),
        /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-tolerance-title"},"Margens de tolerância (para não enlouqueceres)"),
        /*#__PURE__*/React.createElement("ul",{className:"evf-nutrition-tolerances"},
-         /*#__PURE__*/React.createElement("li",null,"Calorias: ±100 kcal/dia é aceitável; conta a média semanal (≈2 240 kcal/dia)."),
+         /*#__PURE__*/React.createElement("li",null,maintenanceNow?"Manutenção: 2 600–2 700 kcal/dia; manter peso ±0,5 kg, sem alertas por flutuação isolada de 0,5–1 kg.":"Calorias: ±100 kcal/dia é aceitável; conta a média semanal (≈2 240 kcal/dia)."),
          /*#__PURE__*/React.createElement("li",null,"Proteína: nunca abaixo de 170 g; acima de 185 g não traz benefício adicional, mas não faz mal."),
          /*#__PURE__*/React.createElement("li",null,"Hidratos e gordura podem trocar entre si ±20 g conforme o dia, desde que as calorias fechem.")
        )
      )
    ),
-   /*#__PURE__*/React.createElement("div",{className:"evf-nutrition-week"},
+   !phase&&/*#__PURE__*/React.createElement("div",{className:"evf-nutrition-week"},
      /*#__PURE__*/React.createElement("strong",null,"Semana completa"),
-     /*#__PURE__*/React.createElement("span",null,"Défice estimado de ≈4 000 kcal/semana · ritmo esperado de ≈0,5–0,6 kg de gordura por semana."),
+     /*#__PURE__*/React.createElement("span",null,maintenanceNow?"Proteína igual; usa a média de peso e não uma única pesagem.":"Défice estimado de ≈4 000 kcal/semana · ritmo esperado de ≈0,5–0,6 kg de gordura por semana."),
      /*#__PURE__*/React.createElement("small",null,"Estimativa: o resultado real depende do gasto energético e da consistência.")
    )
  ),
@@ -5362,8 +5615,8 @@ function Coach2027({ state, update, onNavigate }) {
  ),
  alerts.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
    /*#__PURE__*/React.createElement("div",{className:"pc-title"},"O que merece atenção"),
-   alerts.slice(0,5).map((a,i)=>/*#__PURE__*/React.createElement("button",{className:"coach27-alert coach27-alert-"+a.level,key:i,onClick:()=>onNavigate&&onNavigate(a.tab)},
-     /*#__PURE__*/React.createElement("span",{className:"coach-alert-symbol "+(a.level==="positive"?"coach-alert-positive":a.level==="negative"?"coach-alert-negative":"coach-alert-neutral")},a.level==="positive"?"✓":a.level==="negative"?"!":"•"),
+   alerts.slice(0,5).map((a,i)=>/*#__PURE__*/React.createElement("button",{className:"coach27-alert coach27-alert-"+a.level,key:i,onClick:()=>onNavigate&&onNavigate(a.tab),"aria-label":(a.level==="positive"?"Concluído: ":a.level==="negative"?"Atenção: ":"Informação: ")+a.text},
+     /*#__PURE__*/React.createElement("span",{className:"coach-alert-symbol "+(a.level==="positive"?"coach-alert-positive":a.level==="negative"?"coach-alert-negative":"coach-alert-neutral"),"aria-hidden":true},a.level==="positive"?"✓":a.level==="negative"?"!":"i"),
      /*#__PURE__*/React.createElement("span",{style:{flex:1,textAlign:"left"}},a.text),
      /*#__PURE__*/React.createElement("span",{style:{fontSize:"15px",opacity:.65}},"›")
    ))
@@ -5649,26 +5902,26 @@ button,input,select,textarea{font-family:inherit;}
 /* Informação de apoio / resumo contextual (claramente abaixo do nível primário) */
 #root .pc-empty,#root .evf-ai-sub,#root .evf-ai-insight,#root .bsum-status,
 #root .coach27-alert,#root .ef-corr,#root .goal-val,#root .slp-date,
-#root .ef-pro-k,#root .rir-status{font-size:12px!important;line-height:1.45!important;}
+#root .ef-pro-k,#root .rir-status{font-size:12.5px!important;line-height:1.5!important;}
 
 /* Detalhes secundários, notas e metadados de linha (11px–11.5px discretos) */
 #root .menu-c,#root .water-goal,#root .metric-label,#root .hist-ex,#root .hist-note,
 #root .hist-cardio,#root .rir-help,#root .rir-hint,#root .log-session-note,
 #root .evf-check-option,#root .log-reps-title,#root .exercise-progress-reps,
 #root .log-sr,#root .log-summary,#root .logger-sub,#root .prog-vals,
-#root .section-count,#root .ef-pro-note,#root .home-streak,#root .menu-h{font-size:11.5px!important;line-height:1.4!important;}
+#root .section-count,#root .ef-pro-note,#root .home-streak,#root .menu-h{font-size:12px!important;line-height:1.48!important;}
 
 /* Micro-etiquetas, badges, contadores e instruções auxiliares (10.5px–11px) */
 #root .menu-sub,#root .kcal-note,#root .water-pct,#root .qty-unit,#root .metric-avg,
 #root .metric-diff,#root .log-progress-l,#root .rir-target-note,#root .future-workout-note,
 #root .training-week-nav-label,#root .log-cardio-head span,#root .disclaimer,
 #root .coach27-photo-meta,#root .slp-nums,#root .slp-nums span,#root .gitcal-legend,
-#root .gitcal-legend span,#root .circ-label,#root .stat-l{font-size:11px!important;line-height:1.36!important;}
+#root .gitcal-legend span,#root .circ-label,#root .stat-l{font-size:11.5px!important;line-height:1.42!important;}
 #root .subgroup,#root .bsum-l,#root .coach27-mini-l,#root .coach27-lbl,#root .coach27-badge,
 #root .evf-ai-kicker,#root .evf-ai-badge,#root .evf-ai-use,#root .evf-ai-result-head,
 #root .logged-badge,#root .pc-badge,#root .streak-l,#root .ef-pro-status,#root .rir-lbl,
 #root .coach-tag,#root .today-label,#root .workout-meta span,#root .lbl,
-#root .log-reps-sub,#root .plan-meta span,#root .log-plan-meta span,#root .ef-lib-sub{font-size:10.5px!important;line-height:1.34!important;}
+#root .log-reps-sub,#root .plan-meta span,#root .log-plan-meta span,#root .ef-lib-sub{font-size:11px!important;line-height:1.4!important;}
 #root .coach27-mini-l{line-height:1.36!important;margin-top:4px!important;}
 #root .evf-ai-kicker,#root .evf-ai-badge,#root .bsum-l,#root .subgroup,#root .rir-lbl{letter-spacing:.05em!important;}
 #root .ring-pct i{font-size:10px!important;}
