@@ -35,12 +35,12 @@ const find = (node,predicate) => {
   if (predicate(node)) return node;
   return find(node.children,predicate);
 };
-function mount({today=null,canSave=true}={}) {
+function mount({today=null,canSave=true,exercises=[x,{...x,exerciseId:'exercise-2',name:'Press'}]}={}) {
   const hooks=[]; let cursor=0;
   context.useState = initial => {const i=cursor++;if(!(i in hooks))hooks[i]=typeof initial==='function'?initial():initial;return [hooks[i],value=>{hooks[i]=typeof value==='function'?value(hooks[i]):value;}];};
   context.useRef = initial => {const i=cursor++;if(!(i in hooks))hooks[i]={current:initial};return hooks[i];};
   const saved=[];
-  const props = {history:[],exercises:[x,{...x,exerciseId:'exercise-2',name:'Press'}],onSave:(...args)=>saved.push(args),loggedSelected:!!today,sessionDate:'2026-11-12',canSave,today,cycleWeek:2,cycleStart:'2026-11-09',globalWeek:2,dayIdx:0};
+  const props = {history:[],exercises,onSave:(...args)=>saved.push(args),loggedSelected:!!today,sessionDate:'2026-11-12',canSave,today,cycleWeek:2,cycleStart:'2026-11-09',globalWeek:2,dayIdx:0};
   return {render:()=>{cursor=0;return context.WorkoutLogger(props);},saved};
 }
 const app=mount();
@@ -76,6 +76,17 @@ tree=legacy.render();
 assert.equal(find(tree,n=>n.type==='button'&&n.props['aria-label']==='Marcar exercício feito: Remada')?.props['aria-pressed'],false);
 const future=mount({canSave:false}).render();
 assert.equal(find(future,n=>n.type==='button'&&n.props['aria-label']==='Marcar exercício feito: Remada')?.props.disabled,true,'não assinala dias futuros');
+// As notas existentes ficam guardadas, mas só ocupam espaço quando abertas.
+const noted=mount({exercises:[{...x,notes:'Âncora: apontar a técnica.'},{...x,exerciseId:'exercise-2',name:'Press'}]});
+tree=noted.render();
+assert.equal(find(tree,n=>n.type==='input'&&n.props.className==='log-note'),null,'nota fechada por defeito');
+let noteButton=find(tree,n=>n.type==='button'&&n.props.className==='log-note-toggle has');
+assert.ok(noteButton,'nota guardada permanece acessível');
+noteButton.props.onClick();
+tree=noted.render();
+assert.equal(find(tree,n=>n.type==='input'&&n.props.className==='log-note')?.props.value,'Âncora: apontar a técnica.');
+find(tree,n=>n.type==='button'&&n.props.className?.includes('log-save')).props.onClick();
+assert.equal(noted.saved[0][0][0].notes,'Âncora: apontar a técnica.','guardar não apaga notas ocultas');
 console.log('Check independente: assinalar, desmarcar, persistir sem inventar ou apagar séries/RIR.');
 
 // A conversão para o Histórico guarda o check sem o confundir com séries/RIR.

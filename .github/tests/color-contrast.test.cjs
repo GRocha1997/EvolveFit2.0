@@ -43,3 +43,10 @@ for (const cls of ['coach27-alert-positive', 'coach27-alert-negative', 'coach27-
 }
 assert.ok(palette.includes('border-left: 3px solid var(--ef-warning)'), 'o check-in distingue-se pela faixa lateral');
 console.log('Contraste WCAG AA: texto secundário, alertas e ações em ambos os temas.');
+const compactRows = css.slice(css.indexOf('/* Lista de exercícios: linhas compactas'));
+assert.match(compactRows, /#root \.log-check\s*\{[^}]*grid-area:\s*auto/s, 'check não cria área implícita na grelha');
+assert.match(compactRows, /#root \.log-check\s*\{[^}]*height:\s*44px/s, 'área de toque preservada');
+assert.match(compactRows, /#root \.log-check::before\s*\{[^}]*width:\s*24px/s, 'quadrado visual compacto');
+assert.match(compactRows, /#root \.log-row-btn\s*\{[^}]*display:\s*flex/s, 'metadados ajustam-se sem colunas implícitas');
+assert.match(compactRows, /#root \.log-entry\.open\s*\{[^}]*border-left:\s*3px solid var\(--ef-info\)/s, 'exercício aberto continua destacado');
+console.log('Lista de exercícios: dimensões compactas e grelha sem áreas órfãs.');
