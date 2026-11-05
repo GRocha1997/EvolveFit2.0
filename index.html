@@ -610,6 +610,22 @@ const load = uid => {
  }
 };
 
+const PHOTO_KEY = "evolvefit_progress_photos_v1";
+const PHOTO_OWNER_KEY = PHOTO_KEY + "_legacy_owner";
+const photoKeyFor = uid => PHOTO_KEY + "_" + encodeURIComponent(backupOwner(uid));
+const readPhotos = uid => {
+ try {
+  const privateCopy=localStorage.getItem(photoKeyFor(uid));
+  if(privateCopy!==null){const photos=JSON.parse(privateCopy);return Array.isArray(photos)?photos:[];}
+  const raw=localStorage.getItem(PHOTO_KEY),owner=localStorage.getItem(PHOTO_OWNER_KEY);
+  if(!raw || (owner&&owner!==backupOwner(uid)) || (!owner&&hasOtherAccountCache(uid)))return [];
+  const photos=JSON.parse(raw);
+  if(!Array.isArray(photos))return [];
+  localStorage.setItem(photoKeyFor(uid),raw);
+  if(!owner)localStorage.setItem(PHOTO_OWNER_KEY,backupOwner(uid));
+  return photos;
+ }catch(e){return [];}
+};
 const SNAP_KEY = BASE_KEY + "_snapshots";
 const snapOwner = uid => uid ? String(uid) : "local";
 const snapDayKey = uid => SNAP_KEY + "_day_" + encodeURIComponent(snapOwner(uid));
@@ -897,6 +913,12 @@ async function evolveFitAccountAuth(mode,email,password){
   const localOrigin=!previous&&window.__evfCurrentUid==null;
   const anonymousOrigin=previous?.isAnonymous&&window.__evfCurrentUid===previous.uid;
   if(deviceState&&(localOrigin||anonymousOrigin)&&previous?.uid!==user.uid){
+   // As fotos são locais: copia-as para a nova conta sem eliminar a origem.
+   try {
+    const sourcePhotos=readPhotos(previous?.uid||null);
+    if(sourcePhotos.length&&localStorage.getItem(photoKeyFor(user.uid))===null)
+      localStorage.setItem(photoKeyFor(user.uid),JSON.stringify(sourcePhotos));
+   }catch(e){}
    try{await evolveFitMergeDeviceStateIntoAccount(user.uid,deviceState);}
    catch(error){
     mergeWarning=String(error?.message||error);
@@ -2445,9 +2467,19 @@ function AccountTools({state, update, forceOpen=false, uid=null}) {
   const cloud=window.__evfSyncMode==="cloud";
   const text="Apagar histórico de treinos, medições, hábitos, fotografias e cópias de restauro deste dispositivo. As metas e o plano de treino serão mantidos"+(cloud?" e a eliminação será enviada para a cloud quando houver ligação.":". Esta ação não apaga dados que tenham sido exportados ou guardados noutro dispositivo.")+" Continuar?";
   if(!window.confirm(text))return;
-  try{localStorage.removeItem(SNAP_KEY);localStorage.removeItem(SNAP_KEY+"_day");for(let i=localStorage.length-1;i>=0;i--){const key=localStorage.key(i);if(key&&key.startsWith(SNAP_KEY+"_day_"))localStorage.removeItem(key);}localStorage.removeItem("evolvefit_progress_photos_v1");}catch(e){}
+  try{
+   const owner=snapOwner(uid),arr=JSON.parse(localStorage.getItem(SNAP_KEY)||"[]");
+   if(Array.isArray(arr))localStorage.setItem(SNAP_KEY,JSON.stringify(arr.filter(x=>(x?.owner||"local")!==owner)));
+   localStorage.removeItem(snapDayKey(uid));
+   if(!uid)localStorage.removeItem(SNAP_KEY+"_day");
+   localStorage.removeItem(photoKeyFor(uid));
+   if(localStorage.getItem(PHOTO_OWNER_KEY)===backupOwner(uid)){
+    localStorage.removeItem(PHOTO_KEY);
+    localStorage.removeItem(PHOTO_OWNER_KEY);
+   }
+  }catch(e){}
   setSnapshots([]);
-  window.dispatchEvent(new CustomEvent("evolvefit-clear-photos"));
+  window.dispatchEvent(new CustomEvent("evolvefit-clear-photos",{detail:{uid}}));
   update(current=>{
    current.days={};current.body=[];current.sessions=[];current.trainingCompleted={};
    if(current.profile){delete current.profile.coachBaseline;current.profile.planAdjustments=[];}
@@ -3108,7 +3140,8 @@ function Dashboard({
  }), tab === "goals" && /*#__PURE__*/React.createElement(Coach2027, {
  state: state,
  update: update,
- onNavigate: onNavigate
+ onNavigate: onNavigate,
+ uid: uid
  })), /*#__PURE__*/React.createElement("nav", {
  className: "tabbar",
  "aria-label": "Navegação principal"
@@ -5386,7 +5419,7 @@ function CoachBlockGuide({state}){
  );
 }
 
-function Coach2027({ state, update, onNavigate }) {
+function Coach2027({ state, update, onNavigate, uid }) {
  const prof = state.profile || {};
  const phase=nutritionPhase(state,todayKey);
  const maintenanceNow=phase==="maintenance"||phase==="longMaintenance";
@@ -5548,15 +5581,13 @@ function Coach2027({ state, update, onNavigate }) {
    }finally{setAiBusy(false);}
  };
 
- const [photos,setPhotos] = useState(()=>{
- try{return JSON.parse(localStorage.getItem("evolvefit_progress_photos_v1")||"[]")}catch(e){return[]}
- });
- const PH_KEY = "evolvefit_progress_photos_v1";
+ const [photos,setPhotos] = useState(()=>readPhotos(uid));
+ const PH_KEY = photoKeyFor(uid);
  useEffect(()=>{
-  const clear=()=>{setPhotos([]);try{localStorage.removeItem(PH_KEY);}catch(e){}};
+  const clear=e=>{if(e.detail?.uid===uid)setPhotos([]);};
   window.addEventListener("evolvefit-clear-photos",clear);
   return()=>window.removeEventListener("evolvefit-clear-photos",clear);
- },[]);
+ },[uid]);
  // Fotos ficam só neste dispositivo (por escolha); o resto dos dados vai para a nuvem.
  const savePhotos = arr => {
  setPhotos(arr);
