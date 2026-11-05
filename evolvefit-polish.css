@@ -1563,3 +1563,145 @@ button:disabled {
   background: linear-gradient(135deg, var(--ef-action), var(--ef-navy-2)) !important;
   color: #fff !important;
 }
+
+/* Treinos: ações independentes e foco visual claro no exercício aberto. */
+#root .log-entry {
+  padding: 3px 9px 0;
+  margin: 0 0 8px;
+  border: 1px solid var(--ef-neutral-border);
+  border-radius: 13px;
+  background: var(--surface);
+  transition: background .16s ease, border-color .16s ease, box-shadow .16s ease;
+}
+#root .log-entry.open {
+  padding-left: 7px;
+  border-color: var(--ef-info-border);
+  border-left: 3px solid var(--ef-info);
+  background: var(--ef-info-bg);
+  box-shadow: 0 4px 14px rgba(20,55,99,.10);
+}
+#root .log-head {
+  display: grid;
+  grid-template-columns: 46px minmax(0,1fr);
+  align-items: center;
+  gap: 7px;
+}
+#root .log-check {
+  width: 44px;
+  height: 44px;
+  border: 1.5px solid var(--ef-neutral-border);
+  border-radius: 11px;
+  background: var(--surface);
+  color: var(--text);
+  flex: none;
+  touch-action: manipulation;
+}
+#root .log-check.on {
+  background: var(--ef-success-fill);
+  color: #fff;
+  border-color: var(--ef-success-fill);
+}
+#root .log-check:disabled { opacity: .48; cursor: not-allowed; }
+#root .log-check:focus-visible,
+#root .log-row-btn:focus-visible { outline: 2px solid var(--ef-info); outline-offset: 2px; }
+#root .log-row-btn {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) auto 16px;
+  grid-template-areas: "name name chev" "sr summary chev";
+  padding: 11px 2px;
+  color: var(--text);
+}
+#root .log-entry.open .log-name { color: var(--ef-info); }
+#root .log-entry.open .log-summary { color: var(--text); }
+#root .log-entry:not(.open) > .log-rec-box:not(.warn):not(.down) { display: none; }
+#root .log-entry.open > .log-rec-box {
+  margin: 0 6px 12px 53px;
+  background: var(--surface);
+}
+#root .log-entry.open > .log-panel { padding: 2px 8px 14px 53px; }
+@media (max-width: 400px) {
+  #root .log-entry.open > .log-rec-box { margin-left: 4px; }
+  #root .log-entry.open > .log-panel { padding-left: 4px; }
+  #root .log-row-btn { grid-template-columns: minmax(0,1fr) 16px; grid-template-areas: "name chev" "sr chev" "summary chev"; }
+  #root .log-summary { justify-self: start; text-align: left; }
+}
+#root .log-check-help {
+  margin: -3px 0 12px;
+  color: var(--muted);
+  font-size: 11.5px;
+  line-height: 1.45;
+}
+#root .log-entry:not(.open) > .log-rec-box { margin-left: 53px; }
+@media (max-width: 400px) {
+  #root .log-entry:not(.open) > .log-rec-box { margin-left: 4px; }
+}
+
+/* Coach: guia longo disponível por pedido, em camadas legíveis no telemóvel. */
+#root .card.coach-block-guide {
+  border: 1px solid var(--ef-neutral-border) !important;
+  overflow: hidden;
+}
+#root .coach-block-summary {
+  list-style: none;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 48px;
+  cursor: pointer;
+  color: var(--text);
+}
+#root .coach-block-summary::-webkit-details-marker,
+#root .coach-block-section > summary::-webkit-details-marker { display: none; }
+#root .coach-block-summary > span:first-child { display: grid; gap: 4px; }
+#root .coach-block-summary strong { font-size: 15px; line-height: 1.35; }
+#root .coach-block-summary small { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+#root .coach-block-chevron { color: var(--ef-info); font-size: 22px; transition: transform .16s ease; }
+#root .coach-block-guide[open] .coach-block-chevron { transform: rotate(180deg); }
+#root .coach-block-summary:focus-visible,
+#root .coach-block-section > summary:focus-visible { outline: 2px solid var(--ef-info); outline-offset: 3px; }
+#root .coach-block-content { margin-top: 13px; border-top: 1px solid var(--ef-neutral-border); padding-top: 12px; }
+#root .coach-block-intro,
+#root .coach-block-section-body p,
+#root .coach-block-section-body li { font-size: 12.5px; line-height: 1.55; color: var(--text); }
+#root .coach-block-intro { margin: 0 0 12px; }
+#root .coach-block-section { border: 1px solid var(--ef-neutral-border); border-radius: 12px; margin-top: 9px; background: var(--surface); }
+#root .coach-block-section[open] { border-color: var(--ef-info-border); }
+#root .coach-block-section > summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 10px 13px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 750;
+  line-height: 1.35;
+  color: var(--text);
+}
+#root .coach-block-section > summary::after { content: '+'; margin-left: auto; padding-left: 8px; color: var(--ef-info); font-size: 18px; line-height: 1; }
+#root .coach-block-section[open] > summary { background: var(--ef-info-bg); color: var(--ef-info); border-radius: 11px 11px 0 0; }
+#root .coach-block-section[open] > summary::after { content: '−'; }
+#root .coach-block-section-body { padding: 12px 13px 14px; }
+#root .coach-block-section-body p { margin: 0 0 10px; }
+#root .coach-block-section-body p:last-child { margin-bottom: 0; }
+#root .coach-block-section-body ul { margin: 0; padding-left: 18px; }
+#root .coach-block-section-body li { padding-left: 2px; margin-bottom: 9px; }
+#root .coach-block-section-body li:last-child { margin-bottom: 0; }
+#root .coach-block-phase,
+#root .coach-block-decision { border: 1px solid var(--ef-neutral-border); border-left: 3px solid var(--ef-info); border-radius: 9px; padding: 10px; background: var(--surface2); margin-bottom: 8px; }
+#root .coach-block-phase-head { display: flex; flex-wrap: wrap; gap: 2px 9px; align-items: baseline; }
+#root .coach-block-phase-head strong { color: var(--text); font-size: 12.5px; }
+#root .coach-block-phase-head span { color: var(--ef-info); font-size: 11.5px; font-weight: 750; }
+#root .coach-block-phase p { margin: 5px 0 0; }
+#root .coach-block-decision { display: grid; gap: 5px; }
+#root .coach-block-decision span { color: var(--muted); font-size: 11.5px; line-height: 1.4; }
+#root .coach-block-decision strong { color: var(--text); font-size: 12.5px; line-height: 1.45; font-weight: 700; }
+#root .coach-block-weekmap { overflow-x: auto; margin: 0 0 12px; }
+#root .coach-block-weekmap table { width: 100%; border-collapse: collapse; color: var(--text); font-size: 11.5px; line-height: 1.4; }
+#root .coach-block-weekmap caption { text-align: left; font-size: 12px; font-weight: 750; margin-bottom: 7px; }
+#root .coach-block-weekmap th,
+#root .coach-block-weekmap td { text-align: left; vertical-align: top; padding: 8px 6px; border-bottom: 1px solid var(--ef-neutral-border); }
+#root .coach-block-weekmap thead { background: var(--ef-info-bg); color: var(--ef-info); }
+#root .coach-block-weekmap tbody th { font-weight: 750; white-space: nowrap; }
