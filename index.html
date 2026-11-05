@@ -3439,7 +3439,7 @@ function Workouts({
  })
  }, trainedSelected ? "Treinei ✓" : canMarkSelected ? "Treinei" : "Futuro")), !canMarkSelected && /*#__PURE__*/React.createElement("div",{className:"future-workout-note",role:"note"},"Poderás marcar o treino no próprio dia ou num dia seguinte."), /*#__PURE__*/React.createElement("button", { className: "reset-btn", onClick: () => setShowRir(v => !v) }, showRir ? "Esconder explicação de RIR" : "O que é RIR?"), showRir && /*#__PURE__*/React.createElement("div", {
  className: "rir-help"
- }, "RIR significa Repetições em Reserva. É o número de repetições que ainda conseguias fazer, com boa técnica, quando terminaste a série. RIR 0 é falha, não fazias mais nenhuma. RIR 1 significa que ficou uma repetição por fazer, RIR 2 que ficaram duas, e RIR 3 ou mais indica uma série confortável, longe da falha."), /*#__PURE__*/React.createElement(WorkoutLogger, {
+ }, "Fazes as séries todas normalmente, apontas as reps de cada uma e, no fim da última série, perguntas-te: «Quantas ainda conseguia fazer?» Esse número é o RIR que registas."), /*#__PURE__*/React.createElement(WorkoutLogger, {
  key: sel + ":" + selectedDayKey,
  exercises: loggerExercises,
  cardioTarget: plano[sel]?.cardioMinutes||0,
