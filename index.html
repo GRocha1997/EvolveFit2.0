@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=33">
+<link rel="stylesheet" href="evolvefit-polish.css?v=34">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -3693,6 +3693,27 @@ function PauseManager({state,update}){
     h("small",null,(p.legacy?"Calendário original mantido · ":"Escolheste "+pretty(p.start)+" – "+pretty(p.end)+" · ")+"retoma "+pretty(p.resume)+(p.legacy?"":p.completed?" · semana inicial feita":" · repetir semana inicial"))),
    !p.legacy&&h("button",{type:"button",className:"menu-btn",onClick:()=>remove(p.id),"aria-label":"Remover pausa de "+p.start},"Remover")))));
 }
+function PlanWorkspace({state,update,plano,planDay,setPlanDay,cycleWeek,activeCycleStart,setPlanName,setPlanEx,addPlanEx,delPlanEx,reorderPlanEx}){
+ const h=React.createElement;
+ const pauseCount=(state.profile?.manualPauses||[]).length+(isTravelCycle(state.profile?.progressionCycleStart)?1:0);
+ return h("div",{className:"evf-plan-workspace"},
+  h("div",{className:"evf-workspace-lead"},h("strong",null,"O teu plano"),h("span",null,"Exercícios e decisões à vista. Calendário e regras quando precisares.")),
+  h("section",{className:"evf-plan-exercises","aria-labelledby":"evf-plan-exercises-title"},
+   h("div",{className:"evf-workspace-heading"},h("div",null,h("h2",{id:"evf-plan-exercises-title"},"Exercícios"),h("p",null,"Escolhe o dia para consultar ou editar o treino."))),
+   h("div",{className:"day-picker evf-plan-day-picker",role:"group","aria-label":"Escolher dia do plano"},
+    plano.map((d,i)=>h("button",{key:i,className:"dp"+(planDay===i?" on":""),"aria-pressed":planDay===i,"aria-label":"Plano de "+d.day,onClick:()=>setPlanDay(i)},d.day.slice(0,3)))),
+   h(PlanDayCard,{key:planDay,d:plano[planDay],di:planDay,onEditName:setPlanName,onEditField:setPlanEx,onAdd:addPlanEx,onDelete:delPlanEx,onReorder:reorderPlanEx,cycleWeek,cycleStart:activeCycleStart})
+  ),
+  h("details",{className:"evf-plan-disclosure"},
+   h("summary",null,h("span",null,h("strong",null,"Calendário e pausas"),h("small",null,pauseCount?pauseCount+(pauseCount===1?" pausa configurada":" pausas configuradas"):"Marca uma pausa sem alterar os treinos anteriores")),h("span",{className:"evf-disclosure-chevron","aria-hidden":true},"⌄")),
+   h("div",{className:"evf-plan-disclosure-body"},h(PauseManager,{state,update}))
+  ),
+  h("details",{className:"evf-plan-disclosure"},
+   h("summary",null,h("span",null,h("strong",null,"Como funciona a progressão"),h("small",null,"Fases, recomendações, deload e recuperação")),h("span",{className:"evf-disclosure-chevron","aria-hidden":true},"⌄")),
+   h("div",{className:"evf-plan-disclosure-body"},h(TrainingCycleGuide))
+  )
+ );
+}
 function Workouts({
  state,
  update,
@@ -3880,6 +3901,11 @@ function Workouts({
  return {name,exerciseId,series,samples,first,last,dir};
  });
  const upCount = progression.filter(p => p.dir === "up").length;
+ const travelBanner=/*#__PURE__*/React.createElement("div",{className:"card evf-travel-banner",role:"note"},
+    /*#__PURE__*/React.createElement("strong",null,travelActive?"Pausa planeada · Tailândia":"Pausa planeada para a viagem"),
+    /*#__PURE__*/React.createElement("p",null,manualPauses(state).length?"Viagem mantida em 19 nov – 6 dez; pausas adicionais deslocam semanas, deload, blocos e checkpoints. Consulta Pausas para veres as datas de retoma.":"Semana 1: 9–18 nov (calibração também em 16–18 nov). Pausa: 19 nov – 6 dez. Semana 2: seg 7 dez. Deload: 18–24 jan; bloco 2: seg 25 jan. Treinos seg–sex; fins de semana para descanso."),
+    !travelActive&&/*#__PURE__*/React.createElement("button",{type:"button",className:"menu-btn main",onClick:activateTravelCycle},"Ativar este calendário (sem apagar sessões)"),
+    travelActive&&!manualPauses(state).length&&/*#__PURE__*/React.createElement("small",null,"Checkpoints: 20 dez · 91–92 kg; 10 jan · 89,5–90,5 kg; 24 jan · 88,5–89,5 kg. Manutenção alimentar de 25 jan a 7 fev; sem alterar metas personalizadas automaticamente."));
  return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(TabHead, {
  title: "Treinos",
  sub: "Regista o treino e acompanha a evolução da carga"
@@ -3890,11 +3916,8 @@ function Workouts({
  className: "seg-b" + (view === k ? " on" : ""),
  onClick: () => setView(k)
  }, l))), view === "treino" && React.createElement(React.Fragment, null,
-  (todayKey<="2027-02-15"||travelActive&&selectedDayKey<="2027-02-15")&&/*#__PURE__*/React.createElement("div",{className:"card evf-travel-banner",role:"note"},
-    /*#__PURE__*/React.createElement("strong",null,travelActive?"Pausa planeada · Tailândia":"Pausa planeada para a viagem"),
-    /*#__PURE__*/React.createElement("p",null,manualPauses(state).length?"Viagem mantida em 19 nov – 6 dez; pausas adicionais deslocam semanas, deload, blocos e checkpoints. Consulta Pausas para veres as datas de retoma.":"Semana 1: 9–18 nov (calibração também em 16–18 nov). Pausa: 19 nov – 6 dez. Semana 2: seg 7 dez. Deload: 18–24 jan; bloco 2: seg 25 jan. Treinos seg–sex; fins de semana para descanso."),
-    !travelActive&&/*#__PURE__*/React.createElement("button",{type:"button",className:"menu-btn main",onClick:activateTravelCycle},"Ativar este calendário (sem apagar sessões)"),
-    travelActive&&!manualPauses(state).length&&/*#__PURE__*/React.createElement("small",null,"Checkpoints: 20 dez · 91–92 kg; 10 jan · 89,5–90,5 kg; 24 jan · 88,5–89,5 kg. Manutenção alimentar de 25 jan a 7 fev; sem alterar metas personalizadas automaticamente.")),
+  (todayKey<="2027-02-15"||travelActive&&selectedDayKey<="2027-02-15")&&(travelActive?/*#__PURE__*/React.createElement("details",{className:"evf-training-calendar"},
+   /*#__PURE__*/React.createElement("summary",null,"Calendário da viagem e checkpoints"),travelBanner):travelBanner),
   isBlockCheckpointDate(progressionCycleStart,todayKey,state)&&workoutWeekOffset===0&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"alert"},
     /*#__PURE__*/React.createElement("strong",null,"Fim do deload · check-in"),
     /*#__PURE__*/React.createElement("p",null,"Faz hoje pesagem na balança inteligente, cintura ao umbigo e fotos de frente, lado e costas. Regista em Corpo e no Coach; o bloco seguinte começa automaticamente amanhã.")),
@@ -4003,24 +4026,7 @@ function Workouts({
  ), view === "historico" && /*#__PURE__*/React.createElement(TrainingHistory, {
  state: state,
  update: update
- }), view === "plano" && /*#__PURE__*/React.createElement(React.Fragment, null, React.createElement(PauseManager,{state,update}), /*#__PURE__*/React.createElement(TrainingCycleGuide), /*#__PURE__*/React.createElement("div", {
- className: "day-picker"
- }, plano.map((d, i) => /*#__PURE__*/React.createElement("button", {
- key: i,
- className: "dp" + (planDay === i ? " on" : ""),
- onClick: () => setPlanDay(i)
- }, d.day.slice(0, 3)))), /*#__PURE__*/React.createElement(PlanDayCard, {
- key: planDay,
- d: plano[planDay],
- di: planDay,
- onEditName: setPlanName,
- onEditField: setPlanEx,
- onAdd: addPlanEx,
- onDelete: delPlanEx,
- onReorder: reorderPlanEx,
- cycleWeek,
- cycleStart: activeCycleStart
- })), /*#__PURE__*/React.createElement("div", {
+ }), view === "plano" && /*#__PURE__*/React.createElement(PlanWorkspace,{state,update,plano,planDay,setPlanDay,cycleWeek,activeCycleStart,setPlanName,setPlanEx,addPlanEx,delPlanEx,reorderPlanEx}), /*#__PURE__*/React.createElement("div", {
  className: "pad"
  }));
 }
@@ -5679,7 +5685,6 @@ function Coach2027({ state, update, onNavigate, uid }) {
  const reviewSessions28=Object.keys(state.trainingCompleted||{}).filter(date=>{if(inTravelPause(prof.progressionCycleStart,date,state))return false;const age=(TODAY-new Date(date+"T12:00:00"))/86400000;return age>=0&&age<28;}).length;
 
 
- const hasCoachData=enoughData;
  const [aiQuestion,setAiQuestion] = useState("");
  const [aiAnswer,setAiAnswer] = useState("");
  const [aiBusy,setAiBusy] = useState(false);
@@ -5813,6 +5818,14 @@ function Coach2027({ state, update, onNavigate, uid }) {
 
  return /*#__PURE__*/React.createElement("div",null,
  /*#__PURE__*/React.createElement(TabHead,{title:"Coach",sub:"Revisão semanal e orientação; análise local por defeito"}),
+ /*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
+   /*#__PURE__*/React.createElement("div",{className:"coach27-badge"},"EVOLVEFIT COACH"),
+   /*#__PURE__*/React.createElement("div",{style:{fontSize:"25px",fontWeight:800,marginTop:"10px"}},status),
+   /*#__PURE__*/React.createElement("div",{className:"evf-coach-next-label"},"Próxima ação"),
+   /*#__PURE__*/React.createElement("div",{style:{fontSize:"14px",opacity:.92,marginTop:"8px",lineHeight:1.5}},decision),
+   wkSessions>0 && /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",opacity:.78,marginTop:"10px"}},wkSessions,"/5 treinos esta semana")
+ ),
+
   travelWeightCheckpoint(prof.progressionCycleStart,todayKey,state)&&!isBlockCheckpointDate(prof.progressionCycleStart,todayKey,state)&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
     /*#__PURE__*/React.createElement("strong",null,"Checkpoint de peso · "+travelWeightCheckpoint(prof.progressionCycleStart,todayKey,state)),
     /*#__PURE__*/React.createElement("p",null,"Pesa-te na balança inteligente e acompanha a tendência; não cria uma pausa alimentar adicional.")),
@@ -5822,23 +5835,34 @@ function Coach2027({ state, update, onNavigate, uid }) {
   phase&&([...body].reverse().some(r=>r.weight>0&&r.weight<=85||r.bodyFat>0&&r.bodyFat<=15))&&/*#__PURE__*/React.createElement("section",{className:"card evf-block2-banner",role:"note"},
     /*#__PURE__*/React.createElement("strong",null,"Checkpoint corporal"),
     /*#__PURE__*/React.createElement("p",null,"Aos 85 kg e aos 82 kg / 15% de gordura: reavalia com fotos de frente, lado e costas, cintura ao umbigo e balança inteligente. O checkpoint por si só não altera a fase alimentar.")),
- /*#__PURE__*/React.createElement(CoachBlockGuide,{state}),
-  /*#__PURE__*/React.createElement("section",{className:"card evf-measure-guide","aria-labelledby":"evf-measure-guide-title"},
-   /*#__PURE__*/React.createElement("div",{className:"pc-title",id:"evf-measure-guide-title"},"O que medir"),
-   /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-list"},
-     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Peso"), /*#__PURE__*/React.createElement("span",null,"Diariamente · acompanhar a média de 7 dias")),
-     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Cintura"), /*#__PURE__*/React.createElement("span",null,"Medir ao domingo")),
-     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Cargas"), /*#__PURE__*/React.createElement("span",null,"Registar em todas as sessões")),
-     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Fotografias"), /*#__PURE__*/React.createElement("span",null,"De 2 em 2 semanas"))
-   ),
-   /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide"},
-     /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide-title"},"Reavaliar tendências, nunca criar pausas extra por atingir um peso"),
-     /*#__PURE__*/React.createElement("ul",{className:"evf-calorie-guide-rules"},
-       /*#__PURE__*/React.createElement("li",null,"Perda de 0,4–0,7 kg/semana: manter"),
-       /*#__PURE__*/React.createElement("li",null,"Perda inferior a 0,2 kg/semana: reavaliar após 3 semanas de dados; durante a manutenção não reduzir calorias"),
-       /*#__PURE__*/React.createElement("li",null,"Aos 85 kg, ou aos 82 kg / 15%: fotos, medidas e pesagem inteligente; sem pausa extra. Parar o défice só quando o limiar confirmado for atingido.")
-     )
+ alerts.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
+   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"O que merece atenção"),
+   alerts.slice(0,5).map((a,i)=>/*#__PURE__*/React.createElement("button",{className:"coach27-alert coach27-alert-"+a.level,key:i,onClick:()=>onNavigate&&onNavigate(a.tab),"aria-label":(a.level==="positive"?"Concluído: ":a.level==="negative"?"Atenção: ":"Informação: ")+a.text},
+     /*#__PURE__*/React.createElement("span",{className:"coach-alert-symbol "+(a.level==="positive"?"coach-alert-positive":a.level==="negative"?"coach-alert-negative":"coach-alert-neutral"),"aria-hidden":true},a.level==="positive"?"✓":a.level==="negative"?"!":"i"),
+     /*#__PURE__*/React.createElement("span",{style:{flex:1,textAlign:"left"}},a.text),
+     /*#__PURE__*/React.createElement("span",{style:{fontSize:"15px",opacity:.65}},"›")
+   ))
+ ),
+ weeklyReviewMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
+   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Semana vs semana anterior"),
+   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},weeklyReviewMetrics),
+   /*#__PURE__*/React.createElement("div",{className:"evf-week-note"},"Só aparecem métricas registadas nos dois períodos; valores em falta não contam como zero.")
+ ),
+ (currentMetrics.length>0||coachMetrics.length>0||reviewMetrics.length>0) && /*#__PURE__*/React.createElement("div",{className:"evf-coach-section-label"},"Detalhes de progresso"),
+ currentMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
+   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Estado atual"),
+   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},currentMetrics),
+   trendItems.length>0 && /*#__PURE__*/React.createElement("div",{style:{fontSize:"11px",color:"var(--muted)",marginTop:"9px"}},
+     "Tendência: "+trendItems.join(" · ")
    )
+ ),
+ coachMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
+   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Últimos 7 dias"),
+   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},coachMetrics)
+ ),
+ reviewMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
+   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Revisão de 4 semanas"),
+   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},reviewMetrics)
  ),
  /*#__PURE__*/React.createElement("section",{className:"card evf-nutrition-guide","aria-labelledby":"evf-nutrition-guide-title"},
    /*#__PURE__*/React.createElement("div",{className:"pc-title",id:"evf-nutrition-guide-title"},"Nutrição e metas"),
@@ -5867,42 +5891,6 @@ function Coach2027({ state, update, onNavigate, uid }) {
      /*#__PURE__*/React.createElement("span",null,maintenanceNow?"Proteína igual; usa a média de peso e não uma única pesagem.":"Défice estimado de ≈4 000 kcal/semana · ritmo esperado de ≈0,5–0,6 kg de gordura por semana."),
      /*#__PURE__*/React.createElement("small",null,"Estimativa: o resultado real depende do gasto energético e da consistência.")
    )
- ),
- hasCoachData && /*#__PURE__*/React.createElement("div",{className:"card coach27-hero"},
-   /*#__PURE__*/React.createElement("div",{className:"coach27-badge"}," EVOLVEFIT COACH"),
-   /*#__PURE__*/React.createElement("div",{style:{fontSize:"25px",fontWeight:800,marginTop:"10px"}},status),
-   /*#__PURE__*/React.createElement("div",{style:{fontSize:"14px",opacity:.92,marginTop:"8px",lineHeight:1.5}},decision),
-   wkSessions>0 && /*#__PURE__*/React.createElement("div",{style:{fontSize:"12px",opacity:.78,marginTop:"10px"}},wkSessions,"/5 treinos esta semana")
- ),
-
- weeklyReviewMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
-   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Semana vs semana anterior"),
-   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},weeklyReviewMetrics),
-   /*#__PURE__*/React.createElement("div",{className:"evf-week-note"},"Só aparecem métricas registadas nos dois períodos; valores em falta não contam como zero.")
- ),
- alerts.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
-   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"O que merece atenção"),
-   alerts.slice(0,5).map((a,i)=>/*#__PURE__*/React.createElement("button",{className:"coach27-alert coach27-alert-"+a.level,key:i,onClick:()=>onNavigate&&onNavigate(a.tab),"aria-label":(a.level==="positive"?"Concluído: ":a.level==="negative"?"Atenção: ":"Informação: ")+a.text},
-     /*#__PURE__*/React.createElement("span",{className:"coach-alert-symbol "+(a.level==="positive"?"coach-alert-positive":a.level==="negative"?"coach-alert-negative":"coach-alert-neutral"),"aria-hidden":true},a.level==="positive"?"✓":a.level==="negative"?"!":"i"),
-     /*#__PURE__*/React.createElement("span",{style:{flex:1,textAlign:"left"}},a.text),
-     /*#__PURE__*/React.createElement("span",{style:{fontSize:"15px",opacity:.65}},"›")
-   ))
- ),
- (currentMetrics.length>0||coachMetrics.length>0||reviewMetrics.length>0) && /*#__PURE__*/React.createElement("div",{className:"evf-coach-section-label"},"Detalhes de progresso"),
- currentMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
-   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Estado atual"),
-   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},currentMetrics),
-   trendItems.length>0 && /*#__PURE__*/React.createElement("div",{style:{fontSize:"11px",color:"var(--muted)",marginTop:"9px"}},
-     "Tendência: "+trendItems.join(" · ")
-   )
- ),
- coachMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
-   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Últimos 7 dias"),
-   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},coachMetrics)
- ),
- reviewMetrics.length>0 && /*#__PURE__*/React.createElement("div",{className:"card"},
-   /*#__PURE__*/React.createElement("div",{className:"pc-title"},"Revisão de 4 semanas"),
-   /*#__PURE__*/React.createElement("div",{className:"coach27-grid",style:{marginTop:"12px",marginBottom:0}},reviewMetrics)
  ),
  /*#__PURE__*/React.createElement("details",{className:"card evf-ai-accordion"},
    /*#__PURE__*/React.createElement("summary",{className:"evf-ai-accordion-summary"},
@@ -5946,6 +5934,27 @@ function Coach2027({ state, update, onNavigate, uid }) {
    )
  ),
 
+ /*#__PURE__*/React.createElement(CoachBlockGuide,{state}),
+  /*#__PURE__*/React.createElement("details",{className:"evf-coach-measure-disclosure"},
+    /*#__PURE__*/React.createElement("summary",null,"O que medir · frequência e tendências"),
+  /*#__PURE__*/React.createElement("section",{className:"card evf-measure-guide","aria-labelledby":"evf-measure-guide-title"},
+   /*#__PURE__*/React.createElement("div",{className:"pc-title",id:"evf-measure-guide-title"},"O que medir"),
+   /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-list"},
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Peso"), /*#__PURE__*/React.createElement("span",null,"Diariamente · acompanhar a média de 7 dias")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Cintura"), /*#__PURE__*/React.createElement("span",null,"Medir ao domingo")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Cargas"), /*#__PURE__*/React.createElement("span",null,"Registar em todas as sessões")),
+     /*#__PURE__*/React.createElement("div",{className:"evf-measure-guide-row"}, /*#__PURE__*/React.createElement("strong",null,"Fotografias"), /*#__PURE__*/React.createElement("span",null,"De 2 em 2 semanas"))
+   ),
+   /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide"},
+     /*#__PURE__*/React.createElement("div",{className:"evf-calorie-guide-title"},"Reavaliar tendências, nunca criar pausas extra por atingir um peso"),
+     /*#__PURE__*/React.createElement("ul",{className:"evf-calorie-guide-rules"},
+       /*#__PURE__*/React.createElement("li",null,"Perda de 0,4–0,7 kg/semana: manter"),
+       /*#__PURE__*/React.createElement("li",null,"Perda inferior a 0,2 kg/semana: reavaliar após 3 semanas de dados; durante a manutenção não reduzir calorias"),
+       /*#__PURE__*/React.createElement("li",null,"Aos 85 kg, ou aos 82 kg / 15%: fotos, medidas e pesagem inteligente; sem pausa extra. Parar o défice só quando o limiar confirmado for atingido.")
+     )
+   )
+ ),
+  ),
  /*#__PURE__*/React.createElement("div",{className:"pad"})
  );
 }
