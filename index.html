@@ -141,7 +141,7 @@
 
 
 <link rel="manifest" href="manifest.webmanifest">
-<link rel="stylesheet" href="evolvefit-polish.css?v=34">
+<link rel="stylesheet" href="evolvefit-polish.css?v=35">
 <meta name="application-name" content="EvolveFit">
 <style id="evolvefit-pro-features-css">
 .ef-pro-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:12px}
@@ -4205,26 +4205,77 @@ function arrayMove(arr, from, to) {
 }
 function TrainingCycleGuide(){
  const h=React.createElement;
- const phases=[
-  {title:"Rotina fixa e ciclos",text:"Segunda Upper A · terça Lower A · quarta Pull · quinta Push · sexta Lower B. Bloco 1: calibração no arranque. Bloco 2: semanas 9–11 lineares, 12–15 dupla, 16 deload. Desde o bloco 3, cada bloco de 8 semanas tem 3 semanas lineares, 4 de dupla progressão e 1 de deload. Começa automaticamente à segunda após o deload com cargas válidas da semana 7 anterior, nunca do deload; no arranque há revisão seletiva. Só um exercício trocado calibra na primeira sessão a RIR 3."},
-  {title:"Viagem à Tailândia · pausa planeada",text:"Semana 1 de calibração: seg 9 a dom 15 nov 2026, prolongada em 16–18 nov (sem recomendações). Pausa de 19 nov a 6 dez; manutenção full-body opcional isolada no Histórico. Semana 2: seg 7 dez. Semana 8: deload 18–24 jan 2027. Bloco 2: seg 25 jan. O calendário ativado anteriormente é corrigido sem mover sessões ou medições."},
-  {title:"Bloco 2 · 25 jan a 21 mar",text:"Mesmo programa e ordem, sem nova calibração. Semana 9 usa a última carga válida da semana 7 ou, se não houver, a última válida antes do deload. Âncoras lineares nas semanas 9–11, dupla progressão nas 12–15 e deload na 16 (15–21 mar). Manutenção 25 jan–7 fev: 2 600–2 700 kcal, proteína igual; desde 8 fev: défice 2 300 kcal nos dias de treino / 2 100 nos de descanso. Check-in de fim do deload a 24 jan. Bloco 3: seg 22 mar; bloco 4: seg 17 mai; bloco 5: seg 12 jul. Trocas e série extra apenas mediante aprovação."},
-  {title:"Calibração e progressão linear",text:"Semana 1: RIR 3, apenas registar. Nas âncoras, procura 6–8 reps a RIR 2–3; se 8 forem fáceis, +2,5 kg no tronco ou +5 kg nas pernas na série seguinte. Nos exercícios restantes, encontra carga para o topo a RIR 2–3. Sem recomendações na semana 1. Nas semanas 2–4, as âncoras sobem +2,5 kg (Bench, Smith, Pulldown) ou +5 kg (Hack, RDL) apenas se todas as séries atingirem a base e RIR ≥1; caso contrário, repetem. Secundários seguem a regra normal desde a semana 2."},
-  {title:"Dupla progressão e RIR",text:"Âncoras (Bench, Hack, Pulldown 4×5–8, Incline Smith e RDL): RIR 1–2 na última série, nunca falha. Secundários (incluindo Cable Row, Incline DB, Leg Press, CS Row, Low Row, Chest Press unilateral, Shoulder Press, Hip Thrust e Búlgaro): RIR 0–1. Isolamentos: séries anteriores RIR 1; última RIR 0/falha técnica. Semanas 5–7 podem ter +1 série opcional nos cinco acessórios indicados, desligada por defeito e ativa só no ciclo atual."},
-  {title:"SUBIR, SUBIR ×2, MANTER ou DESCER",text:"Regista reps de cada série e RIR final; sem reps completas ou RIR não há recomendação. Abaixo da base em qualquer série: DESCER 5%; se a sessão válida seguinte voltar a falhar à mesma carga e com o mesmo número de séries, DESCER 10%. Acima do topo em qualquer série: SUBIR ×2. Com todas no topo: SUBIR ×2 em RIR ≥4 (âncora), ≥3 (secundário) ou ≥2 (isolamento); SUBIR em RIR ≥2, ≥1 ou qualquer RIR, respetivamente; senão, MANTER. Duas sessões completas seguidas à mesma carga e com o mesmo número de séries, sem ganhar reps totais: DESCER 10%. O contador reinicia quando muda a carga/séries, ao cortar uma sessão e no deload. Técnica degradada bloqueia subidas. Saltos >10% viram +1 rep/série até topo +1. Incrementos por exercício são editáveis."},
-  {title:"Deload e semana 17",text:"Semana 8: metade das séries (arredondada para cima: 3→2, 4→2, 2→1), carga da semana 7, RIR 3; sem falha nem recomendações. Depois de cada deload, o bloco seguinte começa automaticamente à segunda com cargas válidas da semana 7 anterior. Semana 17 inicia o bloco 3 e treina como semana 2 (linear) enquanto decorre a revisão seletiva: aceitar ou recusar trocar cada exercício estagnado ≥3 semanas ou com dor. Apenas cada exercício efetivamente trocado calibra na sua primeira sessão, a RIR 3. A mesma regra repete-se no arranque dos blocos seguintes. Acessórios podem rodar a cada 8–12 semanas. Pulldown de quarta a 80 kg×8 em todas as séries sugere testar elevações assistidas, depois peso corporal e com peso."},
-  {title:"Limite de 60 min e recuperação",text:"Se faltar tempo, corta e regista apenas o acessório final: segunda 6a/6b, terça cable crunch, quarta hammer curl, quinta rope pushdown ou sexta leg raise. Cortes não geram recomendação nem contam para estagnação. Com 3+ noites abaixo de 6 h, treina a RIR 3 e corta o último acessório; não reduzas comida. Menos de 6 h de sono + 7 h a conduzir: salta cardio, não os pesos. Não compenses treino ao fim de semana."},
-  {title:"Falhas, dor e substituições",text:"Terça falhada: sexta passa a pernas completas (Hack 3×5–8, RDL 3×6–8, Hip Thrust 3×8–10, Leg Curl 3×10–12, Calf 3×10–12). Quinta falhada: segunda Incline Smith 3×6–8 em vez de Incline DB. Dor no ombro no supino: pegada fechada ou halteres neutros; joelho no Hack: Leg Press primeiro, pés altos; lombar no RDL: halteres ou Hip Thrust primeiro. Low Row ocupada: Single-Arm DB Row 3×8–10/lado. São alternativas, não substituições automáticas."},
-  {title:"Cardio, passos e registo",text:"Mantém 3 sessões semanais de cardio de 30 min e 10 000 passos/dia; as duas séries extra de fly direito à quinta seguem a carga do fly principal e não geram decisão. Nos unilaterais regista reps do lado direito; o esquerdo iguala sem reps extra. Aquecimento, ativação e cardio não geram decisões."}
+ const item=(label,description)=>h("li",{key:label},h("strong",null,label)," ",description);
+ const detail=(title,items)=>h("details",{className:"training-cycle-detail",key:title},
+  h("summary",null,title),h("ul",null,...items.map(([label,text])=>item(label,text))));
+ const stages=[
+  ["1", "Calibrar", "Só no bloco 1 · semana 1", "Encontra a carga e regista as séries a RIR 3. Sem recomendação automática; podes ajustar a carga na própria sessão."],
+  ["2", "Progredir em linha", "Bloco 1: semanas 2–4 · seguintes: 1–3", "Nas âncoras, sobe apenas se todas as séries cumprirem a base e o RIR permitir; senão, repete."],
+  ["3", "Ganhar reps, depois carga", "Bloco 1: semanas 5–7 · seguintes: 4–7", "Procura mais repetições dentro do intervalo. A sugestão de carga surge quando cumpres a regra."],
+  ["4", "Deload", "Semana 8 de cada bloco", "Metade das séries, carga válida da semana 7, RIR 3. Sem falha nem recomendações."],
+ ];
+ const outcomes=[
+  ["SUBIR ×2", "Uma série passou o máximo de reps, ou todas chegaram ao máximo com RIR muito alto."],
+  ["SUBIR", "Todas as séries chegaram ao máximo e o RIR permite subir."],
+  ["MANTER", "Ainda há reps a ganhar, ou a subida não cumpre os critérios."],
+  ["DESCER", "Uma série ficou abaixo do mínimo; pode também ser sugerido após estagnação válida."],
  ];
  return h("section",{className:"card training-cycle","aria-labelledby":"training-cycle-title"},
-  h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Progressão dos treinos"),h("p",null,"Recomendação automática por exercício para a próxima sessão")),h("span",{className:"training-cycle-badge"},"AUTO")),
-  h("div",{className:"training-cycle-phases"},phases.map((phase,i)=>h("article",{className:"training-cycle-phase",key:i},h("strong",null,phase.title),h("p",null,phase.text)))),
-  h("div",{className:"training-cycle-routine"},h("p",null,h("strong",null,"Cardio: "),"30 min à segunda, quarta e quinta (3 sessões/semana)."),h("p",null,h("strong",null,"Sábado e domingo: "),"descanso da força; mantém a meta diária de 10 000 passos.")),
-  h("details",{className:"training-cycle-measures"},h("summary",null,"Medições e regra para ajustar calorias"),h("div",{className:"training-cycle-measure-body"},
-   h("p",null,"Regista o peso diariamente e acompanha a média de 7 dias; mede a cintura ao domingo, guarda as cargas de todas as sessões e tira fotos de 15 em 15 dias."),
-   h("p",null,"Só ajusta as calorias após 3 semanas de dados: perda de 0,4–0,7 kg/semana, mantém; abaixo de 0,2 kg/semana com cintura parada, −150 kcal; acima de 1 kg/semana ou fome constante, +150 kcal.")
-  ))
+  h("div",{className:"training-cycle-head"},h("div",null,h("h2",{id:"training-cycle-title"},"Progressão dos treinos"),h("p",null,"O que acontece em cada fase e como ler a próxima sugestão.")),h("span",{className:"training-cycle-badge"},"GUIA")),
+  h("div",{className:"training-cycle-quick"},
+   h("h3",null,"Em 3 passos"),
+   h("ol",null,
+    h("li",null,h("strong",null,"Treina e regista")," as reps de cada série e o RIR da última (reps que ainda conseguirias fazer)."),
+    h("li",null,h("strong",null,"Vê a sugestão")," junto do exercício, com o motivo baseado nas reps e no RIR."),
+    h("li",null,h("strong",null,"Decide na próxima sessão")," se a segues. A sugestão não altera o Plano nem substitui exercícios automaticamente."))),
+  h("div",{className:"training-cycle-section"},h("h3",null,"Um bloco, 8 semanas"),
+   h("div",{className:"training-cycle-stages"},stages.map(([n,title,when,description])=>h("div",{className:"training-cycle-stage",key:n},h("span",{className:"training-cycle-number","aria-hidden":true},n),h("div",null,h("strong",null,title),h("small",null,when),h("p",null,description))))),
+   h("p",{className:"training-cycle-hint"},"A calibração geral só acontece no bloco 1. Os blocos seguintes começam à segunda-feira, depois do deload, com as últimas cargas válidas da semana 7 anterior. Uma troca aceite calibra apenas esse exercício na primeira sessão (RIR 3).")),
+  h("div",{className:"training-cycle-section"},h("h3",null,"O que quer dizer a sugestão?"),
+   h("p",{className:"training-cycle-hint"},"O intervalo de reps é o mínimo e o máximo mostrados no exercício; RIR é quantas reps ainda conseguirias fazer."),
+   h("div",{className:"training-cycle-outcomes"},outcomes.map(([label,description])=>h("div",{className:"training-cycle-outcome",key:label},h("strong",null,label),h("span",null,description)))),
+   h("p",{className:"training-cycle-hint"},"Sem todas as reps e o RIR final registados, não há recomendação. Técnica degradada bloqueia subidas; um corte por falta de tempo não conta como estagnação.")),
+  h("div",{className:"training-cycle-more"},h("h3",null,"Consultar regras e situações especiais"),
+   detail("Calibração e subida linear",[
+    ["Semana 1 · ","RIR 3; apenas registar, sem recomendações. Nas âncoras, procura 6–8 reps a RIR 2–3; se 8 forem fáceis, podes ajustar +2,5 kg no tronco ou +5 kg nas pernas na série seguinte. Nos restantes exercícios, encontra uma carga para o topo a RIR 2–3."],
+    ["Semanas lineares · ","Âncoras (Bench, Incline Smith e Pulldown: +2,5 kg; Hack e RDL: +5 kg) sobem só se todas as séries atingirem o mínimo e RIR ≥1; senão, repetem a carga. Os secundários seguem a regra normal desde a semana 2 do bloco 1."],
+   ]),
+   detail("Regras exatas de SUBIR, MANTER e DESCER",[
+    ["Abaixo do mínimo · ","DESCER 5%. Se a sessão válida seguinte voltar a falhar à mesma carga e com as mesmas séries, DESCER 10%."],
+    ["Acima do máximo · ","SUBIR ×2 se qualquer série ultrapassar o máximo, independentemente das restantes."],
+    ["Todas no máximo · ","SUBIR ×2 se RIR ≥4 na âncora, ≥3 no secundário ou ≥2 no isolamento. Caso contrário, SUBIR se RIR ≥2 na âncora, ≥1 no secundário ou qualquer RIR no isolamento; senão, MANTER."],
+    ["Sem progresso · ","Duas sessões completas seguidas, à mesma carga e com as mesmas séries, sem ganhar reps totais podem sugerir DESCER 10%. O contador reinicia se mudam carga/séries, no corte, no deload e após uma pausa."],
+    ["Limites · ","Técnica degradada bloqueia subidas. Saltos acima de 10% passam a +1 rep por série até topo +1. Os incrementos são editáveis por exercício e os das máquinas são em kg."],
+   ]),
+   detail("RIR, séries extra e registo",[
+    ["Âncoras · ","Bench, Hack, Pulldown 4×5–8, Incline Smith e RDL: RIR 1–2 na última série, nunca falha."],
+    ["Secundários · ","Cable Row, Incline DB, Leg Press, CS Row, Low Row, Chest Press unilateral, Shoulder Press, Hip Thrust e Búlgaro: RIR 0–1. Isolamentos: séries anteriores a RIR 1, última a RIR 0/falha técnica."],
+    ["Série extra · ","Nas semanas de dupla progressão, +1 série em cinco acessórios indicados é opcional, fica desligada por defeito e só vale no ciclo atual mediante aceitação."],
+    ["O que conta · ","Em unilaterais, regista as reps do lado direito; o esquerdo iguala sem reps extra. As duas séries extra de fly direito à quinta seguem a carga do fly principal e não geram decisão. Aquecimento, ativação e cardio também não geram decisões."],
+   ]),
+   detail("Datas, deload e pausas",[
+    ["Viagem original · ","Semana 1: 9–15 nov 2026, prolongada em 16–18 nov sem recomendações. Pausa: 19 nov–6 dez; manutenção full-body opcional fica só no Histórico. Semana 2: 7 dez. O calendário corrigido não desloca sessões nem medições existentes."],
+    ["Deload inicial · ","18–24 jan 2027: metade das séries, arredondada para cima (3→2, 4→2, 2→1), carga válida da semana 7 e RIR 3. Check-in no domingo final."],
+    ["Blocos seguintes · ","Bloco 2: 25 jan–21 mar (linear semanas 9–11, dupla 12–15, deload 16 em 15–21 mar). Bloco 3: 22 mar; bloco 4: 17 mai; bloco 5: 12 jul, se não houver pausas adicionais. Cada bloco tem 3 semanas lineares, 4 de dupla e 1 de deload."],
+    ["Retoma · ","Uma pausa manual pode deslocar as datas. Treinos de manutenção durante a pausa não influenciam cargas. Retomas com a última carga válida; se a pausa durar 14 dias ou mais, a primeira sessão de cada âncora é a RIR 3. A semana 17 já é treino linear do bloco 3, não uma semana sem treino."],
+   ]),
+   detail("Se faltar tempo, sono ou um treino",[
+    ["Até 60 min · ","Se faltar tempo, corta e regista só o acessório final: segunda 6a/6b, terça cable crunch, quarta hammer curl, quinta rope pushdown ou sexta leg raise. O corte não gera recomendação nem conta para estagnação."],
+    ["Sono · ","Com 3+ noites abaixo de 6 h, treina a RIR 3 e corta o último acessório, sem reduzir comida. Com menos de 6 h e 7 h a conduzir, salta o cardio, não os pesos."],
+    ["Faltas · ","Terça falhada: sexta passa a pernas completas (Hack 3×5–8, RDL 3×6–8, Hip Thrust 3×8–10, Leg Curl 3×10–12, Calf 3×10–12). Quinta falhada: segunda faz Incline Smith 3×6–8 em vez de Incline DB. Não compenses no fim de semana."],
+   ]),
+   detail("Dor, revisão e alternativas",[
+    ["Revisão · ","No início dos blocos seguintes, podes aceitar ou recusar cada troca proposta por estagnação ≥3 semanas ou dor. Só o exercício efetivamente trocado calibra na primeira sessão a RIR 3. Acessórios podem rodar a cada 8–12 semanas."],
+    ["Dor · ","Ombro no supino: pegada fechada ou halteres neutros. Joelho no Hack: Leg Press primeiro, pés altos. Lombar no RDL: halteres ou Hip Thrust primeiro. Low Row ocupada: Single-Arm DB Row 3×8–10/lado. São alternativas, nunca substituições automáticas."],
+    ["Marco · ","Pulldown de quarta a 80 kg × 8 em todas as séries sugere testar elevações assistidas, depois peso corporal e, mais tarde, com peso."],
+   ]),
+   detail("Cardio, passos e alimentação",[
+    ["Atividade · ","Cardio 30 min à segunda, quarta e quinta (3×30 min/semana); 10 000 passos todos os dias. Sábado e domingo ficam livres de treino de força."],
+    ["Medições · ","Pesa-te diariamente e acompanha a média de 7 dias; mede a cintura ao domingo, regista as cargas e tira fotos de 15 em 15 dias."],
+    ["Bloco 2 · ","Manutenção de 25 jan a 7 fev: 2 600–2 700 kcal e mesma proteína. Depois, défice planeado de 2 300 kcal em dias de treino / 2 100 em descanso. As duas primeiras semanas de cada novo bloco voltam a manutenção."],
+    ["Ajustes · ","Não ajustes por uma pesagem isolada nem durante uma pausa/manutenção. Com 3 semanas de dados e fora da manutenção: 0,4–0,7 kg/semana, mantém; abaixo de 0,2 com cintura parada, considera −150 kcal; acima de 1 kg/semana ou fome constante, considera +150 kcal. Nenhuma sugestão muda metas sem a tua decisão."],
+   ])
+  )
  );
 }
 function PlanDayCard({
