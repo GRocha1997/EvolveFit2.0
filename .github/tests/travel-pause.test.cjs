@@ -65,7 +65,7 @@ assert.equal(context.tip(past,ex,current('2026-11-25'),'2026-11-25',null,travel,
 console.log('Progressão: manutenção ignorada, sequência reiniciada e regresso sem recomendação prematura.');
 
 // Registar manutenção não toca em cargas/flags do Plano e usa apenas o Histórico.
-const maintenanceStart = source.indexOf('function MaintenanceLogger({state,update,initialDate}){');
+const maintenanceStart = source.indexOf('function MaintenanceLogger({state,update,initialDate,pause}){');
 const maintenanceEnd = source.indexOf('function WorkoutLogger({',maintenanceStart);
 assert.ok(maintenanceStart>0 && maintenanceEnd>maintenanceStart);
 Object.assign(context, {
@@ -77,7 +77,7 @@ Object.assign(context, {
 vm.runInContext(source.slice(maintenanceStart,maintenanceEnd),context);
 const state={sessions:[entry('2026-11-18')],plano:[{ex:[{exerciseId:'test-row',weight:60,techniqueDegraded:false,optionalExtraSetCycleStart:''}]}]};
 const before=JSON.stringify(state.plano);
-const tree=context.MaintenanceLogger({state,update:mutate=>mutate(state),initialDate:'2026-11-25'});
+const tree=context.MaintenanceLogger({state,update:mutate=>mutate(state),initialDate:'2026-11-25',pause:{effectiveStart:'2026-11-19',end:'2026-12-06',resume:'2026-12-07'}});
 const find=(node,predicate)=>{
  if(!node||typeof node!=='object')return null;
  if(predicate(node))return node;
