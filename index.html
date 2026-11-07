@@ -744,13 +744,26 @@ function normalize(s) {
  if (s.profile.cardioTarget == null) s.profile.cardioTarget = 90;
  if (s.profile.ritmoAlvoKgSemana == null) s.profile.ritmoAlvoKgSemana = "0,6 a 0,8";
  if (!Array.isArray(s.profile.planAdjustments)) s.profile.planAdjustments = [];
+ if(!Array.isArray(s.profile.planDeletedExerciseIds))s.profile.planDeletedExerciseIds=[];
  if (s.theme == null) s.theme = "light";
  if (!s.menus || typeof s.menus !== "object" || !s.menus.manha || !s.menus.tarde) s.menus = clone(MENUS);
+ // Apenas na primeira atualização: migra o auxiliar que antes era criado no Treinar.
+ // O marcador impede que volte a ser inserido depois de o utilizador o apagar.
+ if(Array.isArray(s.plano)&&!s.profile.thursdayFlyExtraPlanReady){
+  const thursday=s.plano.find(day=>day?.day==="Quinta");
+  if(thursday&&Array.isArray(thursday.ex)){
+   if(!thursday.ex.some(ex=>ex.exerciseId==="v5-thu-fly-extra"))thursday.ex.push(clone(PLAN[3].ex.find(ex=>ex.exerciseId==="v5-thu-fly-extra")));
+   s.profile.thursdayFlyExtraPlanReady=true;
+  }
+ }
  const planNameKey=name=>String(name||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase().replace(/[^a-z0-9]/g,"");
  const planStructureIsCurrent=()=>Array.isArray(s.plano)&&s.plano.length===PLAN.length&&PLAN.every(day=>{
   const savedDay=s.plano.find(x=>x&&x.day===day.day);
   const exercises=savedDay&&Array.isArray(savedDay.ex)?savedDay.ex:[];
-  return !!savedDay&&day.ex.every(ex=>exercises.some(saved=>saved&&(saved.exerciseId===ex.exerciseId||planNameKey(saved.name)===planNameKey(ex.name)||s.profile.blockReviewPrevious?.[saved.exerciseId]?.exerciseId===ex.exerciseId)));
+  return !!savedDay&&day.ex.every(ex=>
+   (ex.exerciseId==="v5-thu-fly-extra"&&s.profile.thursdayFlyExtraPlanReady||
+    (s.profile.planDeletedExerciseIds||[]).includes(ex.exerciseId))&&!exercises.some(saved=>saved?.exerciseId===ex.exerciseId)||
+   exercises.some(saved=>saved&&(saved.exerciseId===ex.exerciseId||planNameKey(saved.name)===planNameKey(ex.name)||s.profile.blockReviewPrevious?.[saved.exerciseId]?.exerciseId===ex.exerciseId)));
  });
  if (!Array.isArray(s.plano) || !s.plano.length) {
  s.plano = clone(PLAN);
@@ -791,6 +804,7 @@ function normalize(s) {
  });
  s.planoVersion=PLAN_VERSION;
  }
+ if(s.plano.find(day=>day?.day==="Quinta")?.ex?.some(ex=>ex.exerciseId==="v5-thu-fly-extra"))s.profile.thursdayFlyExtraPlanReady=true;
  // Mantém cardio planeado 3x/semana sem reconstruir nem sobrescrever o plano guardado.
  const cardioPlanDays=new Set(["Segunda","Quarta","Quinta"]);
  s.plano.forEach(pd=>{
@@ -1687,7 +1701,8 @@ const PLAN = [{
   {exerciseId:"v5-thu-cable-fly",name:"Cable Fly",sets:2,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+5 kg/lado",rir:1,rirDisplay:"0–1",rest:"60 s"},
   {exerciseId:"v5-thu-cable-lateral",name:"Cable Lateral Raise (unilateral)",sets:3,reps:12,repsMax:15,weight:0,week1Start:null,week8Target:"+5 kg",rir:1,rirDisplay:"0–1",rest:"60 s"},
   {exerciseId:"v5-thu-overhead-rope",name:"Overhead Rope Extension",sets:2,reps:10,repsMax:12,weight:0,week1Start:null,week8Target:"+5 kg",rir:1,rirDisplay:"1",rest:"75 s"},
-  {exerciseId:"v5-thu-rope-pushdown",name:"Rope Pushdown",sets:2,reps:12,repsMax:15,weight:40,week1Start:40,week1StartLabel:"40 kg",week8Target:"50 kg",rir:0,rirDisplay:"0",rest:"60 s"}
+  {exerciseId:"v5-thu-rope-pushdown",name:"Rope Pushdown",sets:2,reps:12,repsMax:15,weight:40,week1Start:40,week1StartLabel:"40 kg",week8Target:"50 kg",rir:0,rirDisplay:"0",rest:"60 s"},
+  {exerciseId:"v5-thu-fly-extra",decisionSourceExerciseId:"v5-thu-cable-fly",noDecision:true,unilateral:true,name:"Cable Fly extra · lado direito",sets:2,reps:12,repsMax:15,weight:0,week1StartLabel:"Carga do Cable Fly principal",rir:1,rirDisplay:"0–1",rest:"60 s",progressionCategory:"isolation",progressionStepKg:2.5,progressionStepKind:"kg",progressionStepUnit:"kg",notes:"Segue a carga do Cable Fly principal até editares a carga aqui. Sem recomendação."}
  ]
 }, {
  day: "Sexta",
@@ -3804,10 +3819,6 @@ function Workouts({
    else loggerBaseExercises=[...loggerBaseExercises.slice(0,1),replacement,...loggerBaseExercises.slice(1)];
   }
  }
- if(sel===3&&!loggerBaseExercises.some(x=>x.exerciseId==="v5-thu-fly-extra")){
-  const fly=loggerBaseExercises.find(x=>x.exerciseId==="v5-thu-cable-fly");
-  if(fly)loggerBaseExercises=[...loggerBaseExercises,{exerciseId:"v5-thu-fly-extra",decisionSourceExerciseId:fly.exerciseId,noDecision:true,unilateral:true,name:"Cable Fly extra · lado direito (segue ex. 4)",sets:2,reps:12,repsMax:15,weight:fly.weight,progressionCategory:"isolation",progressionStepKg:2.5,progressionStepKind:"kg",progressionStepUnit:"kg"}];
- }
  const previousCycleStart=previousProgressionCycleStart(progressionCycleStart,selectedDayKey,state);
  const previousCycleSessions=previousCycleStart?state.sessions.filter(se=>!se.maintenance&&!inTravelPause(progressionCycleStart,se.date,state)&&se.date&&progressionCycleStartFor(progressionCycleStart,se.date,state)===previousCycleStart&&progressionWeekNumber(progressionCycleStart,se.date,state)>=1&&progressionWeekNumber(progressionCycleStart,se.date,state)<=7).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))):[];
  const useWeek7Loads=globalWeek>1&&(cycleWeek===1||globalWeek>=9&&blockWeek(progressionCycleStart,selectedDayKey,state)===1);
@@ -3815,7 +3826,7 @@ function Workouts({
  const secondDeloadSessions=deload16?state.sessions.filter(se=>!se.maintenance&&se.date&&progressionCycleStartFor(progressionCycleStart,se.date,state)===activeCycleStart&&progressionWeekNumber(progressionCycleStart,se.date,state)!==8).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))):[];
  const calibrationSessions=returnPause?.legacy&&firstReturnDay&&cycleWeek===2?state.sessions.filter(se=>se.date>=TRAVEL_CYCLE_START&&se.date<TRAVEL_PAUSE_START&&se.dayIdx===sel&&!se.maintenance).slice().sort((a,b)=>String(b.date).localeCompare(String(a.date))):[];
  const loggerExercises = loggerBaseExercises.map(x=>{
-  const sourceId=x.decisionSourceExerciseId||(x.exerciseId==="v5-thu-fly-extra"?"v5-thu-cable-fly":null);
+  const sourceId=x.decisionSourceExerciseId;
   const source=sourceId?loggerBaseExercises.find(p=>p.exerciseId===sourceId)||(plano.flatMap(pd=>pd.ex||[])).find(p=>p.exerciseId===sourceId):null;
   const historical=lastValidBlockExercise(deload16?secondDeloadSessions:previousCycleSessions,x.exerciseId);
   const calibrated=calibrationSessions.map(se=>(se.ex||[]).find(e=>e.exerciseId===x.exerciseId)).find(e=>e&&!e.cutForTime&&Number.isFinite(Number(e.weight))&&Number(e.weight)>0);
@@ -3858,6 +3869,11 @@ function Workouts({
 
  const setPlanEx = (di, xi, f, val) => update(s => {
  const ex=s.plano[di].ex[xi];
+ if(f==="weight"&&ex.exerciseId==="v5-thu-fly-extra"&&ex.decisionSourceExerciseId){
+  ex.decisionSourceExerciseId=null;
+  ex.week1Start=null;ex.week1StartLabel=null;
+  if(ex.notes==="Segue a carga do Cable Fly principal até editares a carga aqui. Sem recomendação.")ex.notes="Carga própria; sem recomendação.";
+ }
  ex[f] = f === "name" || f === "notes" || f === "optionalExtraSetCycleStart" || f === "progressionStepKind" || f === "progressionStepUnit" ? val : f === "techniqueDegraded" ? !!val : f === "weight" || f === "plateStepKg" || f === "machineStepKg" || f === "progressionStepKg" ? parseNum(val) : parseInt(val, 10) || 0;
  if(f==="progressionStepKg")ex.progressionStepCustom=true;
  if(f==="name"){
@@ -3875,7 +3891,12 @@ function Workouts({
  const step=defaultProgressionStep(exercise);exercise.progressionStepKg=step.amount;exercise.progressionStepKind=step.kind;exercise.progressionStepUnit=step.unit;
  s.plano[di].ex.push(exercise);
  });
- const delPlanEx = (di, xi) => update(s => s.plano[di].ex.splice(xi, 1));
+ const delPlanEx = (di, xi) => update(s => {
+ const removed=s.plano[di].ex.splice(xi,1)[0];
+ if(removed?.exerciseId){
+  s.profile.planDeletedExerciseIds=[...new Set([...(s.profile.planDeletedExerciseIds||[]),removed.exerciseId])];
+ }
+});
  const reorderPlanEx = (di, order) => update(s => {
  s.plano[di].ex = order.map(i => s.plano[di].ex[i]);
  });
@@ -4893,7 +4914,7 @@ const progressionTip = (history, exercise, current, sessionDate, cycleWeek, cycl
  const category=progressionCategory(exercise);
  const name=String(exercise?.name||"");
  if(current?.cutForTime)return {action:"skip",k:"",text:"Cortado por limite de 60 min; guardado sem recomendação e excluído da sequência sem progresso."};
- if(isDecisionExcludedExercise(exercise))return {action:"skip",k:"",text:exercise?.decisionSourceExerciseId||/extra.*fly|fly.*extra/i.test(name)?"Série auxiliar sem decisão; segue a carga do fly principal.":"Aquecimento/ativação/cardio: sem registo de reps/RIR nem decisão."};
+ if(isDecisionExcludedExercise(exercise))return {action:"skip",k:"",text:exercise?.decisionSourceExerciseId?"Série auxiliar sem decisão; segue a carga do fly principal.":exercise?.noDecision||/extra.*fly|fly.*extra/i.test(name)?"Série auxiliar sem decisão; carga definida no Plano.":"Aquecimento/ativação/cardio: sem registo de reps/RIR nem decisão."};
  if(options.dayIdx===2&&/lat pulldown/i.test(name)){
   const repsNow=parseActualRepsBySet(current?.repsBySet??current?.actualRepsBySet);
   if(current?.rir!=null&&parseNum(current?.weight)===80&&repsNow.length===(parseInt(exercise?.sets,10)||0)&&repsNow.every(n=>n===8))return {action:"proposal",k:"warn",text:"PROPOSTA (não automática): testar elevações — assistidas, depois peso corporal e, quando possível, com peso."};
